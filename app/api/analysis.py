@@ -36,6 +36,9 @@ from app.services.period_aggregation import build_annual_layer
 from app.services.time_scope import scope_from_params, filter_by_scope
 from app.services.fin_intelligence import build_intelligence  # FIX-1.1: single health_score source
 from app.services.metric_definitions import cogs_ratio_pct, opex_ratio_pct, total_cost_ratio_pct
+from app.services.metric_resolver import MetricResolver
+from app.services.confidence_engine import score_confidence
+from app.services.attribution_engine import profit_bridge_attribution
 
 # ── Phase 22 scope helper ─────────────────────────────────────────────────────
 
@@ -65,6 +68,57 @@ def _apply_scope(all_stmts: list, scope_basis_type: str = "", scope_period: str 
 
 
 logger = logging.getLogger("vcfo.analysis")
+
+# ── Metric Resolver shadow-mode (log-only) ────────────────────────────────────
+_METRIC_SHADOW_KEYS = (
+    "revenue",
+    "net_profit",
+    "net_margin_pct",
+    "gross_margin_pct",
+    "operating_expenses",
+    "total_cost_ratio_pct",
+    "current_ratio",
+    "working_capital",
+    "operating_cashflow",
+)
+
+
+def _shadow_compare_metrics(
+    *,
+    resolver: MetricResolver,
+    current: dict,
+    label: str,
+) -> None:
+    """
+    Shadow-mode metric consistency checks.
+    Logs mismatches only; never raises and never changes responses.
+    """
+    try:
+        for k in _METRIC_SHADOW_KEYS:
+            rv = resolver.get(k)
+            cv = current.get(k)
+            if rv is None and cv is None:
+                continue
+            # Tolerance by unit family (pct/ratio tighter than currency)
+            tol = 0.05
+            if k in ("revenue", "net_profit", "operating_expenses", "working_capital", "operating_cashflow"):
+                tol = 0.5
+            if k in ("current_ratio",):
+                tol = 0.005
+            try:
+                if rv is None or cv is None:
+                    if (rv is None) != (cv is None):
+                        logger.warning("metric-shadow %s %s mismatch: resolver=%s current=%s meta=%s", label, k, rv, cv, resolver.meta())
+                    continue
+                diff = abs(float(rv) - float(cv))
+                if diff > tol:
+                    logger.warning("metric-shadow %s %s mismatch: resolver=%s current=%s diff=%.4f meta=%s", label, k, rv, cv, diff, resolver.meta())
+            except Exception:
+                # Non-numeric mismatch
+                if rv != cv:
+                    logger.warning("metric-shadow %s %s mismatch (non-numeric): resolver=%s current=%s meta=%s", label, k, rv, cv, resolver.meta())
+    except Exception as exc:
+        logger.warning("metric-shadow %s failed: %s", label, exc)
 
 router = APIRouter(
     prefix="/analysis",
@@ -1021,6 +1075,41 @@ def get_consolidated(
             safe_lang, reason="unavailable"
         )
 
+    # ── Evidence blocks (additive) — consolidated financial brain payload ─────
+    try:
+        _resolver_cons = MetricResolver.from_statements(
+            period_statements=windowed,
+            scope="consolidated",
+            window=(window.upper() if window and window.upper() in VALID_WINDOWS else "ALL"),  # type: ignore[arg-type]
+            currency=(company.currency or "") if company else "",
+            analysis=analysis,
+            cashflow=None,  # not guaranteed in this route; keep deterministic but optional
+        )
+        if isinstance(deep_intel, dict):
+            deep_intel.setdefault("evidence", {"meta": _resolver_cons.meta(), "quality": _resolver_cons.quality()})
+        for rc in (rc_consolidated or []):
+            dom = str(rc.get("domain") or rc.get("type") or "").lower()
+            if dom in ("profitability", "profit"):
+                rc["evidence"] = {"meta": _resolver_cons.meta(), "metrics": [{"key": k, **_resolver_cons.delta(k)} for k in ["net_profit", "net_margin_pct", "gross_margin_pct"]], "quality": _resolver_cons.quality()}
+            elif dom in ("cashflow",):
+                rc["evidence"] = {"meta": _resolver_cons.meta(), "metrics": [{"key": k, **_resolver_cons.delta(k)} for k in ["working_capital"]], "quality": _resolver_cons.quality()}
+            elif dom in ("liquidity",):
+                rc["evidence"] = {"meta": _resolver_cons.meta(), "metrics": [{"key": k, **_resolver_cons.delta(k)} for k in ["working_capital"]], "quality": _resolver_cons.quality()}
+            elif dom in ("revenue", "growth"):
+                rc["evidence"] = {"meta": _resolver_cons.meta(), "metrics": [{"key": k, **_resolver_cons.delta(k)} for k in ["revenue"]], "quality": _resolver_cons.quality()}
+            elif dom in ("cost", "cost_structure", "expenses"):
+                rc["evidence"] = {"meta": _resolver_cons.meta(), "metrics": [{"key": k, **_resolver_cons.delta(k)} for k in ["total_cost_ratio_pct", "operating_expenses", "cogs_ratio_pct"]], "quality": _resolver_cons.quality()}
+        for d in (dec_consolidated or []):
+            dom = str(d.get("domain") or "").lower()
+            keys = ["revenue", "net_profit", "total_cost_ratio_pct"]
+            if dom in ("profitability", "profit"):
+                keys = ["net_profit", "net_margin_pct", "gross_margin_pct"]
+            elif dom in ("revenue", "growth"):
+                keys = ["revenue", "net_profit"]
+            d["evidence"] = {"meta": _resolver_cons.meta(), "metrics": [{"key": k, **_resolver_cons.delta(k)} for k in keys], "quality": _resolver_cons.quality()}
+    except Exception:
+        pass
+
     return {
         "company_id":       company_id,
         "company_name":     company.name,
@@ -1229,6 +1318,22 @@ def get_analysis_summary(
         logger.warning("analysis-summary cashflow failed: %s", exc)
         _debug["cashflow_error"] = str(exc)
 
+    # ── Metric Resolver (foundation for evidence/confidence/attribution) ─────
+    # Additive only: used for evidence blocks; no changes to existing fields.
+    _resolver: Optional[MetricResolver] = None
+    try:
+        _win_norm = (window.upper() if window and window.upper() in VALID_WINDOWS else "ALL")
+        _resolver = MetricResolver.from_statements(
+            period_statements=windowed,
+            scope=("consolidated" if consolidate else "company"),
+            window=_win_norm,  # type: ignore[arg-type]
+            currency=(company.currency or "") if company else "",
+            analysis=analysis,
+            cashflow=(cf_raw if "cf_raw" in locals() else None),
+        )
+    except Exception:
+        _resolver = None
+
     # ── Alerts — from existing engine, normalize severity in aggregation layer ─
     intel = {}
     try:
@@ -1256,8 +1361,8 @@ def get_analysis_summary(
 
     # ── Root causes — add source_metrics in aggregation layer ─────────────────
     try:
-        rc_raw = build_root_causes(analysis, windowed)
-        # build_root_causes returns domain-keyed dict: {revenue, profit, cashflow, cost_structure}
+        # Phase 10 root cause block (domain-keyed dict under one object)
+        rc_raw = build_root_cause(analysis, cf_raw if "cf_raw" in locals() else {})
         # Extract each domain as a cause entry with source_metrics
         DOMAIN_METRICS = {
             "revenue":        ["revenue_mom_pct", "yoy_revenue_pct", "revenue_series"],
@@ -1282,6 +1387,21 @@ def get_analysis_summary(
                 "direction":      trend if trend in ("improving", "deteriorating", "stable") else "neutral",
                 "explanation":    detail,
                 "source_metrics": metrics,
+                # Evidence-first upgrade (additive)
+                "evidence": (None if not _resolver else {
+                    "meta": _resolver.meta(),
+                    "metrics": [
+                        {"key": mk, **_resolver.delta(mk)}
+                        for mk in (
+                            ["revenue"] if domain == "revenue" else
+                            ["net_profit", "net_margin_pct", "gross_margin_pct"] if domain == "profit" else
+                            ["operating_cashflow", "working_capital"] if domain == "cashflow" else
+                            ["total_cost_ratio_pct", "operating_expenses"] if domain == "cost_structure" else
+                            []
+                        )
+                    ],
+                    "quality": _resolver.quality(),
+                }),
             })
     except Exception as exc:
         logger.warning("root_causes failed: %s", exc)
@@ -1432,6 +1552,48 @@ def get_analysis_summary(
         },
     }
 
+    # ── Metric Resolver shadow-mode comparisons (log-only) ────────────────────
+    try:
+        _win_norm = (window.upper() if window and window.upper() in VALID_WINDOWS else "ALL")
+        _resolver = MetricResolver.from_statements(
+            period_statements=windowed,
+            scope=("consolidated" if consolidate else "company"),
+            window=_win_norm,  # type: ignore[arg-type]
+            currency=(company.currency or "") if company else "",
+            analysis=analysis,
+            cashflow=(cf_raw if "cf_raw" in locals() else None),
+        )
+
+        _latest_stmt = windowed[-1] if windowed else {}
+        _is = (_latest_stmt.get("income_statement") or {}) if isinstance(_latest_stmt, dict) else {}
+        _rev_latest = ((_is.get("revenue", {}) or {}).get("total"))
+        _np_latest = (_is.get("net_profit"))
+        _exp_latest = ((_is.get("expenses", {}) or {}).get("total"))
+        _gm_latest = _is.get("gross_margin_pct")
+        _nm_latest = _is.get("net_margin_pct")
+
+        _liq = latest_r.get("liquidity", {}) if isinstance(latest_r, dict) else {}
+        _cur_view = {
+            "revenue": _rev_latest,
+            "net_profit": _np_latest,
+            "net_margin_pct": _nm_latest,
+            "gross_margin_pct": _gm_latest,
+            "operating_expenses": _exp_latest,
+            "total_cost_ratio_pct": _is.get("total_cost_ratio_pct"),
+            "current_ratio": _liq.get("current_ratio"),
+            "working_capital": _liq.get("working_capital"),
+            "operating_cashflow": ((cf_raw.get("operating_cashflow") if isinstance(cf_raw, dict) else None) if "cf_raw" in locals() else None),
+        }
+        # Normalize nested ratio structures that come from extract_ratios() layer
+        for _k in ("current_ratio", "working_capital"):
+            v = _cur_view.get(_k)
+            if isinstance(v, dict) and "value" in v:
+                _cur_view[_k] = v.get("value")
+
+        _shadow_compare_metrics(resolver=_resolver, current=_cur_view, label="analysis-summary")
+    except Exception:
+        pass
+
     # ── Canonical response ────────────────────────────────────────────────────
     liq   = latest_r.get("liquidity", {})
     lev   = latest_r.get("leverage", {})
@@ -1541,6 +1703,108 @@ def get_analysis_summary(
         logger.warning("analysis-summary decisions failed: %s", exc)
         _debug["decisions_error"] = str(exc)
         decisions_recommendations = []
+
+    # ── Evidence blocks (additive) ────────────────────────────────────────────
+    def _evidence_for_keys(keys: list[str]) -> Optional[dict]:
+        if not _resolver:
+            return None
+        return {
+            "meta": _resolver.meta(),
+            "metrics": [{"key": k, **_resolver.delta(k)} for k in keys],
+            "quality": _resolver.quality(),
+        }
+
+    def _confidence_for(keys: list[str]) -> Optional[dict]:
+        if not _resolver:
+            return None
+        q = _resolver.quality()
+        missing = sum(q.get("missing_points", {}).get(k, 0) for k in keys)
+        approx = bool(q.get("approximated"))
+        denom = bool(q.get("denominator_risks"))
+        volatile = any(_resolver.trend_quality(k) == "volatile" for k in keys if k in ("revenue", "net_profit", "operating_expenses", "operating_cashflow"))
+        return score_confidence(
+            n_periods=int(q.get("n_periods") or 0),
+            missing_points=int(missing or 0),
+            approximated=approx,
+            volatile=volatile,
+            denom_risk=denom,
+        )
+
+    # Attach evidence to decisions
+    try:
+        for d in (decisions_out or []):
+            dom = str(d.get("domain") or "").lower()
+            if dom in ("liquidity",):
+                keys = ["current_ratio", "quick_ratio", "working_capital"]
+                d["evidence"] = _evidence_for_keys(keys)
+                d["confidence"] = _confidence_for(keys)
+            elif dom in ("cashflow",):
+                keys = ["operating_cashflow", "working_capital"]
+                d["evidence"] = _evidence_for_keys(keys)
+                d["confidence"] = _confidence_for(keys)
+            elif dom in ("profitability", "profit"):
+                keys = ["net_profit", "net_margin_pct", "gross_margin_pct"]
+                d["evidence"] = _evidence_for_keys(keys)
+                d["confidence"] = _confidence_for(keys)
+                # Deterministic one-step attribution (additive)
+                if _resolver:
+                    d["attribution"] = profit_bridge_attribution(
+                        revenue_delta=_resolver.delta("revenue").get("delta"),
+                        prior_net_margin_pct=_resolver.delta("net_margin_pct").get("previous"),
+                        cogs_ratio_delta_pct=_resolver.delta("cogs_ratio_pct").get("delta"),
+                        opex_ratio_delta_pct=_resolver.delta("opex_ratio_pct").get("delta"),
+                        latest_revenue=_resolver.delta("revenue").get("current"),
+                        observed_net_profit_delta=_resolver.delta("net_profit").get("delta"),
+                    )
+            elif dom in ("growth", "revenue"):
+                keys = ["revenue", "net_profit"]
+                d["evidence"] = _evidence_for_keys(keys)
+                d["confidence"] = _confidence_for(keys)
+            elif dom in ("efficiency",):
+                keys = ["ccc_days", "dso_days", "dpo_days", "dio_days"]
+                d["evidence"] = _evidence_for_keys(keys)
+                d["confidence"] = _confidence_for(keys)
+            else:
+                # Default: revenue + profit context
+                keys = ["revenue", "net_profit", "total_cost_ratio_pct"]
+                d["evidence"] = _evidence_for_keys(keys)
+                d["confidence"] = _confidence_for(keys)
+    except Exception:
+        pass
+
+    # Attach evidence to Phase 43 root causes list (already additive in response)
+    try:
+        for rc in (root_causes_v2 or []):
+            dom = str(rc.get("domain") or rc.get("type") or "").lower()
+            if dom in ("profitability", "profit"):
+                keys = ["net_profit", "net_margin_pct", "gross_margin_pct"]
+                rc["evidence"] = _evidence_for_keys(keys)
+                rc["confidence"] = _confidence_for(keys)
+            elif dom in ("liquidity",):
+                keys = ["current_ratio", "quick_ratio", "working_capital"]
+                rc["evidence"] = _evidence_for_keys(keys)
+                rc["confidence"] = _confidence_for(keys)
+            elif dom in ("cashflow",):
+                keys = ["operating_cashflow", "working_capital"]
+                rc["evidence"] = _evidence_for_keys(keys)
+                rc["confidence"] = _confidence_for(keys)
+            elif dom in ("revenue", "growth"):
+                keys = ["revenue"]
+                rc["evidence"] = _evidence_for_keys(keys)
+                rc["confidence"] = _confidence_for(keys)
+            elif dom in ("cost", "cost_structure", "expenses"):
+                keys = ["total_cost_ratio_pct", "operating_expenses", "cogs_ratio_pct"]
+                rc["evidence"] = _evidence_for_keys(keys)
+                rc["confidence"] = _confidence_for(keys)
+            else:
+                # If the engine already provided source_metrics, honor them when possible
+                src = rc.get("source_metrics") or []
+                keys = [k for k in src if isinstance(k, str)]
+                use = keys[:4] if keys else ["revenue", "net_profit"]
+                rc["evidence"] = _evidence_for_keys(use)
+                rc["confidence"] = _confidence_for(use)
+    except Exception:
+        pass
 
     return {
         "company_id":   company_id,
@@ -4106,7 +4370,6 @@ def get_advisor_context(
     branch_id:   str  = Query(default=None),
     lang:        str  = Query(default="en"),
     db:          Session = Depends(get_db),
-    current_user = Depends(get_current_user),
 ):
     """
     Build full AI CFO context for the advisor.
@@ -4115,16 +4378,8 @@ def get_advisor_context(
     """
     from app.services.vcfo_advisor_context import build_advisor_context
     from app.services.vcfo_ai_advisor import build_quick_actions
-    from app.models.membership import Membership
 
-    # Membership check
-    mem = db.query(Membership).filter(
-        Membership.user_id    == current_user.id,
-        Membership.company_id == company_id,
-        Membership.is_active  == True,
-    ).first()
-    if not mem:
-        raise HTTPException(status_code=403, detail="Access denied")
+    # Membership enforced by router-level Depends(require_company_access)
 
     try:
         ctx = build_advisor_context(

@@ -2,7 +2,9 @@
 """
 scripts/migrate_sqlite_to_pg.py
 --------------------------------
-Copies all VCFO data from SQLite to PostgreSQL.
+Legacy one-off: copies data from a SQLite file into PostgreSQL.
+
+The application never opens SQLite at runtime; this script is for migration only.
 
 Pre-requisites:
   1. alembic upgrade head  (run first)

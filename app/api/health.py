@@ -81,7 +81,7 @@ def health_full(
             row = db.execute(text("SELECT version_num FROM alembic_version")).fetchone()
             alembic_head = row[0] if row else None
         except Exception:
-            # Alembic table may not exist on SQLite
+            # Alembic version table may not exist yet
             alembic_head = "n/a"
 
     except Exception as exc:

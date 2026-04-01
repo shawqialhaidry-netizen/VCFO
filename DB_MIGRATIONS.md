@@ -55,12 +55,14 @@ python scripts/db_migrate.py --db PATH status  # explicit DB file path
 
 ---
 
-## SQLite → PostgreSQL Migration
+## Legacy SQLite data → PostgreSQL
+
+The application **requires PostgreSQL**; `DATABASE_URL` must be a `postgresql://` or `postgres://` URL. The file `data/vcfo.db` is legacy and is not opened by the app.
 
 ### Step 1 — Install PostgreSQL driver
 
 ```bash
-pip install psycopg2-binary
+pip install -r requirements.txt   # includes psycopg2-binary
 ```
 
 ### Step 2 — Update .env
@@ -95,14 +97,14 @@ DATABASE_URL=postgresql://vcfo_user:strongpassword@localhost:5432/vcfo_db \
 > **Note:** `db_migrate.py` auto-detects PostgreSQL via `DATABASE_URL` env var.
 > It uses `psycopg2` and `information_schema` for PostgreSQL compatibility.
 
-### Step 6 — Migrate data (if you have existing SQLite data)
+### Step 6 — Migrate data (if you have an old SQLite `data/vcfo.db`)
 
 ```bash
-# Export from SQLite
-sqlite3 data/vcfo.db .dump > backup.sql
+# Optional: use the project helper (copies tables into PostgreSQL)
+python scripts/migrate_sqlite_to_pg.py --dry-run
+python scripts/migrate_sqlite_to_pg.py
 
-# For production migration, use pgloader or a custom script.
-# Contact your DBA for data migration assistance.
+# Or export manually, then load into PostgreSQL with pgloader / custom tooling.
 ```
 
 ---
@@ -116,10 +118,8 @@ Create `C:\VCFO1\CFO\vcfo\.env` (Windows) or `/opt/vcfo/.env` (Linux):
 # Generate with: python -c "import secrets; print(secrets.token_hex(32))"
 JWT_SECRET_KEY=<strong-random-secret-here>
 
-# ── Database ──────────────────────────────────────────────────────────────────
+# ── Database (PostgreSQL only) ───────────────────────────────────────────────
 DATABASE_URL=postgresql://user:password@host:5432/vcfo_db
-# OR for SQLite dev:
-# DATABASE_URL=sqlite:///./data/vcfo.db
 
 # ── Access control ────────────────────────────────────────────────────────────
 ENFORCE_MEMBERSHIP=true

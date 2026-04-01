@@ -14,6 +14,7 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import { useLang }    from '../context/LangContext.jsx'
 import { usePeriodScope } from '../context/PeriodScopeContext.jsx'
 import { useCompany } from '../context/CompanyContext.jsx'
+import { buildAnalysisQuery } from '../utils/buildAnalysisQuery.js'
 
 const API = '/api/v1'
 function auth() {
@@ -392,7 +393,7 @@ export default function CfoAI() {
   const [loading,    setLoading]    = useState(false)
   const [ctx,        setCtx]        = useState(null)
   const [loadingCtx, setLoadingCtx] = useState(false)
-  const { window: window_, setWindow: setWindow_ } = usePeriodScope()
+  const { window: window_, setWindow: setWindow_, toQueryString } = usePeriodScope()
   const [memory,     setMemory]     = useState({ lastIntent:null, lastBranch:null })
   const bottomRef = useRef()
   const inputRef  = useRef()
@@ -404,7 +405,9 @@ export default function CfoAI() {
     if (!selectedId) return
     setLoadingCtx(true)
     try {
-      const r = await fetch(`${API}/analysis/${selectedId}/advisor-context?window=${window_}&lang=${lang||'en'}`, { headers:auth() })
+      const qs = buildAnalysisQuery(toQueryString, { lang, window: window_, consolidate: false })
+      if (qs === null) return
+      const r = await fetch(`${API}/analysis/${selectedId}/advisor-context?${qs}`, { headers:auth() })
       if (!r.ok) return
       const j = await r.json()
       setCtx(j)
@@ -422,9 +425,9 @@ export default function CfoAI() {
       setMessages([{ role:'assistant', content:welcome, suggestions:getSuggestions('executive_summary', tr) }])
     } catch(e) { console.error('CfoAI ctx:', e) }
     finally { setLoadingCtx(false) }
-  }, [selectedId, lang, window_])
+  }, [selectedId, lang, window_, toQueryString])
 
-  useEffect(() => { loadCtx() }, [selectedId, window_])
+  useEffect(() => { loadCtx() }, [loadCtx])
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior:'smooth' }) }, [messages])
 
   // ── Error messages — Arabic / English ────────────────────────────────────────

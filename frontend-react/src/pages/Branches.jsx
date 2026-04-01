@@ -8,6 +8,7 @@ import { useCompany } from '../context/CompanyContext.jsx'
 import { useLang }    from '../context/LangContext.jsx'
 import { usePeriodScope } from '../context/PeriodScopeContext.jsx'
 import { formatCompact, formatFull, formatDual, formatPct, formatMultiple, formatDays } from '../utils/numberFormat.js'
+import { buildAnalysisQuery } from '../utils/buildAnalysisQuery.js'
 
 const API = '/api/v1'
 
@@ -295,7 +296,7 @@ function StatusBadge({ active, tr }) {
 export default function Branches() {
   const { selectedId: companyId, selectedCompany, canWrite, canManage } = useCompany()
   const { tr, lang }                               = useLang()
-  const { window: brWindow }                       = usePeriodScope()
+  const { window: brWindow, toQueryString }       = usePeriodScope()
 
   const [branches,    setBranches]    = useState([])
   const [loading,     setLoading]     = useState(false)
@@ -361,8 +362,10 @@ const loadIntel = useCallback(async () => {
 
   setIntelLoading(true);
   try {
+    const qs = buildAnalysisQuery(toQueryString, { lang, window: brWindow, consolidate: false })
+    if (qs === null) return
     const r = await fetch(
-      `${API}/companies/${companyId}/branch-intelligence?lang=${lang || 'en'}&window=${brWindow}`,
+      `${API}/companies/${companyId}/branch-intelligence?${qs}`,
       { headers: getAuthHeaders() }
     );
 
@@ -375,7 +378,7 @@ const loadIntel = useCallback(async () => {
   } finally {
     setIntelLoading(false);
   }
-}, [companyId, lang, brWindow]);
+}, [companyId, lang, brWindow, toQueryString]);
 
 useEffect(() => {
   if (activeTab !== 'intelligence') return;
@@ -401,6 +404,23 @@ useEffect(() => {
             {selectedCompany && (
               <p style={s.pageSubtitle}>{selectedCompany.name}</p>
             )}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
+              <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--accent)' }}>
+                {tr('data_source_branch_view_label')}
+              </span>
+              <span
+                title={tr('data_source_branch_vs_company_note')}
+                aria-label={tr('data_source_branch_vs_company_note')}
+                style={{ cursor: 'help', fontSize: 13, color: 'var(--text-muted)' }}>
+                ℹ️
+              </span>
+            </div>
+            <p style={{
+              fontSize: 11, color: 'var(--text-muted)', marginTop: 6, marginBottom: 0,
+              maxWidth: 640, lineHeight: 1.5,
+            }}>
+              {tr('data_source_branch_vs_company_note')}
+            </p>
           </div>
         </div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
@@ -662,6 +682,19 @@ function IntelligencePanel({ intel, loading }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div style={{
+        fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.5, padding: '10px 12px',
+        background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 8,
+      }}>
+        <span style={{ fontWeight: 700, color: 'var(--accent)' }}>{tr('data_source_branch_view_label')}</span>
+        <span
+          title={tr('data_source_branch_vs_company_note')}
+          aria-label={tr('data_source_branch_vs_company_note')}
+          style={{ cursor: 'help', marginInlineStart: 8 }}>
+          ℹ️
+        </span>
+        <div style={{ marginTop: 6, fontSize: 10 }}>{tr('data_source_branch_vs_company_note')}</div>
+      </div>
 
       {/* ── Classifications row ── */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(160px,1fr))', gap: 10 }}>
@@ -864,7 +897,8 @@ function IntelligencePanel({ intel, loading }) {
 
 // ── Branch Analysis Panel ─────────────────────────────────────────────────────
 function BranchAnalysisPanel({ branch, onClose, window: brWindow }) {
-  const { tr } = useLang()
+  const { tr, lang } = useLang()
+  const { toQueryString } = usePeriodScope()
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState(null)
@@ -875,7 +909,13 @@ function BranchAnalysisPanel({ branch, onClose, window: brWindow }) {
     setLoading(true);
     setErr(null);
   
-    fetch(`${API}/branches/${branch.id}/analysis?window=${brWindow}`, {
+    const qs = buildAnalysisQuery(toQueryString, { lang, window: brWindow, consolidate: false })
+    if (qs === null) {
+      setErr('Invalid period scope')
+      setLoading(false)
+      return
+    }
+    fetch(`${API}/branches/${branch.id}/analysis?${qs}`, {
       headers: getAuthHeaders()
     })
       .then(r => r.ok ? r.json() : Promise.reject(r.status))
@@ -888,7 +928,7 @@ function BranchAnalysisPanel({ branch, onClose, window: brWindow }) {
         setLoading(false);
       });
   
-    }, [branch, brWindow]);
+    }, [branch, brWindow, lang, toQueryString]);
 
   // formatCompact / formatPct imported from numberFormat.js
   const clr  = v => v == null ? 'var(--text-muted)' : v >= 0 ? 'var(--green)' : 'var(--red)'
@@ -934,6 +974,14 @@ function BranchAnalysisPanel({ branch, onClose, window: brWindow }) {
             background: 'none', border: 'none', color: 'var(--text-muted)',
             cursor: 'pointer', fontSize: 18, padding: '2px 8px', borderRadius: 4,
           }}>✕</button>
+        </div>
+
+        <div style={{
+          padding: '10px 24px', borderBottom: '1px solid var(--border)',
+          background: 'var(--bg-elevated)', fontSize: 11, fontWeight: 700,
+          color: 'var(--text-secondary)', letterSpacing: '.04em',
+        }}>
+          {tr('data_source_branch_financials')}
         </div>
 
         <div style={{ padding: '20px 24px' }}>

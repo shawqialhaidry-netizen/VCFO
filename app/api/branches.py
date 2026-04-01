@@ -30,9 +30,9 @@ from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.core.deps import get_current_company_access, require_active_membership
 from app.models.branch import Branch, BranchFinancial
 from app.models.company import Company
-from app.models.membership import Membership
 from app.models.trial_balance import TrialBalanceUpload
 from app.services.financial_statements import build_statements, statements_to_dict
 from app.services.metric_definitions import cogs_ratio_pct, opex_ratio_pct, total_cost_ratio_pct
@@ -40,6 +40,113 @@ from app.services.metric_definitions import cogs_ratio_pct, opex_ratio_pct, tota
 router = APIRouter(tags=["branches"])
 
 logger = logging.getLogger("vcfo.branches")
+
+# Rolling windows — same vocabulary as company analysis / executive
+_VALID_BRANCH_WINDOWS = frozenset({"3M", "6M", "12M", "YTD", "ALL"})
+
+
+def _scoped_branch_statements(
+    stmts_all: list[dict],
+    *,
+    window: str,
+    basis_type: str,
+    period: str,
+    year_scope: str,
+    from_period: str,
+    to_period: str,
+) -> tuple[list[dict], str]:
+    """
+    Phase 22 parity with company executive:
+    if basis_type is set and not 'all' → scope_from_params + filter_by_scope
+    else → filter_periods(window)
+    """
+    from app.services.time_intelligence import filter_periods
+    from app.services.time_scope import filter_by_scope, scope_from_params
+
+    _win = (window or "ALL").strip().upper()
+    if _win not in _VALID_BRANCH_WINDOWS:
+        _win = "ALL"
+
+    if (basis_type or "").lower() not in ("all", ""):
+        scope22 = scope_from_params(
+            basis_type,
+            period or None,
+            year_scope or None,
+            from_period or None,
+            to_period or None,
+            stmts_all,
+        )
+        if scope22.get("error"):
+            raise HTTPException(status_code=400, detail=scope22["error"])
+        stmts = filter_by_scope(stmts_all, scope22)
+    else:
+        stmts = filter_periods(stmts_all, _win) if _win != "ALL" else stmts_all
+
+    if not stmts:
+        stmts = stmts_all[-1:]
+    return stmts, _win
+
+# ── Metric Resolver shadow-mode (log-only) ────────────────────────────────────
+from app.services.metric_resolver import MetricResolver  # local import is OK: pure functions
+from app.services.confidence_engine import score_confidence
+from app.services.attribution_engine import profit_bridge_attribution
+
+_BR_METRIC_SHADOW_KEYS = (
+    "revenue",
+    "net_profit",
+    "net_margin_pct",
+    "operating_expenses",
+    "total_cost_ratio_pct",
+    "working_capital",
+    "operating_cashflow",
+)
+
+
+def _shadow_compare_metrics(
+    *,
+    resolver: MetricResolver,
+    current: dict,
+    label: str,
+) -> None:
+    try:
+        for k in _BR_METRIC_SHADOW_KEYS:
+            rv = resolver.get(k)
+            cv = current.get(k)
+            if rv is None and cv is None:
+                continue
+            tol = 0.05
+            if k in ("revenue", "net_profit", "operating_expenses", "working_capital", "operating_cashflow"):
+                tol = 0.5
+            if k in ("total_cost_ratio_pct", "net_margin_pct"):
+                tol = 0.05
+            try:
+                if rv is None or cv is None:
+                    if (rv is None) != (cv is None):
+                        logger.warning("metric-shadow %s %s mismatch: resolver=%s current=%s meta=%s", label, k, rv, cv, resolver.meta())
+                    continue
+                diff = abs(float(rv) - float(cv))
+                if diff > tol:
+                    logger.warning("metric-shadow %s %s mismatch: resolver=%s current=%s diff=%.4f meta=%s", label, k, rv, cv, diff, resolver.meta())
+            except Exception:
+                if rv != cv:
+                    logger.warning("metric-shadow %s %s mismatch (non-numeric): resolver=%s current=%s meta=%s", label, k, rv, cv, resolver.meta())
+    except Exception as exc:
+        logger.warning("metric-shadow %s failed: %s", label, exc)
+
+
+def _confidence_from_resolver(resolver: MetricResolver, keys: list[str]) -> dict:
+    q = resolver.quality()
+    missing = sum(q.get("missing_points", {}).get(k, 0) for k in keys)
+    approx = bool(q.get("approximated"))
+    denom = bool(q.get("denominator_risks"))
+    volatile = any(resolver.trend_quality(k) == "volatile" for k in keys if k in ("revenue", "net_profit", "operating_expenses", "operating_cashflow"))
+    return score_confidence(
+        n_periods=int(q.get("n_periods") or 0),
+        missing_points=int(missing or 0),
+        approximated=approx,
+        volatile=volatile,
+        denom_risk=denom,
+    )
 
 
 # ── Schemas ───────────────────────────────────────────────────────────────────
@@ -105,14 +212,7 @@ def create_branch(
     company = db.query(Company).filter(Company.id == payload.company_id).first()
     if not company:
         raise HTTPException(status_code=404, detail="Company not found")
-    # Verify caller has membership in the target company
-    membership = db.query(Membership).filter(
-        Membership.user_id    == current_user.id,
-        Membership.company_id == payload.company_id,
-        Membership.is_active  == True,  # noqa
-    ).first()
-    if not membership:
-        raise HTTPException(status_code=403, detail="Access denied: no membership for this company")
+    membership = require_active_membership(db, current_user.id, payload.company_id)
     if membership.role not in ("owner", "analyst"):
         raise HTTPException(status_code=403, detail="Viewer role cannot create branches")
     branch = Branch(**payload.model_dump())
@@ -128,13 +228,7 @@ def list_branches(
     db:           Session = Depends(get_db),
     current_user = Depends(get_current_user),
 ):
-    membership = db.query(Membership).filter(
-        Membership.user_id    == current_user.id,
-        Membership.company_id == company_id,
-        Membership.is_active  == True,  # noqa
-    ).first()
-    if not membership:
-        raise HTTPException(status_code=403, detail="Access denied")
+    require_active_membership(db, current_user.id, company_id)
     return (
         db.query(Branch)
         .filter(Branch.company_id == company_id, Branch.is_active == True)  # noqa
@@ -152,13 +246,7 @@ def get_branch(
     b = db.query(Branch).filter(Branch.id == branch_id).first()
     if not b:
         raise HTTPException(status_code=404, detail="Branch not found")
-    membership = db.query(Membership).filter(
-        Membership.user_id    == current_user.id,
-        Membership.company_id == b.company_id,
-        Membership.is_active  == True,  # noqa
-    ).first()
-    if not membership:
-        raise HTTPException(status_code=403, detail="Access denied")
+    require_active_membership(db, current_user.id, b.company_id)
     return b
 
 
@@ -171,13 +259,7 @@ def delete_branch(
     b = db.query(Branch).filter(Branch.id == branch_id).first()
     if not b:
         raise HTTPException(status_code=404, detail="Branch not found")
-    membership = db.query(Membership).filter(
-        Membership.user_id    == current_user.id,
-        Membership.company_id == b.company_id,
-        Membership.is_active  == True,  # noqa
-    ).first()
-    if not membership:
-        raise HTTPException(status_code=403, detail="Access denied: no membership for this company")
+    membership = require_active_membership(db, current_user.id, b.company_id)
     if membership.role not in ("owner", "analyst"):
         raise HTTPException(status_code=403, detail="Viewer role cannot delete branches")
     b.is_active = False
@@ -194,13 +276,7 @@ def update_branch(
     b = db.query(Branch).filter(Branch.id == branch_id).first()
     if not b:
         raise HTTPException(status_code=404, detail="Branch not found")
-    membership = db.query(Membership).filter(
-        Membership.user_id    == current_user.id,
-        Membership.company_id == b.company_id,
-        Membership.is_active  == True,  # noqa
-    ).first()
-    if not membership:
-        raise HTTPException(status_code=403, detail="Access denied: no membership for this company")
+    membership = require_active_membership(db, current_user.id, b.company_id)
     if membership.role not in ("owner", "analyst"):
         raise HTTPException(status_code=403, detail="Viewer role cannot update branches")
     update_data = payload.model_dump(exclude_unset=True)
@@ -222,14 +298,7 @@ def get_branch_financials(
     b = db.query(Branch).filter(Branch.id == branch_id).first()
     if not b:
         raise HTTPException(status_code=404, detail="Branch not found")
-    # Verify caller has membership in the branch's company
-    membership = db.query(Membership).filter(
-        Membership.user_id    == current_user.id,
-        Membership.company_id == b.company_id,
-        Membership.is_active  == True,  # noqa
-    ).first()
-    if not membership:
-        raise HTTPException(status_code=403, detail="Access denied: no membership for this company")
+    require_active_membership(db, current_user.id, b.company_id)
 
     financials = (
         db.query(BranchFinancial)
@@ -326,6 +395,11 @@ def get_branch_analysis(
     branch_id:    str,
     window:       str = Query(default="ALL", description="3M | 6M | 12M | YTD | ALL"),
     lang:         str = Query(default="en"),
+    basis_type:   str = Query(default="all"),
+    period:       str = Query(default=""),
+    year_scope:   str = Query(default="", alias="year"),
+    from_period:  str = Query(default=""),
+    to_period:    str = Query(default=""),
     db:           Session = Depends(get_db),
     current_user = Depends(get_current_user),
 ):
@@ -343,19 +417,12 @@ def get_branch_analysis(
     from app.services.fin_intelligence import build_intelligence
     from app.services.period_aggregation import build_annual_layer
     from app.services.root_cause_engine import build_root_causes, derive_phase43_metrics_trends
-    from app.services.time_intelligence import filter_periods
 
     b = db.query(Branch).filter(Branch.id == branch_id).first()
     if not b:
         raise HTTPException(status_code=404, detail="Branch not found")
 
-    membership = db.query(Membership).filter(
-        Membership.user_id    == current_user.id,
-        Membership.company_id == b.company_id,
-        Membership.is_active  == True,  # noqa
-    ).first()
-    if not membership:
-        raise HTTPException(status_code=403, detail="Access denied")
+    require_active_membership(db, current_user.id, b.company_id)
 
     financials = (
         db.query(BranchFinancial)
@@ -375,12 +442,15 @@ def get_branch_analysis(
         }
 
     stmts_all = [_bf_to_stmt_dict(f) for f in financials]
-    _win = (window or "ALL").strip().upper()
-    if _win not in ("3M", "6M", "12M", "YTD", "ALL"):
-        _win = "ALL"
-    stmts = filter_periods(stmts_all, _win) if _win != "ALL" else stmts_all
-    if not stmts:
-        stmts = stmts_all[-1:]
+    stmts, _win = _scoped_branch_statements(
+        stmts_all,
+        window=window,
+        basis_type=basis_type,
+        period=period,
+        year_scope=year_scope,
+        from_period=from_period,
+        to_period=to_period,
+    )
 
     safe_lang = lang if lang in ("en", "ar", "tr") else "en"
     company = db.query(Company).filter(Company.id == b.company_id).first()
@@ -467,6 +537,99 @@ def get_branch_analysis(
 
         branch_forecast = build_executive_forecast_unavailable(safe_lang, reason="unavailable")
 
+    # ── Metric Resolver shadow-mode comparisons (log-only) ────────────────────
+    try:
+        from app.services.cashflow_engine import build_cashflow
+        cf_raw = build_cashflow(stmts)
+        _resolver = MetricResolver.from_statements(
+            period_statements=stmts,
+            scope="branch",
+            window=_win,  # type: ignore[arg-type]
+            currency=(company.currency if company else "") or "",
+            analysis=analysis,
+            cashflow=cf_raw,
+        )
+        _cur = {
+            "revenue": rev,
+            "net_profit": latest_is.get("net_profit"),
+            "net_margin_pct": latest_is.get("net_margin_pct"),
+            "operating_expenses": latest_is.get("expenses", {}).get("total"),
+            "total_cost_ratio_pct": tc_ratio,
+            "working_capital": (analysis.get("latest", {}).get("liquidity", {}) or {}).get("working_capital"),
+            "operating_cashflow": cf_raw.get("operating_cashflow") if isinstance(cf_raw, dict) else None,
+        }
+        # Normalize nested dict ratios if present
+        if isinstance(_cur.get("working_capital"), dict) and "value" in _cur["working_capital"]:
+            _cur["working_capital"] = _cur["working_capital"].get("value")
+        _shadow_compare_metrics(resolver=_resolver, current=_cur, label="branch-analysis")
+    except Exception:
+        pass
+
+    # ── Evidence blocks (additive) ────────────────────────────────────────────
+    try:
+        # Reuse the resolver we just built when available; otherwise build a minimal one.
+        if "cf_raw" in locals():
+            _resolver_e = MetricResolver.from_statements(
+                period_statements=stmts,
+                scope="branch",
+                window=_win,  # type: ignore[arg-type]
+                currency=(company.currency if company else "") or "",
+                analysis=analysis,
+                cashflow=cf_raw if isinstance(cf_raw, dict) else None,
+            )
+        else:
+            _resolver_e = MetricResolver.from_statements(
+                period_statements=stmts,
+                scope="branch",
+                window=_win,  # type: ignore[arg-type]
+                currency=(company.currency if company else "") or "",
+                analysis=analysis,
+                cashflow=None,
+            )
+
+        # deep intelligence meta evidence
+        if isinstance(deep_intel, dict):
+            deep_intel.setdefault("evidence", {"meta": _resolver_e.meta(), "quality": _resolver_e.quality()})
+
+        # decisions evidence
+        for d in (decisions or []):
+            dom = str(d.get("domain") or "").lower()
+            keys = ["revenue", "net_profit", "total_cost_ratio_pct"]
+            if dom in ("profitability", "profit"):
+                keys = ["net_profit", "net_margin_pct", "gross_margin_pct"]
+            elif dom in ("liquidity",):
+                keys = ["current_ratio", "quick_ratio", "working_capital"]
+            elif dom in ("cashflow",):
+                keys = ["operating_cashflow", "working_capital"]
+            d["evidence"] = {"meta": _resolver_e.meta(), "metrics": [{"key": k, **_resolver_e.delta(k)} for k in keys], "quality": _resolver_e.quality()}
+            d["confidence"] = _confidence_from_resolver(_resolver_e, keys)
+            if dom in ("profitability", "profit"):
+                d["attribution"] = profit_bridge_attribution(
+                    revenue_delta=_resolver_e.delta("revenue").get("delta"),
+                    prior_net_margin_pct=_resolver_e.delta("net_margin_pct").get("previous"),
+                    cogs_ratio_delta_pct=_resolver_e.delta("cogs_ratio_pct").get("delta"),
+                    opex_ratio_delta_pct=_resolver_e.delta("opex_ratio_pct").get("delta"),
+                    latest_revenue=_resolver_e.delta("revenue").get("current"),
+                    observed_net_profit_delta=_resolver_e.delta("net_profit").get("delta"),
+                )
+
+        # phase43 root causes evidence
+        for rc in (rc_phase43 or []):
+            dom = str(rc.get("domain") or rc.get("type") or "").lower()
+            keys = ["revenue", "net_profit"]
+            if dom in ("profitability", "profit"):
+                keys = ["net_profit", "net_margin_pct", "gross_margin_pct"]
+            elif dom in ("liquidity",):
+                keys = ["current_ratio", "quick_ratio", "working_capital"]
+            elif dom in ("cashflow",):
+                keys = ["operating_cashflow", "working_capital"]
+            elif dom in ("cost", "expenses", "cost_structure"):
+                keys = ["total_cost_ratio_pct", "operating_expenses", "cogs_ratio_pct"]
+            rc["evidence"] = {"meta": _resolver_e.meta(), "metrics": [{"key": k, **_resolver_e.delta(k)} for k in keys], "quality": _resolver_e.quality()}
+            rc["confidence"] = _confidence_from_resolver(_resolver_e, keys)
+    except Exception:
+        pass
+
     return {
         "branch_id":   branch_id,
         "branch_name": b.name,
@@ -552,6 +715,8 @@ def get_branch_drill_down(
     branch = db.query(Branch).filter(Branch.id == branch_id).first()
     if not branch:
         raise HTTPException(404, "Branch not found.")
+
+    require_active_membership(db, current_user.id, branch.company_id)
 
     financials = (
         db.query(BranchFinancial)
@@ -922,10 +1087,14 @@ def _build_branch_actions(exp_ratio, nm, c_pos, c_neg, lang):
 
 @router.get("/companies/{company_id}/branch-comparison")
 def branch_comparison(
-    company_id:   str,
     window:       str = Query(default="ALL", description="3M | 6M | 12M | YTD | ALL"),
+    basis_type:   str = Query(default="all"),
+    period:       str = Query(default=""),
+    year_scope:   str = Query(default="", alias="year"),
+    from_period:  str = Query(default=""),
+    to_period:    str = Query(default=""),
     db:           Session = Depends(get_db),
-    current_user = Depends(get_current_user),
+    company:      Company = Depends(get_current_company_access),
 ):
     """
     Compare all active branches for a company.
@@ -939,20 +1108,14 @@ def branch_comparison(
       "bottom_branches": [...], bottom 5 by revenue
       "margin_leaders": [...],  top 5 by net margin
       "growth_leaders": [...],  top 5 by MoM revenue growth (latest period)
-      "periods_available": [...],
+      "periods_available": [...],  # periods in the active scope / window (not full history)
+      "active_periods":    [...],  # same as periods_available (explicit alias for clients)
     }
     """
-    # Verify company exists + membership
-    company = db.query(Company).filter(Company.id == company_id).first()
-    if not company:
-        raise HTTPException(status_code=404, detail="Company not found")
-    membership = db.query(Membership).filter(
-        Membership.user_id    == current_user.id,
-        Membership.company_id == company_id,
-        Membership.is_active  == True,  # noqa
-    ).first()
-    if not membership:
-        raise HTTPException(status_code=403, detail="Access denied")
+    from app.services.time_intelligence import filter_periods as _fp
+    from app.services.time_scope import scope_from_params
+
+    company_id = company.id
 
     # Get all active branches
     branches = (
@@ -972,11 +1135,11 @@ def branch_comparison(
             "margin_leaders":    [],
             "growth_leaders":    [],
             "periods_available": [],
+            "active_periods":    [],
         }
 
-    # Gather financials for all branches
-    branch_data = []
-    all_periods: set[str] = set()
+    branch_rows: list[tuple] = []
+    all_periods_union: set[str] = set()
 
     for b in branches:
         financials = (
@@ -985,6 +1148,34 @@ def branch_comparison(
             .order_by(BranchFinancial.period)
             .all()
         )
+        branch_rows.append((b, financials))
+        for f in financials:
+            all_periods_union.add(f.period)
+
+    _win = (window or "ALL").strip().upper()
+    if _win not in _VALID_BRANCH_WINDOWS:
+        _win = "ALL"
+
+    active_months: set[str] | None = None
+    if (basis_type or "").lower() not in ("all", ""):
+        _synthetic = [{"period": p} for p in sorted(all_periods_union)]
+        scope22 = scope_from_params(
+            basis_type,
+            period or None,
+            year_scope or None,
+            from_period or None,
+            to_period or None,
+            _synthetic,
+        )
+        if scope22.get("error"):
+            raise HTTPException(status_code=400, detail=scope22["error"])
+        active_months = set(scope22.get("months") or [])
+
+    # Gather financials for all branches (same order as branch_rows)
+    branch_data = []
+    active_periods_union: set[str] = set()
+
+    for b, financials in branch_rows:
 
         if not financials:
             branch_data.append({
@@ -995,11 +1186,7 @@ def branch_comparison(
             })
             continue
 
-        for f in financials:
-            all_periods.add(f.period)
-
-        # Apply window filter to financials before aggregating
-        # Convert BranchFinancial records to period-keyed dicts for filter_periods
+        # Apply scope or rolling window — convert to period-keyed dicts (same shape as before)
         _all_periods_list = [
             {"period": f.period,
              "income_statement": {"revenue": {"total": f.revenue or 0.0},
@@ -1010,12 +1197,16 @@ def branch_comparison(
              "_bf": f}
             for f in financials
         ]
-        from app.services.time_intelligence import filter_periods as _fp
-        _windowed_list = _fp(_all_periods_list, window)
-        # Reconstruct filtered financials
+        if active_months is not None:
+            _windowed_list = [item for item in _all_periods_list if item["period"] in active_months]
+        else:
+            _windowed_list = _fp(_all_periods_list, _win)
         _windowed_bf = [item["_bf"] for item in _windowed_list]
         if not _windowed_bf:
             _windowed_bf = [financials[-1]]   # fallback: at least latest
+
+        for _bf in _windowed_bf:
+            active_periods_union.add(_bf.period)
 
         latest   = _windowed_bf[-1]
         prev_rev = _windowed_bf[-2].revenue if len(_windowed_bf) >= 2 else None
@@ -1259,7 +1450,8 @@ def branch_comparison(
         "margin_leaders":              margin_leaders[:5],
         "growth_leaders":              growth_leaders[:5],
         "no_data_branches":            no_data,
-        "periods_available":           sorted(all_periods),
+        "periods_available":           sorted(active_periods_union),
+        "active_periods":              sorted(active_periods_union),
         "insights":                    insights,
         "cross_branch_intelligence":  cross_branch_intelligence,
     }
@@ -1269,10 +1461,9 @@ def branch_comparison(
 
 @router.get("/companies/{company_id}/branch-intelligence")
 def get_branch_intelligence(
-    company_id:   str,
     lang:         str = Query(default="en"),
     db:           Session = Depends(get_db),
-    current_user = Depends(get_current_user),
+    company:      Company = Depends(get_current_company_access),
 ):
     """
     CFO-grade branch intelligence.
@@ -1281,17 +1472,7 @@ def get_branch_intelligence(
     """
     from app.services.analysis_engine import run_analysis, compute_trends
 
-    # Auth
-    company = db.query(Company).filter(Company.id == company_id).first()
-    if not company:
-        raise HTTPException(status_code=404, detail="Company not found")
-    membership = db.query(Membership).filter(
-        Membership.user_id    == current_user.id,
-        Membership.company_id == company_id,
-        Membership.is_active  == True,  # noqa
-    ).first()
-    if not membership:
-        raise HTTPException(status_code=403, detail="Access denied")
+    company_id = company.id
 
     branches = (
         db.query(Branch)
@@ -1784,11 +1965,10 @@ def get_branch_intelligence(
 
 @router.get("/companies/{company_id}/executive")
 def get_company_executive(
-    company_id: str,
     lang:       str  = Query(default="en"),
     consolidate:bool = Query(default=False),
     db:         Session = Depends(get_db),
-    current_user = Depends(get_current_user),
+    company:    Company = Depends(get_current_company_access),
 ):
     """
     Executive layer — assembles from existing pipeline outputs.
@@ -1812,9 +1992,7 @@ def get_company_executive(
     safe_lang = lang if lang in ("en","ar","tr") else "en"
     ar = safe_lang == "ar"; tr_ = safe_lang == "tr"
 
-    company = db.query(Company).filter(Company.id == company_id).first()
-    if not company:
-        raise HTTPException(404, "Company not found.")
+    company_id = company.id
 
     # ── Statements ────────────────────────────────────────────────────────────
     if consolidate:
@@ -2102,10 +2280,9 @@ def get_company_executive(
 
 @router.get("/companies/{company_id}/portfolio-intelligence")
 def get_portfolio_intelligence(
-    company_id:  str,
     lang:        str = Query(default="en"),
     db:          Session = Depends(get_db),
-    current_user = Depends(get_current_user),
+    company:     Company = Depends(get_current_company_access),
 ):
     """
     Portfolio-level intelligence: summary, contribution analysis, cross-branch
@@ -2121,6 +2298,8 @@ def get_portfolio_intelligence(
     from app.i18n import translate as _t
 
     safe_lang = lang if lang in ("en", "ar", "tr") else "en"
+
+    company_id = company.id
 
     branches = (
         db.query(Branch)

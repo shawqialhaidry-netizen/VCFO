@@ -19,7 +19,8 @@ class User(Base):
     created_at    = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at    = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
-    memberships = relationship("Membership", back_populates="user", lazy="dynamic")
+    memberships        = relationship("Membership", back_populates="user", lazy="dynamic")
+    group_memberships    = relationship("GroupMembership", back_populates="user", lazy="dynamic")
 
     def __repr__(self):
         return f"<User id={self.id} email={self.email}>"

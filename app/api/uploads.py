@@ -16,6 +16,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Reques
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.core.deps import require_active_membership
 from app.core.security import get_current_user
 from app.models.membership import Membership
 from app.models.user import User
@@ -156,13 +157,7 @@ async def upload_trial_balance(
         raise HTTPException(status_code=404, detail="Company not found")
 
     # ── Enforce membership + role (viewer cannot upload) ─────────────────────
-    _membership = db.query(Membership).filter(
-        Membership.user_id    == current_user.id,
-        Membership.company_id == company_id,
-        Membership.is_active  == True,  # noqa
-    ).first()
-    if not _membership:
-        raise HTTPException(status_code=403, detail="Access denied")
+    _membership = require_active_membership(db, current_user.id, company_id)
     if _membership.role not in ("owner", "analyst"):
         raise HTTPException(status_code=403, detail="Viewer role cannot upload data")
 
@@ -443,6 +438,8 @@ def list_uploads(
         Membership.user_id    == current_user.id,
         Membership.is_active  == True,  # noqa
     ).all()]
+    if company_id:
+        require_active_membership(db, current_user.id, company_id)
     q = db.query(TrialBalanceUpload).filter(TrialBalanceUpload.company_id.in_(allowed))
     if company_id:
         q = q.filter(TrialBalanceUpload.company_id == company_id)
@@ -485,14 +482,7 @@ def preview_upload(
     if not record:
         raise HTTPException(status_code=404, detail="Upload not found")
 
-    # Enforce membership for the upload's company (Task 5)
-    _mem = db.query(Membership).filter(
-        Membership.user_id    == current_user.id,
-        Membership.company_id == record.company_id,
-        Membership.is_active  == True,  # noqa
-    ).first()
-    if not _mem:
-        raise HTTPException(status_code=403, detail="Access denied")
+    require_active_membership(db, current_user.id, record.company_id)
 
     if record.status != "ok" or not record.normalized_path:
         raise HTTPException(status_code=422, detail="No normalized data available")
@@ -607,14 +597,7 @@ def check_period(
     Check whether a period already has a successful upload for this company.
     Requires authentication and active membership for the company.
     """
-    # Enforce membership before exposing any period info
-    _mem = db.query(Membership).filter(
-        Membership.user_id    == current_user.id,
-        Membership.company_id == company_id,
-        Membership.is_active  == True,  # noqa
-    ).first()
-    if not _mem:
-        raise HTTPException(status_code=403, detail="Access denied")
+    require_active_membership(db, current_user.id, company_id)
 
     resolved_branch = branch_id.strip() or None
 

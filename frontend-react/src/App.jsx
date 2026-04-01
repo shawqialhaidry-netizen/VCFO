@@ -5,7 +5,7 @@ import { useCompany } from './context/CompanyContext.jsx'
 import SessionExpiredBanner from './components/SessionExpiredBanner.jsx'
 import Sidebar from './components/Sidebar.jsx'
 import HeaderBar from './components/HeaderBar.jsx'
-import Dashboard from './pages/Dashboard.jsx'
+import CommandCenter from './pages/CommandCenter.jsx'
 import ExecutiveDashboard from './pages/ExecutiveDashboard.jsx'
 import Upload from './pages/Upload.jsx'
 import CfoAI from './pages/CfoAI.jsx'
@@ -99,7 +99,7 @@ export default function App() {
         />
         <main style={s.main} className="grid-bg">
           <Routes>
-            <Route path="/"           element={<Dashboard />} />
+            <Route path="/"           element={<CommandCenter />} />
             <Route path="/executive"  element={<ExecutiveDashboard />} />
             <Route path="/upload"     element={<Upload />} />
             <Route path="/cfo-ai"     element={<CfoAI />} />

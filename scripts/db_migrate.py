@@ -1,12 +1,15 @@
 """
 scripts/db_migrate.py - VCFO Schema Migration Manager
 
+The application uses PostgreSQL only. The optional --db PATH mode targeting a SQLite
+file is deprecated (legacy); prefer DATABASE_URL + PostgreSQL.
+
 Usage:
   python scripts/db_migrate.py status        -- show applied / pending
   python scripts/db_migrate.py up            -- apply all pending
   python scripts/db_migrate.py up --dry-run  -- preview without applying
   python scripts/db_migrate.py history       -- full history log
-  python scripts/db_migrate.py --db PATH ... -- explicit DB file
+  python scripts/db_migrate.py --db PATH ... -- explicit DB file (deprecated: SQLite)
 
 HOW TO ADD A FUTURE MIGRATION:
   1. Add a new Migration entry to MIGRATIONS list below
@@ -17,7 +20,7 @@ RULES:
   - Never edit an applied migration
   - Never remove entries from the list
   - Always use ADD COLUMN with nullable=True or a safe DEFAULT
-  - Never DROP or RENAME (SQLite limitation)
+  - Never DROP or RENAME (portability / safety)
 """
 
 import argparse

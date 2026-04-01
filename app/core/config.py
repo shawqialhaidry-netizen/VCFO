@@ -3,16 +3,25 @@ app/core/config.py — Application settings.
 
 All values overrideable via environment variables or .env file.
 
+``.env`` is loaded from the **repository root** (next to this package’s parent),
+so ``DATABASE_URL`` works regardless of PowerShell / process current directory.
+
 PRODUCTION CHECKLIST:
   JWT_SECRET_KEY  → generate: python -c "import secrets; print(secrets.token_hex(32))"
-  DATABASE_URL    → postgresql://user:password@host:5432/vcfo_db
+  DATABASE_URL    → postgresql://user:password@host:5432/vcfo_db  (PostgreSQL only — SQLite is not supported)
   PRODUCTION_MODE → true   (blocks startup with insecure defaults)
   ENFORCE_MEMBERSHIP → true
   DEBUG           → false
 """
-import secrets
+from pathlib import Path
 from typing import Optional
-from pydantic_settings import BaseSettings
+
+from pydantic import Field, field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# app/core/config.py → parents[2] = repository root (contains .env)
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_ENV_FILE = _REPO_ROOT / ".env"
 
 
 # Stable insecure default — detected and blocked in production mode
@@ -24,8 +33,11 @@ class Settings(BaseSettings):
     VERSION:  str = "1.0.0"
     DEBUG:    bool = False
 
-    # ── Database ──────────────────────────────────────────────────────────────
-    DATABASE_URL: str = "sqlite:///./data/vcfo.db"
+    # ── Database (PostgreSQL only; SQLite is deprecated and rejected) ────────
+    DATABASE_URL: str = Field(
+        ...,
+        description="SQLAlchemy URL for PostgreSQL only, e.g. postgresql+psycopg2://user:pass@host:5432/dbname",
+    )
 
     # ── CORS ──────────────────────────────────────────────────────────────────
     CORS_ORIGINS: list[str] = ["http://localhost:5173", "http://localhost:3000"]
@@ -46,14 +58,33 @@ class Settings(BaseSettings):
     # Set PRODUCTION_MODE=true in .env before going live.
     PRODUCTION_MODE: bool = False
 
-    class Config:
-        env_file = ".env"
+    model_config = SettingsConfigDict(
+        env_file=_ENV_FILE,
+        env_file_encoding="utf-8",
+    )
+
+    @field_validator("DATABASE_URL")
+    @classmethod
+    def postgres_only(cls, v: str) -> str:
+        if v is None or not str(v).strip():
+            raise ValueError(
+                "DATABASE_URL is required. Use a PostgreSQL URL, e.g. "
+                "postgresql+psycopg2://user:password@127.0.0.1:5432/vcfo"
+            )
+        s = str(v).strip()
+        low = s.lower()
+        if low.startswith("sqlite"):
+            raise ValueError(
+                "SQLite is deprecated and disabled. Set DATABASE_URL to a PostgreSQL URL "
+                "(postgresql://... or postgres://...)."
+            )
+        if not (low.startswith("postgresql") or low.startswith("postgres://")):
+            raise ValueError(
+                "DATABASE_URL must be a PostgreSQL URL (postgresql:// or postgres://)."
+            )
+        return s
 
     # ── Runtime helpers ───────────────────────────────────────────────────────
-
-    @property
-    def is_sqlite(self) -> bool:
-        return self.DATABASE_URL.startswith("sqlite")
 
     @property
     def is_secure_secret(self) -> bool:
@@ -62,7 +93,8 @@ class Settings(BaseSettings):
 
     @property
     def db_label(self) -> str:
-        return "sqlite" if self.is_sqlite else "postgresql"
+        """Backend is PostgreSQL-only (legacy SQLite removed)."""
+        return "postgresql"
 
 
 settings = Settings()

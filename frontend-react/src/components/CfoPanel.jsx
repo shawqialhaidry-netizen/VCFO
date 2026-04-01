@@ -8,6 +8,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useLang }    from '../context/LangContext.jsx'
 import { useCompany } from '../context/CompanyContext.jsx'
+import { usePeriodScope } from '../context/PeriodScopeContext.jsx'
+import { buildAnalysisQuery } from '../utils/buildAnalysisQuery.js'
 
 const API = '/api/v1'
 function auth() {
@@ -237,6 +239,7 @@ function getQuickActions(tr) {
 export default function CfoPanel({ open, onClose }) {
   const { tr, lang }   = useLang()
   const { selectedId, selectedCompany } = useCompany()
+  const { toQueryString, window: win } = usePeriodScope()
 
   const [input,    setInput]   = useState('')
   const [msgs,     setMsgs]    = useState([])
@@ -253,9 +256,14 @@ export default function CfoPanel({ open, onClose }) {
     if (!selectedId || d) return
     setLoading(true)
     try {
+      const qs = buildAnalysisQuery(toQueryString, { lang, window: win, consolidate: false })
+      if (qs === null) {
+        setLoading(false)
+        return
+      }
       const [exR, fcR] = await Promise.all([
-        fetch(`${API}/analysis/${selectedId}/executive?lang=${lang||'en'}`, { headers: auth() }),
-        fetch(`${API}/analysis/${selectedId}/forecast?lang=${lang||'en'}`,  { headers: auth() }),
+        fetch(`${API}/analysis/${selectedId}/executive?${qs}`, { headers: auth() }),
+        fetch(`${API}/analysis/${selectedId}/forecast?${qs}`, { headers: auth() }),
       ])
       const exJ = exR.ok ? await exR.json() : null
       const fcJ = fcR.ok ? await fcR.json() : null
@@ -272,7 +280,7 @@ export default function CfoPanel({ open, onClose }) {
     } finally {
       setLoading(false)
     }
-  }, [selectedId, lang, d])
+  }, [selectedId, lang, win, toQueryString, d])
 
   useEffect(() => {
     if (open) {

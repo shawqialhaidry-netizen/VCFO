@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.core.deps import get_current_company_access, require_active_membership
 from app.core.security import get_current_user
 from app.models.membership import Membership
 from app.models.user import User
@@ -127,21 +128,8 @@ def list_companies(
 
 @router.get("/{company_id}", response_model=CompanyResponse)
 def get_company(
-    company_id:   str,
-    db:           Session = Depends(get_db),
-    current_user = Depends(get_current_user),
+    company: Company = Depends(get_current_company_access),
 ):
-    company = db.query(Company).filter(Company.id == company_id).first()
-    if not company:
-        raise HTTPException(status_code=404, detail="Company not found")
-    # Verify caller has membership
-    mem = db.query(Membership).filter(
-        Membership.user_id    == current_user.id,
-        Membership.company_id == company_id,
-        Membership.is_active  == True,  # noqa: E712
-    ).first()
-    if not mem:
-        raise HTTPException(status_code=403, detail="Access denied")
     return _company_with_trial(company)
 
 
@@ -175,13 +163,7 @@ def list_members(
     current_user = Depends(get_current_user),
 ):
     """List all members of a company. Requires membership."""
-    mem_self = db.query(Membership).filter(
-        Membership.user_id    == current_user.id,
-        Membership.company_id == company_id,
-        Membership.is_active  == True,  # noqa: E712
-    ).first()
-    if not mem_self:
-        raise HTTPException(status_code=403, detail="Access denied")
+    require_active_membership(db, current_user.id, company_id)
 
     members = db.query(Membership).filter(
         Membership.company_id == company_id,
@@ -208,12 +190,8 @@ def add_member(
     current_user = Depends(get_current_user),
 ):
     """Invite a user to a company. Requires owner or analyst role."""
-    mem_self = db.query(Membership).filter(
-        Membership.user_id    == current_user.id,
-        Membership.company_id == company_id,
-        Membership.is_active  == True,  # noqa: E712
-    ).first()
-    if not mem_self or mem_self.role not in ("owner", "analyst"):
+    mem_self = require_active_membership(db, current_user.id, company_id)
+    if mem_self.role not in ("owner", "analyst"):
         raise HTTPException(status_code=403, detail="Only owners and analysts can invite members")
 
     if payload.role not in VALID_ROLES:
@@ -267,12 +245,8 @@ def update_member_role(
     current_user   = Depends(get_current_user),
 ):
     """Change a member's role. Requires owner."""
-    mem_self = db.query(Membership).filter(
-        Membership.user_id    == current_user.id,
-        Membership.company_id == company_id,
-        Membership.is_active  == True,  # noqa: E712
-    ).first()
-    if not mem_self or mem_self.role != "owner":
+    mem_self = require_active_membership(db, current_user.id, company_id)
+    if mem_self.role != "owner":
         raise HTTPException(status_code=403, detail="Only owners can change roles")
 
     if payload.role not in VALID_ROLES:
@@ -304,12 +278,8 @@ def remove_member(
     current_user   = Depends(get_current_user),
 ):
     """Remove a member from a company. Owner required. Cannot remove last owner."""
-    mem_self = db.query(Membership).filter(
-        Membership.user_id    == current_user.id,
-        Membership.company_id == company_id,
-        Membership.is_active  == True,  # noqa: E712
-    ).first()
-    if not mem_self or mem_self.role != "owner":
+    mem_self = require_active_membership(db, current_user.id, company_id)
+    if mem_self.role != "owner":
         raise HTTPException(status_code=403, detail="Only owners can remove members")
 
     target_mem = db.query(Membership).filter(
@@ -343,13 +313,8 @@ def delete_company(
     company = db.query(Company).filter(Company.id == company_id).first()
     if not company:
         raise HTTPException(status_code=404, detail="Company not found")
-    # FIX-S1: only owner can delete
-    mem = db.query(Membership).filter(
-        Membership.user_id    == current_user.id,
-        Membership.company_id == company_id,
-        Membership.is_active  == True,
-    ).first()
-    if not mem or mem.role != "owner":
+    mem = require_active_membership(db, current_user.id, company_id)
+    if mem.role != "owner":
         raise HTTPException(status_code=403, detail="Only company owner can delete")
     company.is_active = False
     db.commit()

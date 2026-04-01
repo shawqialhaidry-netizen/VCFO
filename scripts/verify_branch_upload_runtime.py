@@ -1,18 +1,20 @@
 """
 Runtime verification: branch TB upload -> TrialBalanceUpload + BranchFinancial -> read APIs.
 
-Uses in-memory SQLite + TestClient (same pattern as tests/conftest.py).
+PostgreSQL only (same as the application). Uses VERIFY_DATABASE_URL if set, else DATABASE_URL.
+Writes test rows — use a disposable database or clean up manually.
+
 Run: python scripts/verify_branch_upload_runtime.py
 """
 from __future__ import annotations
 
 import json
+import os
 import uuid
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
 from app.core.config import settings
 from app.core.database import Base, get_db
@@ -23,13 +25,14 @@ from app.models.branch import BranchFinancial
 settings.JWT_SECRET_KEY = "verify-branch-upload-runtime-secret-key-32b!"
 settings.ENFORCE_MEMBERSHIP = True  # production-like; we send real Bearer tokens
 
-# StaticPool: in-memory SQLite must share one connection across TestClient threads
-TEST_DATABASE_URL = "sqlite:///:memory:"
-engine_test = create_engine(
-    TEST_DATABASE_URL,
-    connect_args={"check_same_thread": False},
-    poolclass=StaticPool,
-)
+_VERIFY_URL = (os.environ.get("VERIFY_DATABASE_URL") or settings.DATABASE_URL).strip()
+_engine_kwargs = {
+    "pool_pre_ping": True,
+    "pool_size": 2,
+    "max_overflow": 2,
+    "pool_recycle": 300,
+}
+engine_test = create_engine(_VERIFY_URL, **_engine_kwargs)
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine_test)
 
 

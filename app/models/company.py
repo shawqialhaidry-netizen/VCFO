@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, Column, DateTime, String
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, String
 from sqlalchemy.orm import relationship
 
 from app.core.database import Base
@@ -11,6 +11,9 @@ class Company(Base):
     __tablename__ = "companies"
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    # Optional parent group (portfolio). NULL = standalone company (all existing rows).
+    group_id = Column(String(36), ForeignKey("groups.id", ondelete="SET NULL"), nullable=True, index=True)
+
     name = Column(String(255), nullable=False)
     name_ar = Column(String(255), nullable=True)
     industry = Column(String(100), nullable=True)
@@ -27,7 +30,8 @@ class Company(Base):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
-    memberships = relationship("Membership", back_populates="company", lazy="dynamic")
+    group         = relationship("Group", back_populates="companies")
+    memberships   = relationship("Membership", back_populates="company", lazy="dynamic")
 
     def __repr__(self):
         return f"<Company id={self.id} name={self.name}>"

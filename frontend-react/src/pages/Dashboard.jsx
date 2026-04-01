@@ -15,7 +15,9 @@ import { useLang } from '../context/LangContext.jsx'
 import { kpiContextLabel, kpiLabel } from '../utils/kpiContext.js'
 import { useCompany } from '../context/CompanyContext.jsx'
 import PeriodSelector from '../components/PeriodSelector.jsx'
+import UniversalScopeSelector from '../components/UniversalScopeSelector.jsx'
 import { usePeriodScope } from '../context/PeriodScopeContext.jsx'
+import { buildAnalysisQuery } from '../utils/buildAnalysisQuery.js'
 
 import { hasFlag, safeIncludes } from '../utils/dataGuards.js'
 import { formatCompact, formatFull, formatDual, formatPct, formatMultiple, formatDays } from '../utils/numberFormat.js'
@@ -1156,11 +1158,15 @@ function ExpenseBreakdown({items,total}) {
 //  Branch Panel
 // ══════════════════════════════════════════════════════════════════════════════
 function BranchPanel({companyId,tr}) {
+  const { lang } = useLang()
+  const { toQueryString, window: win } = usePeriodScope()
   const [d,setD]=useState(null)
   useEffect(()=>{
     if (!companyId) return
-    fetch(`${API}/companies/${companyId}/branch-comparison`, { headers: getAuthHeaders() }).then(r=>r.json()).then(setD).catch(()=>{})
-  },[companyId])
+    const qs = buildAnalysisQuery(toQueryString, { lang, window: win, consolidate: false })
+    if (qs === null) return
+    fetch(`${API}/companies/${companyId}/branch-comparison?${qs}`, { headers: getAuthHeaders() }).then(r=>r.json()).then(setD).catch(()=>{})
+  },[companyId, lang, win, toQueryString])
   if (!d) return <div style={{height:50,display:'flex',alignItems:'center',justifyContent:'center'}}><div style={{width:16,height:16,border:`2px solid ${BG.border}`,borderTopColor:C.accent,borderRadius:'50%',animation:'spin .8s linear infinite'}}/></div>
   if (!d.has_data) return (
     <div style={{padding:'24px',textAlign:'center',border:`1px dashed ${BG.border}`,borderRadius:10}}>
@@ -1658,8 +1664,9 @@ function DecisionsTab({data,tSig,tSub,tr,selectedId,lang}) {
 //  Phase 15.5 — What-If Panel
 // ══════════════════════════════════════════════════════════════════════════════
 function WhatIfPanel({data,tr,selectedId}) {
+  const { lang } = useLang()
   const d = data?.data || {}
-  const { toBodyFields: wiScopeBody } = usePeriodScope()
+  const { toBodyFields: wiScopeBody, toQueryString: wiToQS, window: win } = usePeriodScope()
   const [basis,    setBasis]    = useState('ytd')
   const [year,     setYear]     = useState('')
   const [revPct,   setRevPct]   = useState(0)
@@ -1680,7 +1687,9 @@ function WhatIfPanel({data,tr,selectedId}) {
       if (basis==='full_year'&&year) body.year = year
       const scopeBody = wiScopeBody()
       if (scopeBody === null) { setErr('Custom scope: select From and To period first'); return }
-      const r = await fetch(`/api/v1/analysis/${selectedId}/what-if`, {
+      const qs = buildAnalysisQuery(wiToQS, { lang, window: win, consolidate: false })
+      if (qs === null) { setErr('Custom scope: select From and To period first'); return }
+      const r = await fetch(`/api/v1/analysis/${selectedId}/what-if?${qs}`, {
         method:'POST',
         headers:{...getAuthHeaders(),'Content-Type':'application/json'},
         body: JSON.stringify({...body, ...scopeBody}),
@@ -1845,7 +1854,7 @@ function WhatIfPanel({data,tr,selectedId}) {
 //  Phase 16 — Decision Intelligence Panel
 // ══════════════════════════════════════════════════════════════════════════════
 function DecisionIntelPanel({tr, selectedId, data, lang}) {
-  const { toQueryString: decScopeQS, toBodyFields: decScopeBody } = usePeriodScope()
+  const { toQueryString: decScopeQS, toBodyFields: decScopeBody, window: win } = usePeriodScope()
   const [basis,   setBasis]   = useState('ytd')
   const [result,  setResult]  = useState(null)
   const [loading, setLoading] = useState(false)
@@ -1870,7 +1879,9 @@ function DecisionIntelPanel({tr, selectedId, data, lang}) {
     try {
       const decScope = decScopeBody()
       if (decScope === null) { setErr('Custom scope: select From and To period first'); return }
-      const r = await fetch(`/api/v1/analysis/${selectedId}/decisions?lang=${lang||'en'}`, {
+      const qs = buildAnalysisQuery(decScopeQS, { lang, window: win, consolidate: false })
+      if (qs === null) { setErr('Custom scope: select From and To period first'); return }
+      const r = await fetch(`/api/v1/analysis/${selectedId}/decisions?${qs}`, {
         method:'POST',
         headers:{...getAuthHeaders(),'Content-Type':'application/json'},
         body: JSON.stringify({basis, ...decScope}),
@@ -2126,7 +2137,7 @@ function DecisionIntelPanel({tr, selectedId, data, lang}) {
 //  Phase 17 — Executive Narrative Panel
 // ══════════════════════════════════════════════════════════════════════════════
 function NarrativePanel({tr, selectedId, lang}) {
-  const { toQueryString: narScopeQS } = usePeriodScope()
+  const { toQueryString: narScopeQS, window: win } = usePeriodScope()
   const [basis,     setBasis]     = useState('ytd')
   const [narLang,   setNarLang]   = useState(lang==='ar'?'ar':'en')
   const [result,    setResult]    = useState(null)
@@ -2138,8 +2149,10 @@ function NarrativePanel({tr, selectedId, lang}) {
     if (!selectedId) return
     setExporting('xlsx')
     try {
+      const base = buildAnalysisQuery(narScopeQS, { lang: narLang, window: win, consolidate: false })
+      if (base === null) { setErr('Custom scope incomplete'); return }
       const r = await fetch(
-        `/api/v1/analysis/${selectedId}/export.xlsx?basis=${basis}&lang=${narLang}`,
+        `/api/v1/analysis/${selectedId}/export.xlsx?${base}&basis=${encodeURIComponent(basis)}`,
         { headers: getAuthHeaders() }
       )
       if (!r.ok) { setErr('Export failed'); return }
@@ -2158,8 +2171,10 @@ function NarrativePanel({tr, selectedId, lang}) {
     if (!selectedId) return
     setExporting('json')
     try {
+      const base = buildAnalysisQuery(narScopeQS, { lang: narLang, window: win, consolidate: false })
+      if (base === null) { setErr('Custom scope incomplete'); return }
       const r = await fetch(
-        `/api/v1/analysis/${selectedId}/report-bundle?basis=${basis}&lang=${narLang}`,
+        `/api/v1/analysis/${selectedId}/report-bundle?${base}&basis=${encodeURIComponent(basis)}`,
         { headers: getAuthHeaders() }
       )
       const d = await r.json()
@@ -2189,8 +2204,10 @@ function NarrativePanel({tr, selectedId, lang}) {
     if (!selectedId) return
     setLoading(true); setErr(null)
     try {
+      const base = buildAnalysisQuery(narScopeQS, { lang: narLang, window: win, consolidate: false })
+      if (base === null) { setErr('Custom scope incomplete'); setLoading(false); return }
       const r = await fetch(
-        `/api/v1/analysis/${selectedId}/narrative?${narScopeQS({basis,lang:narLang})}`,
+        `/api/v1/analysis/${selectedId}/narrative?${base}&basis=${encodeURIComponent(basis)}`,
         { headers: getAuthHeaders() }
       )
       const d = await r.json()
@@ -2397,7 +2414,7 @@ function NarrativePanel({tr, selectedId, lang}) {
 //  Phase 20 — Management Report / Board Pack Panel
 // ══════════════════════════════════════════════════════════════════════════════
 function ManagementReportPanel({tr, selectedId, lang}) {
-  const { toQueryString: mgmtScopeQS } = usePeriodScope()
+  const { toQueryString: mgmtScopeQS, window: win } = usePeriodScope()
   const [basis,   setBasis]   = useState('ytd')
   const [repLang, setRepLang] = useState(lang==='ar'?'ar':'en')
   const [report,  setReport]  = useState(null)
@@ -2422,8 +2439,10 @@ function ManagementReportPanel({tr, selectedId, lang}) {
     if (!selectedId) return
     setLoading(true); setErr(null)
     try {
+      const base = buildAnalysisQuery(mgmtScopeQS, { lang: repLang, window: win, consolidate: false })
+      if (base === null) { setErr('Custom scope incomplete'); setLoading(false); return }
       const r = await fetch(
-        `/api/v1/analysis/${selectedId}/management-report?${mgmtScopeQS({basis,lang:repLang})}`,
+        `/api/v1/analysis/${selectedId}/management-report?${base}&basis=${encodeURIComponent(basis)}`,
         { headers: getAuthHeaders() }
       )
       const d = await r.json()
@@ -2684,7 +2703,7 @@ function ManagementReportPanel({tr, selectedId, lang}) {
 // ══════════════════════════════════════════════════════════════════════════════
 function FinIntelPanel({tr, selectedId, lang, data}) {
   // Same executive payload as other Dashboard tabs: data.data.intelligence from GET /analysis/{id}/executive
-  const { toQueryString: intelScopeQS } = usePeriodScope()
+  const { toQueryString: intelScopeQS, window: win } = usePeriodScope()
   const [alerts,     setAlerts]     = useState(null)
   const [alertsLoad, setAlertsLoad] = useState(false)
   const loading    = false
@@ -2710,7 +2729,7 @@ function FinIntelPanel({tr, selectedId, lang, data}) {
     if (!selectedId) return
     setAlertsLoad(true)
     try {
-      const qs = intelScopeQS({ lang: lang||'en' })
+      const qs = buildAnalysisQuery(intelScopeQS, { lang, window: win, consolidate: false })
       if (qs === null) return
       const r = await fetch(`/api/v1/analysis/${selectedId}/alerts?${qs}`, { headers: getAuthHeaders() })
       if (!r.ok) return
@@ -2928,86 +2947,10 @@ function FinIntelPanel({tr, selectedId, lang, data}) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-//  Phase 22 — Universal Period Scope Selector
-// ══════════════════════════════════════════════════════════════════════════════
-function UniversalScopeSelector({tr, ps, psUpdate, onApply, allPeriods, activeLabel}) {
-  const years  = [...new Set((allPeriods||[]).map(p=>p.slice(0,4)))].sort((a,b)=>b-a)
-  const months = allPeriods || []
-  const bt = ps?.basis_type || 'all'
-
-  const typeOpts = [
-    {v:'all',    l:tr('scope_all')},
-    {v:'ytd',    l:tr('scope_ytd')},
-    {v:'year',   l:tr('scope_year')},
-    {v:'month',  l:tr('scope_month')},
-    {v:'custom', l:tr('scope_custom')},
-  ]
-
-  const IS = { ...SELECT_DARK, width:'auto', fontSize:11, padding:'5px 24px 5px 8px', backgroundSize:'8px 5px' }
-
-  return (
-    <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap',
-      background:BG.panel,border:`1px solid ${BG.border}`,borderRadius:10,padding:'8px 12px'}}>
-
-      {/* Scope type */}
-      <select value={bt} onChange={e=>psUpdate({basis_type:e.target.value,period:'',year:'',from_period:'',to_period:''})} style={IS}>
-        {typeOpts.map(o=><option key={o.v} value={o.v}>{o.l}</option>)}
-      </select>
-
-      {/* Month picker */}
-      {bt==='month'&&(
-        <select value={ps?.period||''} onChange={e=>psUpdate({period:e.target.value})} style={IS}>
-          <option value="">—</option>
-          {months.map(m=><option key={m} value={m}>{m}</option>)}
-        </select>
-      )}
-
-      {/* Year selector */}
-      {(bt==='year'||bt==='ytd')&&(
-        <select value={ps?.year||''} onChange={e=>psUpdate({year:e.target.value})} style={IS}>
-          <option value="">{bt==='ytd'?tr('scope_ytd')+' (latest)':tr('scope_year')}</option>
-          {years.map(y=><option key={y} value={y}>{y}</option>)}
-        </select>
-      )}
-
-      {/* Custom range */}
-      {bt==='custom'&&(<>
-        <span style={{fontSize:10,color:C.text2}}>{tr('scope_from')}</span>
-        <select value={ps?.from_period||''} onChange={e=>psUpdate({from_period:e.target.value})} style={IS}>
-          <option value="">—</option>
-          {months.map(m=><option key={m} value={m}>{m}</option>)}
-        </select>
-        <span style={{fontSize:10,color:C.text2}}>{tr('scope_to')}</span>
-        <select value={ps?.to_period||''} onChange={e=>psUpdate({to_period:e.target.value})} style={IS}>
-          <option value="">—</option>
-          {months.map(m=><option key={m} value={m}>{m}</option>)}
-        </select>
-      </>)}
-
-      {/* Apply button */}
-      <button onClick={onApply}
-        style={{padding:'5px 14px',borderRadius:7,border:'none',
-          background:C.accent,color:'#000',fontSize:11,fontWeight:700,
-          cursor:'pointer',fontFamily:'var(--font-display)'}}>
-        {tr('scope_apply')}
-      </button>
-
-      {/* Active scope badge */}
-      {activeLabel&&(
-        <span style={{fontFamily:'var(--font-mono)',fontSize:10,color:C.accent,
-          background:`${C.accent}15`,padding:'3px 8px',borderRadius:6,border:`1px solid ${C.accent}30`}}>
-          {activeLabel}
-        </span>
-      )}
-    </div>
-  )
-}
-
-// ══════════════════════════════════════════════════════════════════════════════
 //  Phase 25 — Decisions Panel V2 (CFO Decision Engine)
 // ══════════════════════════════════════════════════════════════════════════════
 function DecisionsPanelV2({tr, selectedId, lang}) {
-  const { toQueryString: decQS } = usePeriodScope()
+  const { toQueryString: decQS, window: win } = usePeriodScope()
   const [result,  setResult]  = useState(null)
   const [loading, setLoading] = useState(false)
   const [err,     setErr]     = useState(null)
@@ -3021,7 +2964,7 @@ function DecisionsPanelV2({tr, selectedId, lang}) {
 
   async function run() {
     if (!selectedId) return
-    const qs = decQS({ lang: lang||'en' })
+    const qs = buildAnalysisQuery(decQS, { lang, window: win, consolidate: false })
     if (qs === null) { setErr('Custom scope: select From and To period first'); return }
     setLoading(true); setErr(null)
     try {
@@ -3227,7 +3170,7 @@ function DecisionsPanelV2({tr, selectedId, lang}) {
 //  Phase 26 — Root Causes Panel
 // ══════════════════════════════════════════════════════════════════════════════
 function RootCausesPanel({tr, selectedId, lang}) {
-  const { toQueryString: rcQS } = usePeriodScope()
+  const { toQueryString: rcQS, window: win } = usePeriodScope()
   const [result,  setResult]  = useState(null)
   const [loading, setLoading] = useState(false)
   const [err,     setErr]     = useState(null)
@@ -3241,7 +3184,7 @@ function RootCausesPanel({tr, selectedId, lang}) {
 
   async function run() {
     if (!selectedId) return
-    const qs = rcQS({ lang: lang||'en' })
+    const qs = buildAnalysisQuery(rcQS, { lang, window: win, consolidate: false })
     if (qs === null) { setErr('Custom scope: select From and To period first'); return }
     setLoading(true); setErr(null)
     try {
@@ -3411,7 +3354,7 @@ function RootCausesPanel({tr, selectedId, lang}) {
 //  Phase 27 — Forecast Panel
 // ══════════════════════════════════════════════════════════════════════════════
 function ForecastPanel({tr, selectedId, lang}) {
-  const { toQueryString: fcQS } = usePeriodScope()
+  const { toQueryString: fcQS, window: win } = usePeriodScope()
   const [result,    setResult]    = useState(null)
   const [loading,   setLoading]   = useState(false)
   const [err,       setErr]       = useState(null)
@@ -3424,7 +3367,7 @@ function ForecastPanel({tr, selectedId, lang}) {
 
   async function run() {
     if (!selectedId) return
-    const qs = fcQS({ lang: lang||'en' })
+    const qs = buildAnalysisQuery(fcQS, { lang, window: win, consolidate: false })
     if (qs === null) { setErr('Custom scope: select From and To period first'); return }
     setLoading(true); setErr(null)
     try {
@@ -3674,6 +3617,7 @@ function ForecastPanel({tr, selectedId, lang}) {
 //  Phase 28 — Portfolio Panel
 // ══════════════════════════════════════════════════════════════════════════════
 function PortfolioPanel({tr, lang, companyId}) {
+  const { toQueryString, window: win } = usePeriodScope()
   const [result,  setResult]  = useState(null)
   const [loading, setLoading] = useState(false)
   const [err,     setErr]     = useState(null)
@@ -3681,13 +3625,15 @@ function PortfolioPanel({tr, lang, companyId}) {
   useEffect(() => {
     if (!companyId) return
     load()
-  }, [companyId, lang])
+  }, [companyId, lang, win, toQueryString])
 
   async function load() {
     setLoading(true); setErr(null)
     try {
+      const qs = buildAnalysisQuery(toQueryString, { lang, window: win, consolidate: false })
+      if (qs === null) { setErr('Custom scope incomplete'); setLoading(false); return }
       const r = await fetch(
-        `/api/v1/companies/${companyId}/portfolio-intelligence?lang=${lang||'en'}`,
+        `/api/v1/companies/${companyId}/portfolio-intelligence?${qs}`,
         { headers: getAuthHeaders() }
       )
       if (!r.ok) { const t = await r.text(); setErr(t || r.statusText); return }
@@ -3924,11 +3870,10 @@ export default function Dashboard() {
     if (!selectedId) return
     // Guard: incomplete custom scope — do not send invalid request
     if (psIncomplete()) return
-    const qs = psScopeQS({ window: win, lang: lang || 'en' })
+    const qs = buildAnalysisQuery(psScopeQS, { lang, window: win, consolidate })
     if (qs === null) return   // toQueryString signals incomplete scope
-    const consolidateQS = consolidate ? '&consolidate=true' : ''
     setLoading(true); setError(null)
-    fetch(`${API}/analysis/${selectedId}/executive?${qs}${consolidateQS}`, { headers: getAuthHeaders() })
+    fetch(`${API}/analysis/${selectedId}/executive?${qs}`, { headers: getAuthHeaders() })
       .then(r => {
         if (!r.ok) return r.text().then(t => { throw new Error(t || r.statusText) })
         return r.json()
@@ -3940,12 +3885,15 @@ export default function Dashboard() {
       .catch(e => setError(e.message))
       .finally(() => setLoading(false))
     // Phase 6.4: fetch forecast alongside main load — read-only, no calc
-    fetch(`${API}/analysis/${selectedId}/forecast?${qs}`, { headers: getAuthHeaders() })
-      .then(r => r.ok ? r.json() : null)
-      .then(j => { if (j?.data) setFcData(j.data) })
-      .catch(() => {})  // silent — forecast is optional
+    const fqs = buildAnalysisQuery(psScopeQS, { lang, window: win, consolidate: false })
+    if (fqs !== null) {
+      fetch(`${API}/analysis/${selectedId}/forecast?${fqs}`, { headers: getAuthHeaders() })
+        .then(r => r.ok ? r.json() : null)
+        .then(j => { if (j?.data) setFcData(j.data) })
+        .catch(() => {})  // silent — forecast is optional
+    }
   // psScopeQS and psSetResolved are stable (refs-based) — safe as deps
-  }, [selectedId, win, consolidate, psScopeQS, psSetResolved, psIncomplete])
+  }, [selectedId, lang, win, consolidate, psScopeQS, psSetResolved, psIncomplete])
 
   // Only re-run when selectedId or window changes — NOT on every scope object change.
   // Scope is applied via the stable psScopeQS ref; no extra deps needed.

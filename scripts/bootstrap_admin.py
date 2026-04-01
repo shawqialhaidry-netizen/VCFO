@@ -5,7 +5,7 @@ Run from the project root (C:/VCFO/CFO/):
     python scripts/bootstrap_admin.py
 
 What it does:
-  1. Connects to the existing SQLite database
+  1. Connects via DATABASE_URL (PostgreSQL only)
   2. Creates the admin user (skips if email already exists)
   3. Finds the first active company (or accepts company_id as argument)
   4. Creates membership with role = owner (skips if already exists)
@@ -26,31 +26,20 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from sqlalchemy import create_engine, text
-from sqlalchemy.orm import sessionmaker
-
 from app.core.config import settings
+from app.core.database import Base, engine, SessionLocal
 from app.core.security import hash_password
 from app.models.company import Company
 from app.models.membership import Membership
 from app.models.user import User
-from app.core.database import Base
 
 
 def run(email: str, password: str, full_name: str, company_id: str | None = None):
-    if settings.DATABASE_URL.startswith("sqlite"):
-        engine = create_engine(
-            settings.DATABASE_URL,
-            connect_args={"check_same_thread": False},
-        )
-    else:
-        engine = create_engine(settings.DATABASE_URL)
     # Ensure all tables exist (safe — no-op if already there)
     from app.models import company, trial_balance, branch, user, membership  # noqa
     Base.metadata.create_all(bind=engine)
 
-    Session = sessionmaker(bind=engine)
-    db = Session()
+    db = SessionLocal()
 
     try:
         # ── 1. Find company ───────────────────────────────────────────────────

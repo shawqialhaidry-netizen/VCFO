@@ -15,6 +15,7 @@ import { useNavigate, useLocation } from 'react-router-dom'
 import { useLang }        from '../context/LangContext.jsx'
 import { useCompany }     from '../context/CompanyContext.jsx'
 import { usePeriodScope } from '../context/PeriodScopeContext.jsx'
+import { buildAnalysisQuery } from '../utils/buildAnalysisQuery.js'
 
 import { hasFlag, safeIncludes } from '../utils/dataGuards.js'
 import { kpiContextLabel, kpiLabel } from '../utils/kpiContext.js'
@@ -420,12 +421,11 @@ export default function Statements() {
   const load = useCallback(async () => {
     if(!selectedId) return
     if(isIncompleteCustom()) return
-    const qs = scopeQS({lang:lang||'en', window: win || 'ALL'})
+    const qs = buildAnalysisQuery(scopeQS, { lang, window: win, consolidate })
     if(qs===null) return
-    const consolidateQS = consolidate ? '&consolidate=true' : ''
     setLoading(true); setErr(null)
     try {
-      const r = await fetch(`${API}/analysis/${selectedId}/executive?${qs}${consolidateQS}`,{headers:auth()})
+      const r = await fetch(`${API}/analysis/${selectedId}/executive?${qs}`,{headers:auth()})
       if(!r.ok){setErr(`Error ${r.status}`);return}
       const json = await r.json()
       setData(json)
@@ -434,7 +434,7 @@ export default function Statements() {
     finally{setLoading(false)}
     // Phase 6.4: forecast — read-only, silent fail
     try {
-      const qs2 = scopeQS({lang:lang||'en', window: win || 'ALL'})
+      const qs2 = buildAnalysisQuery(scopeQS, { lang, window: win, consolidate: false })
       if(qs2 !== null) {
         const fr = await fetch(`${API}/analysis/${selectedId}/forecast?${qs2}`,{headers:auth()})
         if(fr.ok){ const fj=await fr.json(); if(fj?.data) setFcData(fj.data) }

@@ -1,20 +1,16 @@
 """
 migrate_add_tb_type.py
 ----------------------
-One-time schema migration: adds tb_type column to tb_uploads table.
+DEPRECATED: one-off SQLite-era migration (adds tb_type on tb_uploads).
 
-Cause:  Phase 2 fix (FIX-2.1) added tb_type to the TrialBalanceUpload
-        SQLAlchemy model, but the live SQLite table does not have the column yet.
+The application uses PostgreSQL only. Prefer Alembic + `scripts/db_migrate.py` on PostgreSQL.
+This script remains only for emergency use against a legacy SQLite file.
 
 Safe:   ALTER TABLE ... ADD COLUMN with a NULL default — no data is modified,
         no rows are deleted, existing uploads continue to work unchanged.
         tb_type = NULL means "unknown" (same as passing no tb_type on upload).
 
-Usage:
-    cd <project_root>          # directory that contains data/vcfo.db
-    python scripts/migrate_add_tb_type.py
-
-    # or with explicit DB path:
+Usage (legacy SQLite file only):
     python scripts/migrate_add_tb_type.py --db data/vcfo.db
 """
 import argparse

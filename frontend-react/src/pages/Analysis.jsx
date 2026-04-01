@@ -19,6 +19,7 @@ import { useCompany } from '../context/CompanyContext.jsx'
 import { usePeriodScope } from '../context/PeriodScopeContext.jsx'  // FIX-1.2
 import { kpiContextLabel, kpiLabel } from '../utils/kpiContext.js'
 import { formatCompact, formatFull, formatDual, formatPct, formatMultiple, formatDays } from '../utils/numberFormat.js'
+import { buildAnalysisQuery } from '../utils/buildAnalysisQuery.js'
 
 const API = '/api/v1'
 function auth() {
@@ -509,12 +510,11 @@ export default function Analysis() {
   const load = useCallback(async () => {
     if (!selectedId) return
     if (isIncompleteCustom()) return   // FIX-1.2: guard incomplete custom scope
-    const qs = scopeQS({ lang: lang||'en', window: win || 'ALL' })
+    const qs = buildAnalysisQuery(scopeQS, { lang, window: win, consolidate })
     if (qs === null) return            // FIX-1.2: null = incomplete scope, do not fetch
-    const consolidateQS = consolidate ? '&consolidate=true' : ''
     setLoading(true); setErr(null)
     try {
-      const r = await fetch(`${API}/analysis/${selectedId}/executive?${qs}${consolidateQS}`, {headers:auth()})
+      const r = await fetch(`${API}/analysis/${selectedId}/executive?${qs}`, {headers:auth()})
       if (!r.ok) {
         if (r.status === 422) {
           setErr(tr('err_no_financial_data'))
@@ -529,7 +529,7 @@ export default function Analysis() {
     } catch(e) { setErr(e.message) }
     // Phase 6.4: forecast — silent fail
     try {
-      const fqs = scopeQS({ lang: lang||'en', window: win || 'ALL' })
+      const fqs = buildAnalysisQuery(scopeQS, { lang, window: win, consolidate: false })
       if (fqs !== null) {
         const fr = await fetch(`${API}/analysis/${selectedId}/forecast?${fqs}`, {headers:auth()})
         if (fr.ok) { const fj = await fr.json(); if (fj?.data) setFcData(fj.data) }

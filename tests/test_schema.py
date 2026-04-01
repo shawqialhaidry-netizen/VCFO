@@ -19,9 +19,9 @@ def test_orm_model_has_tb_type():
 
 def test_create_all_includes_tb_type(setup_test_db):
     """create_all() must create tb_type column in the test DB."""
-    from app.core.database import Base
-    from tests.conftest import engine_test
-    insp = sa_inspect(engine_test)
+    from tests.conftest import get_engine_test
+
+    insp = sa_inspect(get_engine_test())
     cols = [c["name"] for c in insp.get_columns("tb_uploads")]
     assert "tb_type" in cols, (
         "create_all() did not create tb_type column — "

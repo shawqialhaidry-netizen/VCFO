@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 from typing import Optional
 
 from app.core.database import get_db
-from app.core.deps import require_company_access
+from app.core.deps import require_active_membership, require_company_access
 from app.models.trial_balance import TrialBalanceUpload
 from app.models.company import Company
 from app.services.financial_statements import build_statements, statements_to_dict
@@ -62,7 +62,6 @@ def _check_upload_access(company_id: str, current_user, db: Session):
     In dev mode (ENFORCE_MEMBERSHIP=False) with no user → pass through.
     """
     from app.core.config import settings
-    from app.models.membership import Membership
 
     enforce = getattr(settings, "ENFORCE_MEMBERSHIP", False)
     if not current_user:
@@ -71,14 +70,7 @@ def _check_upload_access(company_id: str, current_user, db: Session):
                                 detail="Authentication required")
         return  # dev mode pass-through
 
-    membership = db.query(Membership).filter(
-        Membership.user_id    == current_user.id,
-        Membership.company_id == company_id,
-        Membership.is_active  == True,  # noqa
-    ).first()
-    if not membership:
-        raise HTTPException(status_code=403,
-                            detail="Access denied: no membership for this company")
+    require_active_membership(db, current_user.id, company_id)
 
 
 # ── Helper ─────────────────────────────────────────────────────────────────────

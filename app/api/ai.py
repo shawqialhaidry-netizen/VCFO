@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config   import settings
 from app.core.database import get_db
+from app.core.deps import require_active_membership
 from app.core.security import get_current_user
 
 logger = logging.getLogger(__name__)
@@ -130,16 +131,7 @@ def post_advisor(
     4. Calls Anthropic server-side
     5. Returns structured answer + follow-up suggestions
     """
-    from app.models.membership import Membership
-
-    # ── Membership check ──────────────────────────────────────────────────────
-    mem = db.query(Membership).filter(
-        Membership.user_id    == current_user.id,
-        Membership.company_id == body.company_id,
-        Membership.is_active  == True,
-    ).first()
-    if not mem:
-        raise HTTPException(status_code=403, detail="Access denied")
+    require_active_membership(db, current_user.id, body.company_id)
 
     # ── Build advisor context ──────────────────────────────────────────────────
     try:
