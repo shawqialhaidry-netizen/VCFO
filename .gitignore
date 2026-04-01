@@ -1,0 +1,44 @@
+# ── Database & uploads (NEVER commit real data) ───────────────────────────────
+data/*.db
+data/*.db-wal
+data/*.db-shm
+data/uploads/
+
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+
+# ── Environment & secrets ─────────────────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+*.env
+
+# ── Frontend ──────────────────────────────────────────────────────────────────
+node_modules/
+frontend-react/dist/
+frontend-react/.env.local
+
+# ── OS / IDE ──────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ── Test artifacts ────────────────────────────────────────────────────────────
+.pytest_cache/
+htmlcov/
+.coverage
+coverage.xml
+
+# .env.example is safe to commit — it has no real secrets
+!.env.example

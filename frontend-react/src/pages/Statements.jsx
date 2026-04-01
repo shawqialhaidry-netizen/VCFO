@@ -1,0 +1,1073 @@
+/**
+ * Statements.jsx — UPGRADE 2
+ * Complete financial review: Statements + Analysis + Comparisons in one screen.
+ *
+ * Data source: /executive endpoint (single source of truth)
+ * - d.statements        → IS, BS, CF values + series
+ * - d.kpi_block         → MoM, YoY, series for comparisons
+ * - d.intelligence      → ratios, trends, health
+ * - d.decisions         → linked decisions
+ * - d.cashflow          → OCF quality + reliability
+ * - meta.pipeline_validation → data quality
+ */
+import React, { useState, useEffect, useCallback } from 'react'
+import { useNavigate, useLocation } from 'react-router-dom'
+import { useLang }        from '../context/LangContext.jsx'
+import { useCompany }     from '../context/CompanyContext.jsx'
+import { usePeriodScope } from '../context/PeriodScopeContext.jsx'
+
+import { hasFlag, safeIncludes } from '../utils/dataGuards.js'
+import { kpiContextLabel, kpiLabel } from '../utils/kpiContext.js'
+import { formatCompact, formatFull, formatDual, formatPct, formatMultiple, formatDays } from '../utils/numberFormat.js'
+
+const API = '/api/v1'
+function auth() {
+  try { const t=JSON.parse(localStorage.getItem('vcfo_auth')||'{}').token; return t?{Authorization:`Bearer ${t}`}:{} }
+  catch { return {} }
+}
+
+// ── Formatters ────────────────────────────────────────────────────────────────
+// fmtM → formatCompact (from numberFormat.js)
+const fmtP  = v => v==null?'—':`${Number(v).toFixed(1)}%`
+const fmtX  = v => v==null?'—':`${Number(v).toFixed(2)}x`
+const fmtD  = (v,base) => { if(v==null||base==null||base===0)return null; return v-base }
+const fmtDp = (v,base) => { if(v==null||base==null||base===0)return null; return ((v-base)/Math.abs(base))*100 }
+const arr   = v => v==null?'':v>0?'▲':v<0?'▼':'─'
+const clrV  = v => v==null?'var(--text-secondary)':v>0?'var(--green)':v<0?'var(--red)':'var(--text-secondary)'
+const clrVi = (v,inv) => inv?clrV(-v):clrV(v)  // inverted for costs
+const urgC  = {high:'var(--red)',medium:'var(--amber)',low:'var(--blue)',info:'var(--green)'}
+const domC  = {liquidity:'var(--blue)',profitability:'var(--green)',efficiency:'var(--violet)',leverage:'var(--amber)',growth:'var(--accent)'}
+
+// Phase 6.1: read insight text for a statement line — no calculation
+function stmtInsight(key, d, lang) {
+  const ar = lang === 'ar'
+  const trends  = d?.intelligence?.trends  || {}
+  const ratios  = d?.intelligence?.ratios  || {}
+  const ins     = d?.statements?.insights  || []
+  const findIns = k => ins.find(i => i.key === k)
+  const statusLabel = (st) => {
+    if (st === 'good')    return ar ? '✓ مستوى جيد'   : '✓ Healthy level'
+    if (st === 'warning') return ar ? '⚠ يحتاج متابعة' : '⚠ Needs attention'
+    if (st === 'risk')    return ar ? '✗ مستوى خطر'   : '✗ At risk'
+    return null
+  }
+  switch (key) {
+    case 'revenue': {
+      const dir = trends?.revenue?.direction
+      if (dir === 'up')     return ar ? '↑ إيرادات في اتجاه صاعد' : '↑ Revenue trending up'
+      if (dir === 'down')   return ar ? '↓ إيرادات في اتجاه هابط' : '↓ Revenue trending down'
+      if (dir === 'stable') return ar ? '→ إيرادات مستقرة'         : '→ Revenue stable'
+      return null
+    }
+    case 'net_profit': {
+      const st = ratios?.profitability?.net_margin_pct?.status
+      return statusLabel(st)
+    }
+    case 'cashflow': {
+      const ins2 = findIns('cashflow_positive')
+      return ins2 ? ins2.message.split('. ')[0] : null
+    }
+    case 'working_capital': {
+      const st = ratios?.liquidity?.working_capital?.status
+      return statusLabel(st)
+    }
+    default: return null
+  }
+}
+
+// Phase 6.2: cause text for statement lines — reads decisions/root_causes only
+function stmtCause(key, d, lang) {
+  const ar      = lang === 'ar'
+  const decs    = d?.decisions   || []
+  const causes  = d?.root_causes || []
+  const cf      = d?.cashflow    || {}
+  const ratios  = d?.intelligence?.ratios || {}
+  const decR    = domain => { const x=decs.find(v=>v.domain===domain); return x?.reason?x.reason.split('. ')[0]:null }
+  const rcT     = domain => { const c=causes.find(v=>v.domain===domain||v.domain==='cross_domain'); return c?.title||null }
+  const clip    = s => s && s.length > 60 ? s.slice(0,57)+'…' : s
+  switch(key) {
+    case 'revenue':        return clip(rcT('growth')      || decR('growth'))
+    case 'net_profit':     { const nm=ratios?.profitability?.net_margin_pct; return nm?.value!=null?`${ar?'الهامش':'Margin'} ${nm.value.toFixed(1)}% — ${nm.status==='good'?(ar?'جيد':'healthy'):nm.status==='warning'?(ar?'تحت المستهدف':'below target'):(ar?'خطر':'at risk')}`:null }
+    case 'cashflow':       { const flags=cf?.flags; return hasFlag(flags,'single_period')?(ar?'فترة واحدة — تقدير':'Single period — estimate'):null }
+    case 'working_capital':return clip(rcT('liquidity')   || decR('liquidity'))
+    default: return null
+  }
+}
+
+// Phase 6.4: forecast text helper — reads fcData.scenarios.base.[key][0]
+function stmtForecast(key, fcData, lang, fmtFn) {
+  if (!fcData?.available) return null
+  const next = (fcData?.scenarios?.base?.[key] || [])[0]
+  if (!next?.point) return null
+  const ar  = lang === 'ar'
+  const val = fmtFn ? fmtFn(next.point) : next.point.toFixed(0)
+  const dir = next.mom_applied > 0 ? '↑' : next.mom_applied < 0 ? '↓' : '→'
+  const conf= next.confidence != null ? ` (${ar?'ثقة':'conf.'} ${next.confidence}%)` : ''
+  return `${dir} ${val}${conf}`
+}
+
+// ── Shared badge ──────────────────────────────────────────────────────────────
+const Badge = ({label,color}) => (
+  <span style={{fontSize:9,fontWeight:800,padding:'2px 7px',borderRadius:20,
+    background:`${color}18`,color,border:`1px solid ${color}30`,
+    textTransform:'uppercase',letterSpacing:'.05em',flexShrink:0}}>
+    {label}
+  </span>
+)
+
+const Card = ({children,style={}}) => (
+  <div style={{
+    background:'var(--bg-panel)',
+    border:'1px solid var(--border)',
+    borderRadius:13,padding:'16px 18px',
+    transition:'box-shadow 0.2s ease, border-color 0.2s ease',
+    ...style
+  }}>{children}</div>
+)
+
+function SectionHead({label,color='var(--accent)',sub}) {
+  return (
+    <div style={{marginBottom:12}}>
+      <div style={{display:'flex',alignItems:'center',gap:8}}>
+        <div style={{width:20,height:2,background:color,borderRadius:2}}/>
+        <span style={{fontSize:10,fontWeight:800,color,textTransform:'uppercase',letterSpacing:'.08em'}}>{label}</span>
+      </div>
+      {sub&&<p style={{fontSize:11,color:'var(--text-secondary)',margin:'4px 0 0 28px',lineHeight:1.5}}>{sub}</p>}
+    </div>
+  )
+}
+
+// ── Comparison row: label | current | prior | variance | variance% ─────────
+function CmpRow({label,cur,prior,bold,color,invertColor,pct,onClick,indent}) {
+  const delta  = fmtD(cur,prior)
+  const deltap = fmtDp(cur,prior)
+  const dc     = invertColor ? clrVi(delta,true) : clrV(delta)
+  return (
+    <div onClick={onClick}
+      style={{display:'grid',gridTemplateColumns:'1fr 90px 90px 80px 70px',
+        gap:4,padding:'8px 0',borderBottom:'1px solid var(--border)',
+        cursor:onClick?'pointer':'default',alignItems:'center',
+        paddingLeft:indent?16:0}}>
+      <span style={{fontSize:bold?13:12,fontWeight:bold?700:400,
+        color:bold?'#fff':'var(--text-secondary)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+        {label}
+      </span>
+      {/* Current */}
+      <span style={{fontFamily:'var(--font-mono)',fontSize:bold?13:12,fontWeight:bold?800:500,
+        color:color||'var(--text-primary)',textAlign:'right',direction:'ltr'}}>
+        {pct?fmtP(cur):formatCompact(cur)}
+      </span>
+      {/* Prior */}
+      <span style={{fontFamily:'var(--font-mono)',fontSize:11,
+        color:'var(--text-secondary)',textAlign:'right',direction:'ltr'}}>
+        {prior!=null?(pct?fmtP(prior):formatCompact(prior)):'—'}
+      </span>
+      {/* Variance absolute */}
+      <span style={{fontFamily:'var(--font-mono)',fontSize:11,color:dc,textAlign:'right',direction:'ltr'}}>
+        {delta!=null?(delta>0?'+':'')+formatCompact(delta):'—'}
+      </span>
+      {/* Variance % */}
+      <span style={{fontFamily:'var(--font-mono)',fontSize:10,
+        color:dc,textAlign:'right',direction:'ltr'}}>
+        {deltap!=null?(deltap>0?'+':'')+deltap.toFixed(1)+'%':'—'}
+      </span>
+    </div>
+  )
+}
+
+// Column headers for comparison table
+function CmpHeader({lang,priorLabel,tr}) {
+  return (
+    <div style={{display:'grid',gridTemplateColumns:'1fr 90px 90px 80px 70px',
+      gap:4,padding:'5px 0 8px',borderBottom:'2px solid var(--border)'}}>
+      {['',
+        tr('cmp_current'),
+        priorLabel || tr('cmp_prior'),
+        tr('cmp_variance'),
+        '%'
+      ].map((h,i)=>(
+        <span key={i} style={{fontSize:9,fontWeight:700,color:'var(--text-secondary)',
+          textTransform:'uppercase',letterSpacing:'.06em',textAlign:i>0?'right':'left'}}>
+          {h}
+        </span>
+      ))}
+    </div>
+  )
+}
+
+// ── Summary KPI card ──────────────────────────────────────────────────────────
+function KpiCard({label,value,fullValue,mom,yoy,color,sub,badge,onClick,insight,cause,forecast}) {
+  const [hov,setHov] = useState(false)
+  return (
+    <div onClick={onClick}
+      onMouseEnter={()=>setHov(true)}
+      onMouseLeave={()=>setHov(false)}
+      style={{
+        background: hov ? `linear-gradient(160deg, rgba(255,255,255,0.03), var(--bg-panel))` : 'var(--bg-panel)',
+        borderWidth: '2px 1px 1px 1px',
+        borderStyle: 'solid',
+        borderColor: `${color} ${hov ? color+'50' : 'var(--border)'} ${hov ? color+'50' : 'var(--border)'} ${hov ? color+'50' : 'var(--border)'}`,
+        borderRadius:13,padding:'13px 15px',
+        cursor:onClick?'pointer':'default',
+        transition:'all 0.2s cubic-bezier(0.4,0,0.2,1)',
+        transform: hov && onClick ? 'translateY(-2px)' : 'none',
+        boxShadow: hov
+          ? `0 10px 28px rgba(0,0,0,0.45), 0 0 0 1px ${color}18`
+          : '0 2px 8px rgba(0,0,0,0.2)',
+      }}>
+      <div style={{fontSize:9,color:'var(--text-muted)',textTransform:'uppercase',
+        letterSpacing:'.07em',fontWeight:700,marginBottom:6,display:'flex',alignItems:'center',gap:6}}>
+        {label}
+        {badge&&<Badge label={badge} color='var(--amber)'/>}
+      </div>
+      <div style={{
+        fontFamily:'var(--font-display)',fontSize:22,fontWeight:800,
+        color:'#ffffff',marginBottom:5,direction:'ltr',lineHeight:1,
+        letterSpacing:'-0.02em',
+        textShadow: hov ? `0 0 20px ${color}40` : 'none',
+        transition:'text-shadow 0.2s',
+      }}>{value}</div>
+      {fullValue&&<div style={{fontFamily:'var(--font-mono)',fontSize:9,color:'var(--text-muted)',marginBottom:3,letterSpacing:'.02em',direction:'ltr'}}>{fullValue}</div>}
+      <div style={{display:'flex',alignItems:'center',gap:6,flexWrap:'wrap'}}>
+        {mom!=null&&<span style={{
+          fontFamily:'var(--font-mono)',fontSize:10,fontWeight:700,
+          color:clrV(mom),
+          padding:'1px 5px',borderRadius:8,
+          background:`${clrV(mom)}14`,
+        }}>
+          {arr(mom)} {Math.abs(mom).toFixed(1)}% MoM
+        </span>}
+        {yoy!=null&&<span style={{fontFamily:'var(--font-mono)',fontSize:9,color:clrV(yoy),opacity:.8}}>
+          {arr(yoy)} {Math.abs(yoy).toFixed(1)}% YoY
+        </span>}
+        {sub&&<span style={{fontSize:10,color:'var(--text-muted)'}}>{sub}</span>}
+      </div>
+      {/* Phase 6.1: insight line */}
+      {insight&&<div style={{fontSize:10,color:'var(--text-muted)',marginTop:6,
+        lineHeight:1.4,opacity:.8,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}
+        title={insight}>💡 {insight}</div>}
+      {/* Phase 6.2: cause line */}
+      {cause&&<div style={{fontSize:9,color:'var(--text-dim)',marginTop:2,
+        lineHeight:1.3,opacity:.65,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}
+        title={cause}>↳ {cause}</div>}
+      {/* Phase 6.4: forecast line */}
+      {forecast&&<div style={{fontSize:9,color:'var(--accent)',marginTop:3,
+        lineHeight:1.3,opacity:.7,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',
+        fontFamily:'var(--font-mono)'}} title={forecast}>📈 {forecast}</div>}
+    </div>
+  )
+}
+
+// ── Mini sparkline bar chart ──────────────────────────────────────────────────
+function Spark({data=[],color='var(--accent)',h=36}) {
+  if(!data||data.length<2) return null
+  const vals = data.filter(v=>v!=null)
+  if(!vals.length) return null
+  const min = Math.min(...vals), max = Math.max(...vals)
+  const range = max-min||1
+  const w = 6, gap = 3
+  const total = data.length*(w+gap)-gap
+  return (
+    <svg width={total} height={h} style={{display:'block'}}>
+      {data.map((v,i)=>{
+        if(v==null)return null
+        const barH = Math.max(2,((v-min)/range)*(h-4))
+        const x = i*(w+gap)
+        return <rect key={i} x={x} y={h-barH} width={w} height={barH}
+          rx={2} fill={color} opacity={i===data.length-1?1:0.5}/>
+      })}
+    </svg>
+  )
+}
+
+// ── Insight card ──────────────────────────────────────────────────────────────
+function InsightCard({ins,onClick,lang}) {
+  const uc = urgC[ins.severity]||'var(--text-secondary)'
+  const l = lang||'en'
+  return (
+    <div onClick={onClick}
+      style={{background:'var(--bg-elevated)',border:`1px solid ${uc}20`,
+        borderLeft:`3px solid ${uc}`,borderRadius:9,padding:'11px 13px',
+        cursor:'pointer',transition:'background .12s',marginBottom:6}}
+      onMouseEnter={e=>{e.currentTarget.style.background='var(--bg-panel)';e.currentTarget.style.transform='translateX(2px)'}}
+      onMouseLeave={e=>{e.currentTarget.style.background='var(--bg-elevated)';e.currentTarget.style.transform='none'}}>
+      <div style={{display:'flex',alignItems:'center',gap:7,marginBottom:5}}>
+        <Badge label={ins.severity} color={uc}/>
+        <Badge label={ins.domain||''} color={domC[ins.domain]||'var(--accent)'}/>
+        <span style={{marginLeft:'auto',fontSize:9,color:'var(--accent)'}}>→</span>
+      </div>
+      <p style={{fontSize:11,color:'var(--text-secondary)',lineHeight:1.6,margin:0}}>{ins.message}</p>
+    </div>
+  )
+}
+
+// ── Ratio row ─────────────────────────────────────────────────────────────────
+function RatioRow({label,value,status,unit}) {
+  const sc = status==='good'?'var(--green)':status==='warning'?'var(--amber)':'var(--red)'
+  return (
+    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',
+      padding:'8px 0',borderBottom:'1px solid var(--border)'}}>
+      <span style={{fontSize:11,color:'var(--text-secondary)'}}>{label}</span>
+      <span style={{fontFamily:'var(--font-mono)',fontSize:13,fontWeight:700,color:sc,direction:'ltr'}}>
+        {value!=null?`${Number(value).toFixed(2)}${unit||''}` :'—'}
+      </span>
+    </div>
+  )
+}
+
+// ── Context side panel ────────────────────────────────────────────────────────
+function ContextPanel({item,decs,tr,lang,onClose}) {
+  if(!item) return null
+  const l = lang||'en'
+  const uc = urgC[item.severity]||'var(--text-secondary)'
+  const linked = (decs||[]).filter(d=>d.domain===item.domain).slice(0,2)
+  return (
+    <div style={{position:'fixed',inset:0,zIndex:900,display:'flex'}}
+      onClick={onClose}>
+      <div style={{flex:1}}/>
+      <div style={{width:420,background:'var(--bg-surface)',
+        borderLeft:'1px solid var(--border-bright)',
+        padding:24,overflowY:'auto',animation:'slideIn .25s ease',
+        boxShadow:'-20px 0 60px rgba(0,0,0,.6)',}}
+        onClick={e=>e.stopPropagation()}>
+        <div style={{display:'flex',justifyContent:'space-between',marginBottom:16}}>
+          <div style={{display:'flex',gap:8}}>
+            <Badge label={item.severity||'info'} color={uc}/>
+            {item.domain&&<Badge label={item.domain} color={domC[item.domain]||'var(--accent)'}/>}
+          </div>
+          <button onClick={onClose} style={{background:'transparent',border:'none',
+            color:'var(--text-secondary)',fontSize:18,cursor:'pointer'}}>✕</button>
+        </div>
+        <p style={{fontSize:13,color:'var(--text-secondary)',lineHeight:1.7,marginBottom:16}}>{item.message}</p>
+        {item.why&&<div style={{fontSize:12,color:'var(--text-secondary)',lineHeight:1.6,marginBottom:12}}>
+          <strong style={{color:'#fff'}}>{tr('why_label')}</strong>{item.why}
+        </div>}
+        {item.recommendation&&<div style={{padding:'10px 12px',background:'rgba(99,102,241,.08)',
+          border:'1px solid rgba(99,102,241,.2)',borderRadius:8,fontSize:12,
+          color:'var(--accent)',lineHeight:1.6,marginBottom:16}}>
+          💡 {item.recommendation}
+        </div>}
+        {linked.length>0&&<>
+          <div style={{fontSize:10,fontWeight:700,color:'var(--text-secondary)',
+            textTransform:'uppercase',letterSpacing:'.06em',marginBottom:8}}>
+            {tr('linked_decisions')}
+          </div>
+          {linked.map((d,i)=>(
+            <div key={i} style={{padding:'10px 12px',background:'var(--bg-elevated)',
+              borderRadius:9,fontSize:12,color:'var(--text-secondary)',lineHeight:1.6,
+              marginBottom:6,border:'1px solid var(--border)'}}>
+              {d.title||d.action}
+            </div>
+          ))}
+        </>}
+        <button onClick={onClose}
+          style={{width:'100%',marginTop:16,padding:'9px',borderRadius:8,border:'none',
+            background:'var(--bg-elevated)',color:'var(--text-secondary)',fontSize:13,cursor:'pointer'}}>
+          {tr('close')}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ── Data Quality Banner ───────────────────────────────────────────────────────
+function DataQualityBanner({validation,lang,tr}) {
+  if(!validation) return null
+  const {consistent,warnings=[],has_errors,has_info} = validation
+  if(consistent===true&&!has_info) return null
+  const color = has_errors?'var(--red)':'var(--amber)'
+  const bg    = has_errors?'rgba(248,113,113,0.06)':'rgba(251,191,36,0.06)'
+  const bdr   = has_errors?'rgba(248,113,113,0.25)':'rgba(251,191,36,0.25)'
+  return (
+    <div style={{padding:'8px 14px',borderRadius:9,marginBottom:10,
+      background:bg,borderWidth:'1px 1px 1px 3px',borderStyle:'solid',borderColor:`${bdr} ${bdr} ${bdr} ${color}`,
+      display:'flex',flexWrap:'wrap',alignItems:'center',gap:10}}>
+      <span style={{fontSize:12}}>{has_errors?'⚠':'ℹ'}</span>
+      <span style={{fontSize:10,fontWeight:800,color,letterSpacing:'.04em'}}>
+        {has_errors ? tr('dq_warning_title') : tr('dq_notice_title')}:
+      </span>
+      {warnings.map((w,i)=>{return(
+        <span key={i} style={{fontSize:10,color:'var(--text-secondary)'}}>
+          · {tr(`dq_${w.code}`)}
+        </span>
+      )})}
+    </div>
+  )
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  Main Component
+// ══════════════════════════════════════════════════════════════════════════════
+export default function Statements() {
+  const { tr, lang } = useLang()
+  const ctxLabel = () => kpiContextLabel({ window: 'ALL', ps: ps||{}, latestPeriod: data?.meta?.periods?.slice(-1)[0] || '', lang, tr })
+  const { selectedId, selectedCompany } = useCompany()
+  const { params: ps, toQueryString:scopeQS, setResolved, isIncompleteCustom, window: win } = usePeriodScope()
+  const navigate = useNavigate()
+  const location = useLocation()
+
+  const [data,    setData]    = useState(null)
+  const [loading, setLoading] = useState(false)
+  const [consolidate, setConsolidate] = useState(false)
+  const [err,     setErr]     = useState(null)
+  const [fcData,  setFcData]  = useState(null)
+  const [tab,     setTab]     = useState('income')
+  const [panel,   setPanel]   = useState(null)
+  const [cmpMode, setCmpMode] = useState('mom') // mom | yoy | prior_ytd
+
+  useEffect(()=>{ if(location.state?.focus) setTab(location.state.focus) },[location.state])
+
+  const load = useCallback(async () => {
+    if(!selectedId) return
+    if(isIncompleteCustom()) return
+    const qs = scopeQS({lang:lang||'en', window: win || 'ALL'})
+    if(qs===null) return
+    const consolidateQS = consolidate ? '&consolidate=true' : ''
+    setLoading(true); setErr(null)
+    try {
+      const r = await fetch(`${API}/analysis/${selectedId}/executive?${qs}${consolidateQS}`,{headers:auth()})
+      if(!r.ok){setErr(`Error ${r.status}`);return}
+      const json = await r.json()
+      setData(json)
+      setResolved(json.meta?.scope||null)
+    } catch(e){setErr(e.message)}
+    finally{setLoading(false)}
+    // Phase 6.4: forecast — read-only, silent fail
+    try {
+      const qs2 = scopeQS({lang:lang||'en', window: win || 'ALL'})
+      if(qs2 !== null) {
+        const fr = await fetch(`${API}/analysis/${selectedId}/forecast?${qs2}`,{headers:auth()})
+        if(fr.ok){ const fj=await fr.json(); if(fj?.data) setFcData(fj.data) }
+      }
+    } catch(_){}
+  },[selectedId,lang,consolidate,win,scopeQS,setResolved,isIncompleteCustom])
+
+  useEffect(()=>{ load() },[selectedId,load])
+
+  // ── Data extraction (single source of truth) ─────────────────────────────
+  const d       = data?.data || {}
+  const stmts   = d.statements || {}
+  const is_     = stmts.income_statement || {}
+  const bs_     = stmts.balance_sheet    || {}
+  const cf_     = stmts.cashflow         || {}
+  const smry    = stmts.summary          || {}
+  const ser     = stmts.series           || {}
+  const insights= stmts.insights         || []
+  const decs    = d.decisions            || []
+  const kpis    = d.kpi_block?.kpis      || {}
+  const series  = d.kpi_block?.series    || {}
+  const intel   = d.intelligence         || {}
+  const ratios  = intel.ratios           || {}
+  const trends  = intel.trends           || {}
+  const health  = d.health_score_v2
+  const validation = data?.meta?.pipeline_validation
+  const period  = stmts.period || data?.meta?.periods?.slice(-1)[0] || '—'
+
+  const cfReliability = cf_.reliability || 'estimated'
+  const cfEstimated   = cfReliability === 'estimated'
+  const bsWarning     = bs_.balance_warning
+
+  // Prior period from kpi_block series
+  const serLen    = (series.revenue||[]).length
+  const priorIdx  = serLen >= 2 ? serLen-2 : null
+  const prior     = {
+    revenue:    priorIdx!=null ? series.revenue?.[priorIdx]    : null,
+    net_profit: priorIdx!=null ? series.net_profit?.[priorIdx] : null,
+    cashflow:   priorIdx!=null ? (d.kpi_block?.mom_series?.ocf?.[priorIdx]||null) : null,
+  }
+
+  // Comparison label for header
+  const priorLabel = tr(`cmp_${cmpMode}`)
+
+  // MoM values from kpi_block
+  const momRev = kpis.revenue?.mom_pct
+  const momNp  = kpis.net_profit?.mom_pct
+  const yoyRev = kpis.revenue?.yoy_pct
+  const yoyNp  = kpis.net_profit?.yoy_pct
+
+  // Health color
+  const healthC = health!=null?(health>=80?'var(--green)':health>=60?'var(--amber)':'var(--red)'):'var(--text-secondary)'
+
+  const cfFlagClr = cf_.reliability==='good'?'var(--green)':cf_.reliability==='warning'?'var(--amber)':'var(--red)'
+
+  const TABS = [
+    { k:'income',   label:tr('stmt_section_is') },
+    { k:'balance',  label:tr('stmt_section_bs') },
+    { k:'cashflow', label:tr('cashflow_operating') },
+    { k:'insights', label:tr('analysis_top_issues'),
+      badge:insights.filter(x=>x.severity==='high').length||null },
+  ]
+
+  const l = lang||'en'
+
+  if(!selectedId) return (
+    <div style={{display:'flex',alignItems:'center',justifyContent:'center',
+      height:'60vh',flexDirection:'column',gap:12,background:'var(--bg-void)'}}>
+      <span style={{fontSize:40,opacity:.2}}>📊</span>
+      <span style={{fontSize:14,color:'var(--text-secondary)'}}>{tr('gen_select_company')}</span>
+    </div>
+  )
+
+  return (
+    <div className="" style={{padding:'16px 24px',display:'flex',flexDirection:'column',
+      gap:12,minHeight:'calc(100vh - 62px)',background:'var(--bg-void)'}}>
+      <style>{`@keyframes slideIn{from{transform:translateX(100%);opacity:0}to{transform:translateX(0);opacity:1}}`}</style>
+
+      {/* ── Header ──────────────────────────────────────────────────────── */}
+      <div style={{display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
+        <div style={{flex:1}}>
+          <h1 style={{fontSize:20,fontWeight:800,color:'#fff',margin:0}}>
+            {tr('stmt_page_title')}
+          </h1>
+          <p style={{fontSize:11,color:'var(--text-secondary)',margin:'3px 0 0'}}>
+            {selectedCompany?.name} · {period}
+          </p>
+        </div>
+        {/* Comparison mode selector */}
+        <div style={{display:'flex',gap:3,background:'var(--bg-elevated)',
+          borderRadius:8,padding:2}}>
+          {[['mom',tr('cmp_mom_short')],['yoy',tr('cmp_yoy_short')]].map(([k,lbl])=>(
+            <button key={k} onClick={()=>setCmpMode(k)}
+              style={{padding:'4px 12px',borderRadius:7,border:'none',fontSize:10,
+                fontWeight:700,cursor:'pointer',transition:'all .15s',
+                background:cmpMode===k?'var(--bg-panel)':'transparent',
+                color:cmpMode===k?'#fff':'var(--text-secondary)'}}>
+              {lbl}
+            </button>
+          ))}
+        </div>
+        {[['← '+tr('nav_executive'),'/executive'],['↗ '+tr('nav_analysis'),'/analysis']].map(([lbl,path])=>(
+          <button key={path} onClick={()=>navigate(path)}
+            style={{padding:'6px 12px',borderRadius:8,border:'1px solid var(--border)',
+              background:'var(--bg-elevated)',color:'#aab4c3',fontSize:11,cursor:'pointer'}}>
+            {lbl}
+          </button>
+        ))}
+        <button onClick={load} disabled={loading}
+          style={{padding:'6px 11px',borderRadius:8,border:'1px solid var(--border)',
+            background:'var(--bg-elevated)',color:'#aab4c3',fontSize:12,cursor:'pointer'}}>
+          {loading?'…':'↻'}
+        </button>
+          {/* ── Data Source Toggle ── */}
+          <div style={{display:'flex',alignItems:'center',gap:0,background:'var(--bg-elevated)',
+            border:'1px solid var(--border)',borderRadius:8,overflow:'hidden',flexShrink:0}}>
+            {[{v:false,l:tr('company_uploads')},{v:true,l:tr('branch_consolidation')}].map(opt=>(
+              <button key={String(opt.v)} onClick={()=>{setConsolidate(opt.v);setData(null)}}
+                style={{padding:'5px 12px',fontSize:11,fontWeight:600,border:'none',cursor:'pointer',
+                  background: consolidate===opt.v ? 'var(--accent)' : 'transparent',
+                  color:      consolidate===opt.v ? '#000' : 'var(--text-secondary)',
+                  transition: 'all .15s', whiteSpace:'nowrap'}}>
+                {opt.l}
+              </button>
+            ))}
+          </div>
+      </div>
+
+
+      {/* ── Data Source Banner ── */}
+      {data && (
+        <div style={{display:'flex',alignItems:'center',gap:8,padding:'6px 12px',
+          borderRadius:8,fontSize:11,marginBottom:2,
+          background: consolidate ? 'rgba(0,212,170,.07)' : 'rgba(59,158,255,.07)',
+          border: `1px solid ${consolidate ? 'rgba(0,212,170,.27)' : 'rgba(59,158,255,.27)'}`,
+        }}>
+          <span style={{fontWeight:700,color: consolidate ? 'var(--accent)' : 'var(--blue)'}}>
+            {consolidate ? '⊞' : '⊟'}
+          </span>
+          <span style={{color: consolidate ? 'var(--accent)' : 'var(--blue)', fontWeight:600}}>
+            {tr('data_source')}:
+          </span>
+          <span style={{color:'var(--text-secondary)'}}>
+            {consolidate ? tr('branch_consolidation') : tr('company_uploads')}
+          </span>
+          {consolidate && (
+            <span style={{marginLeft:8,padding:'2px 8px',borderRadius:4,fontSize:10,
+              background:'rgba(251,191,36,.12)',color:'#fbbf24',border:'1px solid rgba(251,191,36,.25)',
+              fontWeight:600}}>
+              {tr('no_elimination')} · {tr('no_currency_conversion')} · {tr('simplified_consolidation')}
+            </span>
+          )}
+        </div>
+      )}
+      {err&&<div style={{padding:'10px 14px',background:'rgba(248,113,113,.1)',
+        border:'1px solid var(--red)',borderRadius:9,fontSize:12,color:'var(--red)'}}>
+        ⚠ {err}
+      </div>}
+
+      {loading&&!data&&(
+        <div style={{display:'flex',flexDirection:'column',gap:12,paddingTop:8}}>
+          <div style={{display:'grid',gridTemplateColumns:'repeat(5,1fr)',gap:8}}>
+            {[1,2,3,4,5].map(i=>(
+              <div key={i} style={{background:'var(--bg-panel)',borderRadius:13,padding:'16px',borderTop:'2px solid var(--border)'}}>
+                <div className="skeleton skeleton-text" style={{width:'60%',marginBottom:10}}/>
+                <div className="skeleton skeleton-num" style={{marginBottom:8}}/>
+                <div className="skeleton skeleton-text" style={{width:'40%'}}/>
+              </div>
+            ))}
+          </div>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 300px',gap:14}}>
+            <div style={{background:'var(--bg-panel)',borderRadius:13,padding:'20px'}}>
+              <div className="skeleton skeleton-text" style={{width:'30%',marginBottom:16}}/>
+              {[1,2,3,4,5].map(i=><div key={i} className="skeleton skeleton-text" style={{marginBottom:10}}/>)}
+            </div>
+            <div style={{display:'flex',flexDirection:'column',gap:10}}>
+              {[1,2].map(i=>(
+                <div key={i} style={{background:'var(--bg-panel)',borderRadius:13,padding:'16px'}}>
+                  <div className="skeleton skeleton-text" style={{width:'50%',marginBottom:10}}/>
+                  <div className="skeleton skeleton-chart" style={{height:80}}/>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Data quality banner ──────────────────────────────────────── */}
+      {data&&<DataQualityBanner validation={validation} lang={l} tr={tr}/>}
+
+      {data&&stmts.available&&(<>
+
+        {/* ── TOP SUMMARY ROW (UPGRADE 2) ─────────────────────────── */}
+        <div style={{display:'grid',gridTemplateColumns:'repeat(5,1fr)',gap:8}}>
+          <KpiCard label={tr('fc_revenue')}
+            value={formatCompact(smry.revenue)}
+            fullValue={formatFull(smry.revenue)}
+            mom={cmpMode==='mom'?momRev:null}
+            yoy={cmpMode==='yoy'?yoyRev:null}
+            color='var(--accent)'
+            insight={stmtInsight('revenue',data?.data,l)}
+            cause={stmtCause('revenue',data?.data,l)}
+            forecast={stmtForecast('revenue',fcData,l,formatCompact)}
+            onClick={()=>setTab('income')}/>
+          <KpiCard label={tr('fc_net_profit')}
+            value={formatCompact(smry.net_profit)}
+            fullValue={formatFull(smry.net_profit)}
+            mom={cmpMode==='mom'?momNp:null}
+            yoy={cmpMode==='yoy'?yoyNp:null}
+            color={smry.net_profit>=0?'var(--green)':'var(--red)'}
+            sub={smry.net_margin_pct!=null?fmtP(smry.net_margin_pct):null}
+            insight={stmtInsight('net_profit',data?.data,l)}
+            cause={stmtCause('net_profit',data?.data,l)}
+            forecast={stmtForecast('net_profit',fcData,l,formatCompact)}
+            onClick={()=>setTab('income')}/>
+          <KpiCard label={tr('cashflow_operating')}
+            value={formatCompact(smry.operating_cashflow)}
+            fullValue={formatFull(smry.operating_cashflow)}
+            mom={cmpMode==='mom'?cf_.operating_cashflow_mom:null}
+            color={cfFlagClr}
+            badge={cfEstimated?tr('label_estimated_short'):null}
+            insight={stmtInsight('cashflow',data?.data,l)}
+            cause={stmtCause('cashflow',data?.data,l)}
+            onClick={()=>setTab('cashflow')}/>
+          <KpiCard label={tr('working_capital')}
+            value={formatCompact(smry.working_capital)}
+            fullValue={formatFull(smry.working_capital)}
+            color={smry.working_capital>=0?'var(--green)':'var(--red)'}
+            sub={smry.working_capital<0?tr('wc_negative'):null}
+            insight={stmtInsight('working_capital',data?.data,l)}
+            cause={stmtCause('working_capital',data?.data,l)}
+            onClick={()=>setPanel(insights.find(x=>x.key==='negative_working_capital')||null)}/>
+          {/* Health card */}
+          <div style={{background:'var(--bg-panel)',border:'1px solid var(--border)',
+            borderTop:`2px solid ${healthC}`,borderRadius:11,padding:'13px 15px',
+            display:'flex',flexDirection:'column',justifyContent:'center',alignItems:'center',gap:4}}>
+            <div style={{fontSize:9,color:'var(--text-secondary)',textTransform:'uppercase',
+              letterSpacing:'.06em',fontWeight:700,marginBottom:4}}>
+              {tr('health_score')}
+            </div>
+            <div style={{fontFamily:'var(--font-mono)',fontSize:26,fontWeight:900,
+              color:healthC,direction:'ltr'}}>
+              {health!=null?health:'—'}
+            </div>
+            <div style={{fontSize:9,color:healthC,fontWeight:600}}>
+              {health!=null?tr(`health_tier_${health>=80?'excellent':health>=60?'good':health>=40?'warning':'risk'}`):'—'}
+            </div>
+            {(validation?.has_errors||validation?.has_info)&&(
+              <div style={{fontSize:9,color:'var(--amber)',marginTop:2}}>⚠ {tr('data_issues')}</div>
+            )}
+          </div>
+        </div>
+
+        {/* High-severity alert strip */}
+        {insights.filter(x=>x.severity==='high').length>0&&(
+          <div style={{padding:'9px 14px',background:'rgba(248,113,113,.07)',
+            border:'1px solid rgba(248,113,113,.25)',borderRadius:9,
+            display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
+            <span style={{fontSize:12,fontWeight:700,color:'var(--red)',flexShrink:0}}>🚨</span>
+            {insights.filter(x=>x.severity==='high').slice(0,3).map((ins,i)=>(
+              <button key={i} onClick={()=>setPanel(ins)}
+                style={{fontSize:10,color:'var(--red)',background:'rgba(248,113,113,.1)',
+                  padding:'3px 10px',borderRadius:20,border:'1px solid rgba(248,113,113,.22)',
+                  cursor:'pointer'}}>
+                {ins.message.slice(0,55)}{ins.message.length>55?'…':''} →
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* ── Tabs ─────────────────────────────────────────────────── */}
+        <div style={{display:'flex',gap:4,background:'var(--bg-elevated)',
+          borderRadius:10,padding:3,width:'fit-content'}}>
+          {TABS.map(t=>(
+            <button key={t.k} onClick={()=>setTab(t.k)}
+              style={{padding:'6px 16px',borderRadius:8,border:'none',fontSize:11,fontWeight:700,
+                cursor:'pointer',transition:'all .15s',position:'relative',
+                background:tab===t.k?'var(--bg-panel)':'transparent',
+                color:tab===t.k?'#fff':'var(--text-secondary)'}}>
+              {t.label}
+              {t.badge>0&&<span style={{position:'absolute',top:2,right:2,
+                width:6,height:6,borderRadius:'50%',background:'var(--red)'}}/>}
+            </button>
+          ))}
+        </div>
+
+        {/* ════════════════════════════════════════════════════════════
+            INCOME STATEMENT TAB — with comparison + linked analysis
+        ════════════════════════════════════════════════════════════ */}
+        {tab==='income'&&(
+          <div style={{display:'grid',gridTemplateColumns:'1fr 300px',gap:14}}>
+            <Card>
+              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:12}}>
+                <SectionHead label={tr('stmt_section_is')} color='var(--accent)' sub={period}/>
+                <div style={{display:'flex',gap:6,alignItems:'center'}}>
+                  <Spark data={series.revenue?.slice(-8)} color='var(--accent)'/>
+                </div>
+              </div>
+              <CmpHeader lang={l} priorLabel={priorLabel} tr={tr}/>
+              <CmpRow label={tr('fc_revenue')}
+                cur={is_.revenue} prior={prior.revenue}
+                bold color='var(--accent)'
+                onClick={()=>setPanel(insights.find(x=>x.domain==='growth')||null)}/>
+              <CmpRow label={tr('cogs')}
+                cur={is_.cogs} prior={null} invertColor/>
+              <CmpRow label={tr('stmt_bridge_gross')}
+                cur={is_.gross_profit} prior={null}
+                bold color='var(--green)'/>
+              <CmpRow label={tr('stmt_bridge_opex')}
+                cur={is_.operating_expenses} prior={null} invertColor/>
+              <CmpRow label={tr('stmt_bridge_op')}
+                cur={is_.operating_profit} prior={null} bold/>
+              {is_.tax!=null&&<CmpRow label={tr('stmt_bridge_tax')}
+                cur={is_.tax} prior={null} invertColor/>}
+              <CmpRow label={tr('fc_net_profit')}
+                cur={is_.net_profit} prior={prior.net_profit}
+                bold color={is_.net_profit>=0?'var(--green)':'var(--red)'}
+                onClick={()=>setPanel(insights.find(x=>x.key==='low_net_margin')||null)}/>
+            </Card>
+
+            {/* Right panel: margins + ratios + insights */}
+            <div style={{display:'flex',flexDirection:'column',gap:10}}>
+              <Card>
+                <SectionHead label={tr('margins')} color='var(--green)'/>
+                {[
+                  {l:tr('gross_margin'),v:is_.gross_margin_pct,
+                   c:is_.gross_margin_pct>=30?'var(--green)':is_.gross_margin_pct>=15?'var(--amber)':'var(--red)'},
+                  {l:tr('net_margin'),v:is_.net_margin_pct,
+                   c:is_.net_margin_pct>=10?'var(--green)':is_.net_margin_pct>=5?'var(--amber)':'var(--red)'},
+                  {l:tr('operating_margin'),
+                   v:is_.operating_profit&&is_.revenue?(is_.operating_profit/is_.revenue*100):null,
+                   c:'var(--accent)'},
+                ].map(({l:lbl,v,c})=>(
+                  <div key={lbl} style={{display:'flex',justifyContent:'space-between',
+                    padding:'7px 0',borderBottom:'1px solid var(--border)'}}>
+                    <span style={{fontSize:11,color:'var(--text-secondary)'}}>{lbl}</span>
+                    <span style={{fontFamily:'var(--font-mono)',fontSize:13,fontWeight:700,color:c}}>{fmtP(v)}</span>
+                  </div>
+                ))}
+              </Card>
+
+              {/* Profitability ratios from intelligence */}
+              {ratios.profitability&&<Card>
+                <SectionHead label={tr('profitability')} color='var(--violet)'/>
+                {[
+                  [tr('net_margin'), ratios.profitability?.net_margin_pct?.value, ratios.profitability?.net_margin_pct?.status, '%'],
+                  [tr('gross_margin'), ratios.profitability?.gross_margin_pct?.value, ratios.profitability?.gross_margin_pct?.status, '%'],
+                ].map(([label,v,st,unit])=>(
+                  <RatioRow key={label} label={label} value={v} status={st} unit={unit}/>
+                ))}
+              </Card>}
+
+              {/* Linked insights — profitability */}
+              {insights.filter(x=>x.domain==='profitability'||x.domain==='growth').slice(0,2).map((ins,i)=>(
+                <InsightCard key={i} ins={ins} onClick={()=>setPanel(ins)} lang={l}/>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ════════════════════════════════════════════════════════════
+            BALANCE SHEET TAB — with ratios + linked analysis
+        ════════════════════════════════════════════════════════════ */}
+        {tab==='balance'&&(
+          <div style={{display:'grid',gridTemplateColumns:'1fr 300px',gap:14}}>
+            <Card>
+              <SectionHead label={tr('stmt_section_bs')} color='var(--blue)' sub={period}/>
+              <CmpHeader lang={l} priorLabel={tr('na_label')} tr={tr}/>
+
+              {/* Assets section */}
+              <div style={{fontSize:10,fontWeight:700,color:'var(--blue)',
+                textTransform:'uppercase',letterSpacing:'.06em',margin:'8px 0 4px'}}>
+                {tr('assets')}
+              </div>
+              <CmpRow label={tr('current_assets')}
+                cur={bs_.current_assets} prior={null} color='var(--blue)'/>
+              <CmpRow label={tr('noncurrent_assets')}
+                cur={bs_.noncurrent_assets} prior={null} indent/>
+              <CmpRow label={tr('total_assets')}
+                cur={bs_.total_assets} prior={null} bold color='var(--blue)'/>
+
+              {/* Liabilities section */}
+              <div style={{fontSize:10,fontWeight:700,color:'var(--red)',
+                textTransform:'uppercase',letterSpacing:'.06em',margin:'12px 0 4px'}}>
+                {tr('liabilities')}
+              </div>
+              <CmpRow label={tr('current_liabilities')}
+                cur={bs_.current_liabilities} prior={null} invertColor/>
+              <CmpRow label={tr('noncurrent_liabilities')}
+                cur={bs_.noncurrent_liabilities} prior={null} invertColor indent/>
+              <CmpRow label={tr('total_liabilities')}
+                cur={bs_.total_liabilities} prior={null} bold color='var(--red)' invertColor/>
+
+              {/* Equity */}
+              <CmpRow label={tr('equity')}
+                cur={bs_.total_equity} prior={null} bold color='var(--green)'/>
+
+              {/* Working Capital — highlighted */}
+              <div style={{marginTop:10,paddingTop:10,borderTop:'2px solid var(--border)'}}>
+                <CmpRow label={tr('working_capital')}
+                  cur={bs_.working_capital} prior={null} bold
+                  color={bs_.working_capital>=0?'var(--green)':'var(--red)'}
+                  onClick={bs_.working_capital<0?()=>setPanel(insights.find(x=>x.key==='negative_working_capital')||null):null}/>
+              </div>
+
+              {/* Balance check — BS only (assets == liabilities + equity) */}
+              <div style={{marginTop:10,padding:'10px 12px',borderRadius:8,
+                background:bs_.is_balanced?'rgba(34,197,94,.05)':'rgba(251,191,36,.05)',
+                border:`1px solid ${bs_.is_balanced?'rgba(34,197,94,.25)':'rgba(251,191,36,.25)'}`}}>
+
+                <div style={{display:'flex',alignItems:'center',gap:8}}>
+                  <span style={{fontSize:15}}>{bs_.is_balanced?'✅':'⚠️'}</span>
+                  <span style={{fontSize:11,fontWeight:700,
+                    color:bs_.is_balanced?'var(--green)':'var(--amber)'}}>
+                    {bs_.is_balanced ? tr('bs_balanced_msg') : tr('bs_not_balanced_msg')}
+                  </span>
+                  {bs_.balance_diff!=null&&!bs_.is_balanced&&(
+                    <span style={{fontFamily:'var(--font-mono)',fontSize:10,
+                      color:'var(--amber)',marginLeft:'auto'}}>
+                      Δ {formatCompact(bs_.balance_diff)}
+                    </span>
+                  )}
+                </div>
+
+                {/* Explain WHY unbalanced */}
+                {!bs_.is_balanced&&(
+                  <div style={{marginTop:8,fontSize:10,color:'var(--text-secondary)',
+                    lineHeight:1.6,paddingLeft:24}}>
+                    {safeIncludes(bs_.balance_warning,'tb_type_unknown')
+                      ? tr('bs_unbalanced_cause_tb_type')
+                      : tr('bs_unbalanced_cause_other')}
+                  </div>
+                )}
+
+                {/* TB check is separate */}
+                <div style={{marginTop:6,fontSize:9,color:'var(--text-secondary)',
+                  paddingLeft:24,opacity:.8}}>
+                  {tr('bs_check_note')}
+                </div>
+              </div>
+            </Card>
+
+            {/* Right panel: liquidity + leverage ratios + insights */}
+            <div style={{display:'flex',flexDirection:'column',gap:10}}>
+              <Card>
+                <SectionHead label={tr('liquidity')} color='var(--blue)'/>
+                {[
+                  [tr('current_ratio'),  ratios.liquidity?.current_ratio?.value, ratios.liquidity?.current_ratio?.status, 'x'],
+                  [tr('quick_ratio'),    ratios.liquidity?.quick_ratio?.value,   ratios.liquidity?.quick_ratio?.status,   'x'],
+                  [tr('working_capital'), bs_.working_capital, bs_.working_capital>=0?'good':'risk',''],
+                ].map(([label,v,st,unit])=>(
+                  <RatioRow key={label} label={label} value={v} status={st} unit={unit}/>
+                ))}
+              </Card>
+
+              <Card>
+                <SectionHead label={tr('leverage')} color='var(--amber)'/>
+                {[
+                  [tr('debt_ratio_pct'), bs_.ratios?.debt_ratio_pct, bs_.ratios?.debt_ratio_pct<60?'good':bs_.ratios?.debt_ratio_pct<80?'warning':'risk','%'],
+                  [tr('total_assets'),   bs_.total_assets, 'good', ''],
+                  [tr('total_equity'),   bs_.total_equity,  bs_.total_equity>=0?'good':'risk',''],
+                ].map(([label,v,st,unit])=>(
+                  <RatioRow key={label} label={label} value={v} status={st} unit={unit}/>
+                ))}
+              </Card>
+
+              {insights.filter(x=>x.domain==='liquidity'||x.domain==='leverage').slice(0,2).map((ins,i)=>(
+                <InsightCard key={i} ins={ins} onClick={()=>setPanel(ins)} lang={l}/>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ════════════════════════════════════════════════════════════
+            CASH FLOW TAB — with OCF quality + reliability + comparison
+        ════════════════════════════════════════════════════════════ */}
+        {tab==='cashflow'&&(
+          <div style={{display:'grid',gridTemplateColumns:'1fr 300px',gap:14}}>
+            <Card>
+              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:12}}>
+                <SectionHead label={tr('cashflow_operating_indirect')} color={cfFlagClr} sub={period}/>
+                {cfEstimated&&(
+                  <Badge label={tr('label_estimated')} color='var(--amber)'/>
+                )}
+              </div>
+
+              <CmpHeader lang={l} priorLabel={priorLabel} tr={tr}/>
+              <CmpRow label={tr('fc_net_profit')}
+                cur={is_.net_profit} prior={prior.net_profit}/>
+              {cf_.da_estimate!=null&&cf_.da_estimate!==0&&(
+                <CmpRow label={tr('cf_da_estimate')}
+                  cur={cf_.da_estimate} prior={null} color='var(--accent)'/>
+              )}
+              {cf_.wc_change?.net!=null&&(
+                <CmpRow label={tr('cf_wc_change')}
+                  cur={cf_.wc_change.net} prior={null}
+                  color={cf_.wc_change.net>=0?'var(--green)':'var(--red)'}/>
+              )}
+              <CmpRow label={tr('cashflow_operating')}
+                cur={cf_.operating_cashflow} prior={prior.cashflow}
+                bold color={cf_.operating_cashflow>=0?'var(--green)':'var(--red)'}/>
+
+              {/* Reliability badge */}
+              {cfEstimated&&(
+                <div style={{marginTop:10,display:'flex',alignItems:'center',gap:8,
+                  padding:'8px 12px',borderRadius:8,
+                  background:'rgba(251,191,36,.07)',border:'1px solid rgba(251,191,36,.22)'}}>
+                  <span style={{fontSize:13}}>⚠</span>
+                  <span style={{fontSize:10,color:'var(--amber)',lineHeight:1.4}}>
+                    {tr('cf_estimated_hint')}
+                  </span>
+                </div>
+              )}
+
+              {/* WC movement breakdown */}
+              {(cf_.wc_change?.receivables!=null||cf_.wc_change?.payables!=null)&&(
+                <div style={{marginTop:12}}>
+                  <div style={{fontSize:10,fontWeight:700,color:'var(--text-secondary)',
+                    textTransform:'uppercase',letterSpacing:'.06em',marginBottom:6}}>
+                    {tr('wc_movement_detail')}
+                  </div>
+                  {[
+                    [tr('receivables_delta'),  cf_.wc_change?.receivables],
+                    [tr('inventory_delta'),    cf_.wc_change?.inventory],
+                    [tr('payables_delta'),     cf_.wc_change?.payables],
+                  ].filter(([,v])=>v!=null).map(([lbl,v])=>(
+                    <div key={lbl} style={{display:'flex',justifyContent:'space-between',
+                      padding:'5px 0',borderBottom:'1px solid var(--border)'}}>
+                      <span style={{fontSize:11,color:'var(--text-secondary)'}}>{lbl}</span>
+                      <span style={{fontFamily:'var(--font-mono)',fontSize:11,
+                        color:clrV(v),direction:'ltr'}}>
+                        {v>0?'+':''}{formatCompact(v)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Trend */}
+              {ser.periods?.length>1&&(
+                <div style={{marginTop:14}}>
+                  <div style={{fontSize:9,color:'var(--text-secondary)',textTransform:'uppercase',
+                    letterSpacing:'.06em',marginBottom:6}}>
+                    {tr('trend')}
+                  </div>
+                  <Spark data={cf_.trend?.length?cf_.trend:series.net_profit}
+                    color='var(--blue)' h={44}/>
+                </div>
+              )}
+            </Card>
+
+            <div style={{display:'flex',flexDirection:'column',gap:10}}>
+              {/* OCF quality card */}
+              <Card style={{borderTop:`2px solid ${cfFlagClr}`}}>
+                <SectionHead label={tr('ocf_quality')} color={cfFlagClr}/>
+                <div style={{fontFamily:'var(--font-mono)',fontSize:24,fontWeight:800,
+                  color:cfFlagClr,direction:'ltr',marginBottom:6}}>
+                  {formatCompact(cf_.operating_cashflow)}
+                </div>
+                {cf_.quality&&<>
+                  {[
+                    [tr('conversion_ratio'),
+                     cf_.quality.cash_conversion_ratio!=null?`${cf_.quality.cash_conversion_ratio?.toFixed(2)}x`:null],
+                    [tr('quality'),
+                     cf_.quality.cash_conversion_quality||null],
+                    [tr('profit_cash_gap'),
+                     cf_.quality.profit_vs_cash_gap!=null?formatCompact(cf_.quality.profit_vs_cash_gap):null],
+                  ].filter(([,v])=>v!=null).map(([lbl,v])=>(
+                    <div key={lbl} style={{display:'flex',justifyContent:'space-between',
+                      padding:'6px 0',borderBottom:'1px solid var(--border)'}}>
+                      <span style={{fontSize:10,color:'var(--text-secondary)'}}>{lbl}</span>
+                      <span style={{fontFamily:'var(--font-mono)',fontSize:11,color:'var(--text-primary)'}}>{v}</span>
+                    </div>
+                  ))}
+                </>}
+                <p style={{fontSize:11,color:'var(--text-secondary)',lineHeight:1.5,margin:'8px 0 0'}}>
+                  {cf_.operating_cashflow>=0 ? tr('cf_positive_note') : tr('cf_negative_note')}
+                </p>
+              </Card>
+
+              {/* Cashflow reliability note */}
+              <Card>
+                <SectionHead label={tr('reliability')} color={cfEstimated?'var(--amber)':'var(--green)'}/>
+                <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:6}}>
+                  <span style={{fontSize:16}}>{cfEstimated?'⚠️':'✅'}</span>
+                  <span style={{fontSize:12,fontWeight:600,
+                    color:cfEstimated?'var(--amber)':'var(--green)'}}>
+                    {cfEstimated ? tr('estimated') : tr('real')}
+                  </span>
+                </div>
+                <p style={{fontSize:10,color:'var(--text-secondary)',lineHeight:1.5,margin:0}}>
+                  {cfEstimated ? tr('cf_reliability_estimated_note') : tr('cf_reliability_real_note')}
+                </p>
+              </Card>
+
+              {insights.filter(x=>x.domain==='cashflow'||x.key==='cashflow_below_profit').slice(0,2).map((ins,i)=>(
+                <InsightCard key={i} ins={ins} onClick={()=>setPanel(ins)} lang={l}/>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ════════════════════════════════════════════════════════════
+            INSIGHTS TAB — all linked insights
+        ════════════════════════════════════════════════════════════ */}
+        {tab==='insights'&&(
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,maxWidth:900}}>
+            {insights.length===0&&(
+              <div style={{gridColumn:'1/-1',textAlign:'center',padding:'40px',
+                color:'var(--text-secondary)',fontSize:13,fontStyle:'italic'}}>
+                {tr('no_insights_available')}
+              </div>
+            )}
+            {insights.map((ins,i)=>(
+              <InsightCard key={i} ins={ins} onClick={()=>setPanel(ins)} lang={l}/>
+            ))}
+          </div>
+        )}
+
+      </>)}
+
+      {/* No statements */}
+      {data&&!stmts.available&&(
+        <div style={{textAlign:'center',padding:'60px 0',color:'var(--text-secondary)'}}>
+          <div style={{fontSize:36,marginBottom:12,opacity:.3}}>📊</div>
+          <p style={{fontSize:14}}>
+            {tr('stmt_no_data')}
+          </p>
+        </div>
+      )}
+
+      {/* Context panel */}
+      {panel&&<ContextPanel item={panel} decs={decs} tr={tr} lang={l} onClose={()=>setPanel(null)}/>}
+    </div>
+  )
+}

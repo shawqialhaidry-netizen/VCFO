@@ -1,0 +1,29 @@
+# VCFO Environment Configuration
+# Copy this file to .env and fill in your values.
+# Never commit .env to version control.
+
+# ── Required ──────────────────────────────────────────────────────────────────
+# Generate with: python -c "import secrets; print(secrets.token_hex(32))"
+JWT_SECRET_KEY=vcfo-change-this-secret-in-production
+
+# ── Database ──────────────────────────────────────────────────────────────────
+# Development (SQLite):
+DATABASE_URL=sqlite:///./data/vcfo.db
+# Production (PostgreSQL):
+# DATABASE_URL=postgresql://vcfo_user:strongpassword@localhost:5432/vcfo_db
+
+# ── Access control ────────────────────────────────────────────────────────────
+# false = dev-friendly (no auth required for read endpoints)
+# true  = production (all endpoints require valid Bearer token)
+ENFORCE_MEMBERSHIP=false
+
+# ── CORS ──────────────────────────────────────────────────────────────────────
+# Add your frontend URL for production:
+# CORS_ORIGINS=["https://app.yourdomain.com","http://localhost:5173"]
+
+# ── Production guard ──────────────────────────────────────────────────────────
+# Set to true to block startup if JWT_SECRET_KEY is default or DB unreachable
+PRODUCTION_MODE=false
+
+# ── Optional ──────────────────────────────────────────────────────────────────
+DEBUG=false
