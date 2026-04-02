@@ -34,6 +34,7 @@ app.add_middleware(
 # ── Routers ───────────────────────────────────────────────────────────────────
 from app.api import companies, health, language, uploads, statements, analysis
 from app.api import branches, auth, portfolio, ai as ai_router
+from app.api import expense_intelligence
 
 app.include_router(health.router,     prefix="/api/v1")
 app.include_router(companies.router,  prefix="/api/v1")
@@ -45,6 +46,7 @@ app.include_router(branches.router,   prefix="/api/v1")
 app.include_router(auth.router,       prefix="/api/v1")
 app.include_router(portfolio.router,  prefix="/api/v1")
 app.include_router(ai_router.router,  prefix="/api/v1")
+app.include_router(expense_intelligence.router, prefix="/api/v1")
 
 
 @app.get("/")

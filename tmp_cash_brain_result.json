@@ -1,0 +1,62 @@
+{
+  "inputSummary": {
+    "hasCashflow": true,
+    "hasStatements": true,
+    "hasIntelligence": true,
+    "insightsCount": 2
+  },
+  "en": {
+    "pressure": {
+      "tier": "low",
+      "meaningful": true,
+      "headline": "Operating cash generation looks manageable.",
+      "bullets": [
+        "Operating cash flow: 525.3K",
+        "Operating cash flow vs prior month: +11.0%"
+      ],
+      "evidenceKeys": [
+        "operating_cashflow",
+        "operating_cashflow_mom",
+        "net_profit",
+        "cash_conversion_quality",
+        "working_capital_change_net"
+      ]
+    },
+    "liquidity": {
+      "tier": "low",
+      "meaningful": true,
+      "headline": "Short-term coverage appears within range.",
+      "bullets": [
+        "Current ratio: 3.66x",
+        "Quick ratio: 2.79x"
+      ],
+      "evidenceKeys": [
+        "current_ratio",
+        "quick_ratio",
+        "current_ratio_status",
+        "quick_ratio_status",
+        "working_capital"
+      ]
+    },
+    "survival": {
+      "tier": "comfortable",
+      "meaningful": true,
+      "headline": "Comfortable runway",
+      "copy": "No loss-driven burn indicated; runway is usually not computed when earnings are not loss-making.",
+      "months": null,
+      "burn": 0,
+      "cash": 460000
+    }
+  },
+  "arSample": {
+    "sectionTitle": "ذكاء السيولة",
+    "pressureHeadline": "توليد النقد التشغيلي ضمن حدود مقبولة.",
+    "pressureBullets": [
+      "التدفق النقدي التشغيلي: 525.3K",
+      "التدفق التشغيلي مقارنة بالشهر السابق: +11.0%"
+    ]
+  },
+  "duplicateFactsVsNarrative": [],
+  "weakCards": [],
+  "verdict": "PASS"
+}

@@ -847,6 +847,74 @@ def get_branch_drill_down(
         lang              = safe_lang,
     )
 
+    # ── Expense Decisions Upgrade (branch-level; additive, comparative-aware) ─
+    expense_decisions_v2: list = []
+    try:
+        from app.services.expense_intelligence_engine import build_expense_intelligence_bundle
+        from app.services.expense_decisions_upgrade import build_branch_expense_decisions_v2
+        from app.api.analysis import _build_consolidated_statements
+        from app.services.comparative_intelligence import build_comparative_intelligence
+
+        # Branch bundle from the same statement dicts used in this endpoint
+        branch_bundle = build_expense_intelligence_bundle(stmts, lang=safe_lang)
+
+        # Company bundle for contribution + comparative context (prefer consolidated from branches)
+        cons = _build_consolidated_statements(branch.company_id, db) or []
+        periods_union = set(s.get("period") for s in stmts if s.get("period"))
+        if periods_union:
+            cons = [s for s in cons if s.get("period") in periods_union]
+        company_bundle = build_expense_intelligence_bundle(cons, lang=safe_lang) if cons else {}
+
+        # Build minimal comparative context for this company across branches in this period-set
+        # (deterministic and statement-derived; needed for contribution + abnormal category driver).
+        from app.models.branch import Branch as _BModel
+        branches_active = (
+            db.query(_BModel)
+            .filter(_BModel.company_id == branch.company_id, _BModel.is_active == True)  # noqa
+            .all()
+        )
+        branch_bundles = []
+        for b2 in branches_active:
+            # Drill-down uses BranchFinancial-derived synthetic statements.
+            # For comparative signals we only need consistent by_period totals/ratios/categories.
+            if str(b2.id) == str(branch.id):
+                stmts_b = stmts
+            else:
+                # Best-effort: use BranchFinancial synthetic statements if present
+                bfs = (
+                    db.query(BranchFinancial)
+                    .filter(BranchFinancial.branch_id == b2.id)
+                    .order_by(BranchFinancial.period)
+                    .all()
+                )
+                if not bfs:
+                    continue
+                stmts_b = [_bf_to_stmt_dict(f) for f in bfs]
+                if periods_union:
+                    stmts_b = [s for s in stmts_b if s.get("period") in periods_union]
+            if not stmts_b:
+                continue
+            bun = build_expense_intelligence_bundle(stmts_b, lang=safe_lang)
+            branch_bundles.append({"branch_id": b2.id, "branch_name": b2.name, "expense_bundle": bun})
+
+        comp_ctx = build_comparative_intelligence(
+            company_expense_bundle=company_bundle,
+            branch_bundles=branch_bundles,
+        ) if branch_bundles and company_bundle else {}
+
+        expense_decisions_v2 = build_branch_expense_decisions_v2(
+            branch_id=branch_id,
+            branch_name=branch.name,
+            company_id=branch.company_id,
+            company_name=(company_drill.name if company_drill else ""),
+            currency=((company_drill.currency if company_drill else "") or ""),
+            branch_bundle=branch_bundle,
+            comparative_intelligence=comp_ctx,
+            lang=safe_lang,
+        )
+    except Exception as exc:
+        logger.warning("branch drill-down expense_decisions_v2 failed: %s", exc)
+
     deep_intel: dict = {}
     try:
         deep_intel = build_deep_intelligence(stmts, analysis, safe_lang)
@@ -1034,6 +1102,7 @@ def get_branch_drill_down(
         "kpis":                 kpis,
         "trends":               branch_trends,
         "expense_intelligence": expense_intel,
+        "expense_decisions_v2": expense_decisions_v2,
         "deep_intelligence":    deep_intel,
         "phase43_root_causes":  phase43_rc,
         "cfo_decisions":        cfo_decisions_br,

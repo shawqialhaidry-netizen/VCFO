@@ -12,6 +12,8 @@ import { usePeriodScope } from '../context/PeriodScopeContext.jsx'
 import { kpiContextLabel, kpiLabel } from '../utils/kpiContext.js'
 import { formatCompact, formatFull, formatDual, formatPct, formatMultiple, formatDays } from '../utils/numberFormat.js'
 import { buildAnalysisQuery } from '../utils/buildAnalysisQuery.js'
+import { buildExecutiveNarrative } from '../utils/buildExecutiveNarrative.js'
+import ExecutiveNarrativeStrip from '../components/ExecutiveNarrativeStrip.jsx'
 
 const API = '/api/v1'
 function auth() {
@@ -852,6 +854,7 @@ export default function ExecutiveDashboard() {
 
   const navigate = useNavigate()
   const [impacts, setImpacts] = useState({})
+  const [narrative, setNarrative] = useState(null)
   const [pType, setPType] = useState(null)
   const [pLoad, setPLoad] = useState(null)
   const [pXtra, setPXtra] = useState(null)
@@ -869,11 +872,13 @@ export default function ExecutiveDashboard() {
       if (!r.ok) {
         if (r.status === 422) {
           setMain(null)
+          setNarrative(null)
           setNoDataMsg(tr('err_no_financial_data'))
         }
         return
       }
       const j = await r.json(); const d = j.data||{}
+      setNarrative(buildExecutiveNarrative(d, { lang }))
       setIntel(d.intelligence||null)
       setDecs(d.decisions||[])
       setCauses(d.root_causes||[])
@@ -970,32 +975,6 @@ export default function ExecutiveDashboard() {
   const kpis   = main?.kpi_block?.kpis || {}
   const period = main?.intelligence?.latest_period || main?.periods?.slice(-1)[0]
 
-
-  {/* ── Data Source Banner ── */}
-  {main && (
-    <div style={{display:'flex',alignItems:'center',gap:8,padding:'6px 12px',
-      borderRadius:8,fontSize:11,marginBottom:6,
-      background: consolidate ? 'rgba(0,212,170,.07)' : 'rgba(59,158,255,.07)',
-      border: `1px solid ${consolidate ? 'rgba(0,212,170,.27)' : 'rgba(59,158,255,.27)'}`,
-    }}>
-      <span style={{fontWeight:700,color: consolidate ? 'var(--accent)' : 'var(--blue)'}}>
-        {consolidate ? '⊞' : '⊟'}
-      </span>
-      <span style={{color: consolidate ? 'var(--accent)' : 'var(--blue)', fontWeight:600}}>
-        {tr('data_source')}:
-      </span>
-      <span style={{color:'var(--text-secondary)'}}>
-        {consolidate ? tr('branch_consolidation') : tr('company_uploads')}
-      </span>
-      {consolidate && (
-        <span style={{marginLeft:8,padding:'2px 8px',borderRadius:4,fontSize:10,
-          background:'rgba(251,191,36,.12)',color:'#fbbf24',border:'1px solid rgba(251,191,36,.25)',
-          fontWeight:600}}>
-          {tr('no_elimination')} · {tr('no_currency_conversion')} · {tr('simplified_consolidation')}
-        </span>
-      )}
-    </div>
-  )}
   return (
     <div className="" style={{padding:'18px 26px',display:'flex',flexDirection:'column',gap:14,
       minHeight:'calc(100vh - 62px)',background:T.bg}}>
@@ -1006,6 +985,31 @@ export default function ExecutiveDashboard() {
         @keyframes fadeUp  { from { opacity:0;transform:translateY(5px) } to { opacity:1;transform:none } }
       `}</style>
 
+      {main && (
+        <div style={{display:'flex',alignItems:'center',gap:8,padding:'6px 12px',
+          borderRadius:8,fontSize:11,
+          background: consolidate ? 'rgba(0,212,170,.07)' : 'rgba(59,158,255,.07)',
+          border: `1px solid ${consolidate ? 'rgba(0,212,170,.27)' : 'rgba(59,158,255,.27)'}`,
+        }}>
+          <span style={{fontWeight:700,color: consolidate ? 'var(--accent)' : 'var(--blue)'}}>
+            {consolidate ? '⊞' : '⊟'}
+          </span>
+          <span style={{color: consolidate ? 'var(--accent)' : 'var(--blue)', fontWeight:600}}>
+            {tr('data_source')}:
+          </span>
+          <span style={{color:'var(--text-secondary)'}}>
+            {consolidate ? tr('branch_consolidation') : tr('company_uploads')}
+          </span>
+          {consolidate && (
+            <span style={{marginLeft:8,padding:'2px 8px',borderRadius:4,fontSize:10,
+              background:'rgba(251,191,36,.12)',color:'#fbbf24',border:'1px solid rgba(251,191,36,.25)',
+              fontWeight:600}}>
+              {tr('no_elimination')} · {tr('no_currency_conversion')} · {tr('simplified_consolidation')}
+            </span>
+          )}
+        </div>
+      )}
+
       {/* FIX-4.3: Data quality banner */}
       <DataQualityBanner validation={main?.pipeline_validation} lang={lang} tr={tr}/>
       <TopBar tr={tr} health={health} status={status}
@@ -1014,6 +1018,7 @@ export default function ExecutiveDashboard() {
         periodCount={main?.periods?.length} scopeLabel={main?.scope_label}
         consolidate={consolidate} setConsolidate={setConsolidate}/>
 
+      <ExecutiveNarrativeStrip narrative={narrative} tr={tr} lang={lang} />
       <TopFocusBanner tr={tr} decSum={decSum} alertSum={alertSum} health={health}/>
 
       {decs?.length>0 && <ActionStrip decisions={decs} tr={tr} causes={causes} impacts={impacts} onSelect={open}/>}

@@ -1,11 +1,6 @@
 /**
- * CommandCenter.jsx — Flagship interface (Dashboard + Executive merged)
- *
- * Backbone: ExecutiveDashboard blocks (no API/model changes)
- * Additions:
- * - Explicit Forecast summary in "What Matters Now"
- * - Branch Performance aligned with same lang/window/scope query semantics
- * - Lightweight Command Navigation at bottom (drill-down launcher only)
+ * CommandCenter.jsx — Premium unified Command Center (single executive column).
+ * Order: Narrative → Health & KPIs → Key signals → Branch intelligence → Decisions → Secondary detail.
  */
 import { useState, useCallback, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
@@ -15,8 +10,16 @@ import { usePeriodScope } from '../context/PeriodScopeContext.jsx'
 import { kpiContextLabel, kpiLabel } from '../utils/kpiContext.js'
 import { formatCompact, formatFull } from '../utils/numberFormat.js'
 import { buildAnalysisQuery } from '../utils/buildAnalysisQuery.js'
+import { buildExecutiveNarrative } from '../utils/buildExecutiveNarrative.js'
 import PeriodSelector from '../components/PeriodSelector.jsx'
 import UniversalScopeSelector from '../components/UniversalScopeSelector.jsx'
+import ExecutiveNarrativeStrip from '../components/ExecutiveNarrativeStrip.jsx'
+import {
+  KeySignalsSection,
+  BranchIntelligenceSection,
+  DecisionsSection,
+  keySignalsShowsInefficientBranch,
+} from '../components/CommandCenterUnifiedSections.jsx'
 
 const API = '/api/v1'
 function auth() {
@@ -35,7 +38,21 @@ const stC  = {excellent:'#34d399', good:'#00d4aa', warning:'#fbbf24', risk:'#f87
 const dClr = {liquidity:T.blue, profitability:T.green, efficiency:T.violet, leverage:T.amber, growth:T.accent}
 const dIco = {liquidity:'💧', profitability:'📈', efficiency:'⚡', leverage:'🏋', growth:'🚀'}
 const uClr = {high:T.red, medium:T.amber, low:T.blue}
-const fmtP = v => v==null?'—':`${Number(v).toFixed(1)}%`
+const fmtP = v => (v == null || !Number.isFinite(Number(v)) ? '' : `${Number(v).toFixed(1)}%`)
+
+function looksLikeRawKey(v) {
+  return typeof v === 'string' && /^(exec_|cmd_|nav_|dq_)[a-z0-9_]+$/i.test(v.trim())
+}
+
+function Tx(tr, key, en) {
+  try {
+    const v = tr(key)
+    if (v == null || v === '' || v === key || looksLikeRawKey(v)) return en
+    return v
+  } catch {
+    return en
+  }
+}
 
 const Pill = ({label, color}) => (
   <span style={{fontSize:9,fontWeight:800,padding:'2px 9px',borderRadius:20,
@@ -71,71 +88,154 @@ function DataQualityBanner({ validation, lang, tr }) {
   )
 }
 
-function TopBar({ tr, health, status, companyName, period, loading, onRefresh, periodCount, scopeLabel }) {
-  const hc   = stC[status] || T.text2
-  const circ = 2 * Math.PI * 34
-  const dash = (Math.max(0,Math.min(100,health||0)) / 100) * circ
+/** Merged health ring + identity + KPI grid — single performance snapshot. */
+function HealthKpiSnapshot({
+  tr,
+  health,
+  status,
+  companyName,
+  period,
+  loading,
+  onRefresh,
+  periodCount,
+  scopeLabel,
+  kpis,
+  cashflow,
+  main,
+  alerts,
+  onSelect,
+  ctxLabel,
+}) {
+  const hc = stC[status] || T.text2
+  const circ = 2 * Math.PI * 30
+  const h = health != null && Number.isFinite(Number(health)) ? Number(health) : null
+  const dash = h != null ? (Math.max(0, Math.min(100, h)) / 100) * circ : 0
+  const healthLabel = Tx(tr, 'cmd_health_score', 'Health score')
+  const snapTitle = Tx(tr, 'cmd_performance', 'Performance snapshot')
+
   return (
-    <div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:16,
-      padding:'16px 24px',display:'flex',alignItems:'center',gap:20,flexWrap:'wrap'}}>
-      <svg width={80} height={80} viewBox="0 0 88 88" style={{flexShrink:0}}>
-        <circle cx={44} cy={44} r={34} fill="none" stroke={T.border} strokeWidth={5}/>
-        <circle cx={44} cy={44} r={34} fill="none" stroke={hc} strokeWidth={5}
-          strokeDasharray={`${dash} ${circ-dash}`} strokeDashoffset={circ*.25}
-          strokeLinecap="round" style={{filter:`drop-shadow(0 0 7px ${hc}90)`}}/>
-        <text x={44} y={43} textAnchor="middle" fontSize={17} fontWeight={800}
-          fill={hc} fontFamily="monospace">{health??'—'}</text>
-        <text x={44} y={57} textAnchor="middle" fontSize={8} fill={T.text3}>/100</text>
-      </svg>
-      <div style={{flex:1,minWidth:160}}>
-        <div style={{fontSize:10,color:T.text2,marginBottom:3,textTransform:'uppercase',
-          letterSpacing:'.06em',fontWeight:600}}>{tr('exec_health_label')}</div>
-        <div style={{fontSize:19,fontWeight:800,color:T.text1,lineHeight:1.2,marginBottom:8}}>
-          {companyName||'—'}
+    <div
+      style={{
+        background: 'linear-gradient(165deg, rgba(17,24,39,0.98) 0%, rgba(15,23,42,0.99) 100%)',
+        border: '1px solid rgba(148,163,184,0.14)',
+        borderRadius: 16,
+        boxShadow: '0 0 0 1px rgba(0,212,170,0.08), 0 12px 40px rgba(0,0,0,0.42), 0 0 100px -24px rgba(0,212,170,0.1)',
+        padding: '20px 22px 22px',
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 14, marginBottom: 18 }}>
+        <div>
+          <div
+            style={{
+              fontSize: 11,
+              fontWeight: 800,
+              color: T.accent,
+              letterSpacing: '.08em',
+              textTransform: 'uppercase',
+            }}
+          >
+            {snapTitle}
+          </div>
+          <div style={{ fontSize: 10, color: T.text3, marginTop: 5, lineHeight: 1.45 }}>
+            {Tx(tr, 'cmd_performance_sub', 'Score, period context, and core KPIs for the active scope.')}
+          </div>
         </div>
-        <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
-          <div style={{width:7,height:7,borderRadius:'50%',background:hc,boxShadow:`0 0 8px ${hc}`}}/>
-          <span style={{fontSize:12,fontWeight:700,color:hc}}>
-            {tr(`status_${status}_simple`)||tr(`status_${status}`)||status}
-          </span>
-          {period && <span style={{fontSize:11,color:T.text2,fontFamily:'monospace'}}>{period}</span>}
-          {periodCount!=null && <span style={{fontSize:10,color:T.text3}}>· {periodCount}p</span>}
-          {scopeLabel && <span style={{fontSize:10,color:T.text3}}>· {scopeLabel}</span>}
+        <button
+          onClick={onRefresh}
+          disabled={loading}
+          style={{
+            flexShrink: 0,
+            width: 38,
+            height: 38,
+            borderRadius: 10,
+            border: `1px solid ${T.border}`,
+            background: T.card,
+            color: T.text2,
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: 16,
+          }}
+        >
+          {loading ? (
+            <div
+              style={{
+                width: 14,
+                height: 14,
+                border: `2px solid ${T.border}`,
+                borderTopColor: T.accent,
+                borderRadius: '50%',
+                animation: 'spin .7s linear infinite',
+              }}
+            />
+          ) : (
+            '↻'
+          )}
+        </button>
+      </div>
+
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 20, alignItems: 'stretch' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexShrink: 0 }}>
+          <svg width={72} height={72} viewBox="0 0 88 88" style={{ flexShrink: 0 }}>
+            <circle cx={44} cy={44} r={34} fill="none" stroke={T.border} strokeWidth={5} />
+            <circle
+              cx={44}
+              cy={44}
+              r={34}
+              fill="none"
+              stroke={hc}
+              strokeWidth={5}
+              strokeDasharray={`${dash} ${circ - dash}`}
+              strokeDashoffset={circ * 0.25}
+              strokeLinecap="round"
+              style={{ filter: `drop-shadow(0 0 8px ${hc}85)` }}
+            />
+            <text x={44} y={43} textAnchor="middle" fontSize={16} fontWeight={800} fill={hc} fontFamily="monospace">
+              {h != null ? Math.round(h) : ''}
+            </text>
+            <text x={44} y={57} textAnchor="middle" fontSize={8} fill={T.text3}>
+              /100
+            </text>
+          </svg>
+          <div style={{ minWidth: 140 }}>
+            <div
+              style={{
+                fontSize: 9,
+                fontWeight: 800,
+                color: T.text3,
+                textTransform: 'uppercase',
+                letterSpacing: '.08em',
+                marginBottom: 4,
+              }}
+            >
+              {healthLabel}
+            </div>
+            <div style={{ fontSize: 17, fontWeight: 800, color: T.text1, lineHeight: 1.25, marginBottom: 8 }}>
+              {companyName || ''}
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <div style={{ width: 6, height: 6, borderRadius: '50%', background: hc, boxShadow: `0 0 6px ${hc}` }} />
+              <span style={{ fontSize: 11, fontWeight: 700, color: hc }}>
+                {tr(`status_${status}_simple`) || tr(`status_${status}`) || status}
+              </span>
+              {period ? <span style={{ fontSize: 11, color: T.text2, fontFamily: 'monospace' }}>{period}</span> : null}
+              {periodCount != null ? (
+                <span style={{ fontSize: 10, color: T.text3 }}>
+                  · {periodCount}p
+                </span>
+              ) : null}
+              {scopeLabel ? <span style={{ fontSize: 10, color: T.text3 }}>· {scopeLabel}</span> : null}
+            </div>
+          </div>
+        </div>
+
+        <div style={{ flex: '1 1 280px', minWidth: 0 }}>
+          {main ? (
+            <ExecutiveKpiRow kpis={kpis} cashflow={cashflow || {}} main={main} tr={tr} alerts={alerts} onSelect={onSelect} ctxLabel={ctxLabel} hideTitle />
+          ) : null}
         </div>
       </div>
-      <button onClick={onRefresh} disabled={loading}
-        style={{flexShrink:0,width:36,height:36,borderRadius:10,border:`1px solid ${T.border}`,
-          background:T.card,color:T.text2,cursor:'pointer',
-          display:'flex',alignItems:'center',justifyContent:'center',fontSize:16}}>
-        {loading
-          ? <div style={{width:14,height:14,border:`2px solid ${T.border}`,
-              borderTopColor:T.accent,borderRadius:'50%',animation:'spin .7s linear infinite'}}/>
-          : '↻'}
-      </button>
-    </div>
-  )
-}
-
-function TopFocusBanner({ tr, decSum, alertSum, health }) {
-  const topFocus = decSum?.top_focus
-  const hiAlerts = alertSum?.high || 0
-  const total    = alertSum?.total || 0
-  if (!topFocus && !total) return null
-  let icon, msg, color
-  if (health >= 70 && hiAlerts === 0) {
-    icon='✅'; color=T.green;  msg=tr('banner_all_good')
-  } else if (hiAlerts >= 2 || health < 40) {
-    icon='🚨'; color=T.red;   msg=tr(`dec_short_${decSum?.top_focus_domain||'liquidity'}`)||tr('banner_urgent')
-  } else {
-    icon='⚠️'; color=T.amber; msg=tr(`dec_short_${decSum?.top_focus_domain||'profitability'}`)||tr('banner_attention')
-  }
-  return (
-    <div style={{background:`${color}0b`,borderWidth:'1px',borderStyle:'solid',borderColor:`${color}28`,
-      borderLeftWidth:'4px',borderLeftColor:color,borderRadius:12,
-      padding:'12px 20px',display:'flex',alignItems:'center',gap:12}}>
-      <span style={{fontSize:20,flexShrink:0}}>{icon}</span>
-      <div style={{flex:1,fontSize:14,fontWeight:700,color:T.text1,lineHeight:1.4}}>{msg}</div>
-      {hiAlerts > 0 && <Pill label={`${hiAlerts} ${tr('banner_high_alerts')}`} color={T.red}/>}
     </div>
   )
 }
@@ -424,85 +524,10 @@ function ContextPanel({ type, payload, extra, tr, onClose, onNavigate, impacts={
   )
 }
 
-function ActionStrip({ decisions, tr, onSelect, causes, impacts={} }) {
-  if (!decisions?.length) return null
-  return (
-    <div>
-      <div style={{fontSize:10,fontWeight:700,color:T.text3,textTransform:'uppercase',
-        letterSpacing:'.08em',marginBottom:10}}>{tr('exec_action_strip')}</div>
-      {/* Visual hierarchy: #1 dominant, #2 medium, #3 smaller */}
-      <div style={{display:'grid',gridTemplateColumns:'2fr 1.15fr 0.95fr',gap:10,alignItems:'stretch'}}>
-        {decisions.slice(0,3).map((dec,i) => {
-          const uc    = uClr[dec.urgency]||T.text3
-          const isTop = i === 0
-          const isMid = i === 1
-          const shortTitle = tr(`dec_short_${dec.domain}`)||dec.title
-          const hint       = dec.reason?.split('. ')[0]||''
-          const linkedC    = causes?.filter(c=>c.domain===dec.domain||c.domain==='cross_domain')||[]
-          return (
-            <div key={dec.key||i}
-              onClick={()=>onSelect('decision', dec, {causes:linkedC})}
-              title={hint}
-              style={{
-                gridColumn: isTop ? '1 / span 1' : 'auto',
-                background: isTop
-                  ? `linear-gradient(135deg,${T.card},rgba(0,212,170,0.10))`
-                  : isMid
-                    ? `linear-gradient(135deg,${T.card},rgba(124,92,252,0.06))`
-                    : T.card,
-                borderWidth:'1px',borderStyle:'solid',
-                borderColor:isTop?`${T.accent}40`:isMid?`${T.violet}26`:T.border,
-                borderTopWidth:isTop?4:3,borderTopColor:uc,borderRadius:14,
-                padding:isTop?'18px 18px':isMid?'16px 16px':'14px 14px',
-                cursor:'pointer',
-                minHeight:isTop?120:isMid?102:92,
-                transition:'transform .15s ease,box-shadow .15s ease'}}
-              {...lift(uc)}>
-              <div style={{display:'flex',alignItems:'center',gap:7,marginBottom:9}}>
-                <span style={{fontSize:isTop?18:14}}>{dIco[dec.domain]||'◉'}</span>
-                <Pill label={tr(`urgency_${dec.urgency}`)||dec.urgency} color={uc}/>
-                {isTop && <span style={{marginLeft:'auto',fontSize:9,color:T.accent,fontWeight:800}}>#1</span>}
-                {isMid && <span style={{marginLeft:'auto',fontSize:9,color:T.violet,fontWeight:800}}>#2</span>}
-              </div>
-              <div style={{fontSize:isTop?16:isMid?14:13,fontWeight:900,color:T.text1,lineHeight:1.25,marginBottom:6}}>
-                {shortTitle}
-              </div>
-              {(()=>{
-                const impKey = dec.key||dec.domain
-                const imp = impacts[impKey]?.impact || impacts[dec.domain]?.impact
-                if (imp?.value!=null) return (
-                  <div style={{display:'inline-flex',alignItems:'center',gap:4,
-                    background:`${uc}15`,border:`1px solid ${uc}30`,borderRadius:20,
-                    padding:isTop?'3px 10px':'2px 8px',marginBottom:8,width:'fit-content'}}>
-                    <span style={{fontSize:isTop?13:11,fontWeight:900,color:uc,fontFamily:'monospace'}}>
-                      {imp.unit==='%'?`${imp.value>0?'+':''}${imp.value.toFixed(1)}%`
-                       :(imp.value>=1e6?`+${(imp.value/1e6).toFixed(1)}M`
-                        :imp.value>=1e3?`+${(imp.value/1e3).toFixed(0)}K`
-                        :`+${imp.value.toFixed(0)}`)}
-                    </span>
-                    <span style={{fontSize:9,color:uc,opacity:.8}}>
-                      {imp.type==='cash'?tr('impact_type_cash')
-                       :imp.type==='margin'?tr('impact_type_margin')
-                       :tr('risk_down_short')}
-                    </span>
-                  </div>
-                )
-                return null
-              })()}
-              <div style={{fontSize:10,color:T.text2,lineHeight:1.4,marginBottom:9,
-                display:'-webkit-box',WebkitLineClamp:isTop?2:1,WebkitBoxOrient:'vertical',overflow:'hidden'}}>
-                {hint}
-              </div>
-              <div style={{fontSize:isTop?11:10,color:T.text2,fontFamily:'monospace'}}>⏱ {dec.timeframe}</div>
-            </div>
-          )
-        })}
-      </div>
-    </div>
-  )
-}
-
-function ExecutiveKpiRow({ kpis, cashflow, main, tr, onSelect, alerts, ctxLabel }) {
+function ExecutiveKpiRow({ kpis, cashflow, main, tr, onSelect, alerts, ctxLabel, hideTitle = false }) {
+  const na = Tx(tr, 'cmd_na_short', 'N/A')
+  const dispN = (v) => (v == null || v === '' || isNaN(Number(v)) ? na : formatCompact(v))
+  const dispFull = (v) => (v == null || v === '' || isNaN(Number(v)) ? null : formatFull(v))
   const cfEstimated = cashflow?.reliability === 'estimated'
   const wc       = kpis.working_capital?.value
              ?? cashflow?.working_capital
@@ -510,11 +535,11 @@ function ExecutiveKpiRow({ kpis, cashflow, main, tr, onSelect, alerts, ctxLabel 
   const wcColor  = wc==null?T.text3:wc>=0?T.green:T.red
   const heroKey = 'net_profit'
   const cards = [
-    { key:'revenue',         value:formatCompact(kpis.revenue?.value),        full:formatFull(kpis.revenue?.value),        mom:kpis.revenue?.mom_pct,    yoy:kpis.revenue?.yoy_pct,    color:T.accent,  icon:'📈' },
-    { key:'net_profit',      value:formatCompact(kpis.net_profit?.value),      full:formatFull(kpis.net_profit?.value),      mom:kpis.net_profit?.mom_pct, yoy:kpis.net_profit?.yoy_pct, color:T.green,   icon:'💰' },
-    { key:'cashflow',        value:formatCompact(cashflow?.operating_cashflow), full:formatFull(cashflow?.operating_cashflow), mom:cashflow?.operating_cashflow_mom, yoy:null, color:T.blue,   icon:'💧', estimated:cfEstimated },
-    { key:'net_margin',      value:fmtP(kpis.net_margin?.value),               full:null,                                    mom:kpis.net_margin?.mom_pct, yoy:null,                     color:T.violet,  icon:'%'  },
-    { key:'working_capital', value:formatCompact(wc),                           full:formatFull(wc),                          mom:null,                     yoy:null, sub:wc!=null&&wc<0?tr('wc_negative'):null, color:wcColor, icon:'⚖️' },
+    { key:'revenue',         value:dispN(kpis.revenue?.value),        full:dispFull(kpis.revenue?.value),        mom:kpis.revenue?.mom_pct,    yoy:kpis.revenue?.yoy_pct,    color:T.accent,  icon:'📈' },
+    { key:'net_profit',      value:dispN(kpis.net_profit?.value),      full:dispFull(kpis.net_profit?.value),      mom:kpis.net_profit?.mom_pct, yoy:kpis.net_profit?.yoy_pct, color:T.green,   icon:'💰' },
+    { key:'cashflow',        value:dispN(cashflow?.operating_cashflow), full:dispFull(cashflow?.operating_cashflow), mom:cashflow?.operating_cashflow_mom, yoy:null, color:T.blue,   icon:'💧', estimated:cfEstimated },
+    { key:'net_margin',      value:fmtP(kpis.net_margin?.value)||na, full:null, mom:kpis.net_margin?.mom_pct, yoy:null, color:T.violet,  icon:'%'  },
+    { key:'working_capital', value:dispN(wc),                           full:dispFull(wc),                          mom:null,                     yoy:null, sub:wc!=null&&wc<0?tr('wc_negative'):null, color:wcColor, icon:'⚖️' },
   ]
   const ordered = [
     ...cards.filter(c=>c.key===heroKey),
@@ -589,8 +614,10 @@ function ExecutiveKpiRow({ kpis, cashflow, main, tr, onSelect, alerts, ctxLabel 
 
   return (
     <div>
-      <div style={{fontSize:10,fontWeight:700,color:T.text3,textTransform:'uppercase',
-        letterSpacing:'.08em',marginBottom:10}}>{tr('exec_kpi_title')}</div>
+      {!hideTitle ? (
+        <div style={{fontSize:10,fontWeight:700,color:T.text3,textTransform:'uppercase',
+          letterSpacing:'.08em',marginBottom:10}}>{tr('exec_kpi_title')}</div>
+      ) : null}
       {/* Hero KPI + secondary KPIs (avoid equal weight) */}
       <div style={{display:'grid',gridTemplateColumns:'1.25fr 1fr',gap:14,alignItems:'stretch'}}>
         <div style={{minWidth:0}}>
@@ -604,7 +631,7 @@ function ExecutiveKpiRow({ kpis, cashflow, main, tr, onSelect, alerts, ctxLabel 
   )
 }
 
-function DomainGrid({ intelligence, tr, onSelect, rootCauses, decisions, alerts }) {
+function DomainGrid({ intelligence, tr, onSelect, rootCauses, decisions, alerts, secondary = false }) {
   const ratios  = intelligence?.ratios  || {}
   const trends  = intelligence?.trends  || {}
   const scoreFromCategory = (cat) => {
@@ -631,9 +658,9 @@ function DomainGrid({ intelligence, tr, onSelect, rootCauses, decisions, alerts 
   ]
   const ratioMap = key => ratios[key] || {}
   return (
-    <div>
-      <div style={{fontSize:10,fontWeight:700,color:T.text3,textTransform:'uppercase',
-        letterSpacing:'.08em',marginBottom:10}}>{tr('exec_domain_title')}</div>
+    <div style={secondary ? { opacity: 0.92 } : undefined}>
+      <div style={{fontSize:secondary?9:10,fontWeight:700,color:T.text3,textTransform:'uppercase',
+        letterSpacing:'.1em',marginBottom:10}}>{tr('exec_domain_title')}</div>
       <div style={{display:'grid',gridTemplateColumns:'repeat(12,1fr)',gap:10}}>
         {blocks.map((b, idx) => {
           const s   = b.score
@@ -719,12 +746,12 @@ function DomainGrid({ intelligence, tr, onSelect, rootCauses, decisions, alerts 
   )
 }
 
-function AlertsBar({ alerts, tr, onSelect }) {
+function AlertsBar({ alerts, tr, onSelect, secondary = false }) {
   if (!alerts?.length) return null
   return (
     <div style={{display:'flex',alignItems:'center',gap:8,
       background:T.surface,border:`1px solid ${T.border}`,
-      borderRadius:11,padding:'10px 16px',flexWrap:'wrap'}}>
+      borderRadius:11,padding:secondary?'8px 14px':'10px 16px',flexWrap:'wrap',opacity:secondary?0.9:1}}>
       <span style={{fontSize:11,fontWeight:700,color:T.amber,flexShrink:0}}>
         ⚠ {alerts.length} {tr('alerts_title')}
       </span>
@@ -745,7 +772,7 @@ function AlertsBar({ alerts, tr, onSelect }) {
   )
 }
 
-function ForecastNow({ fcData, tr }) {
+function ForecastNow({ fcData, tr, secondary = false }) {
   if (!fcData?.available) return null
   const bRev = fcData?.scenarios?.base?.revenue?.[0]
   const bNp  = fcData?.scenarios?.base?.net_profit?.[0]
@@ -753,7 +780,8 @@ function ForecastNow({ fcData, tr }) {
   if (!bRev?.point && !bNp?.point) return null
   const riskClr = risk==='high'?T.red:risk==='medium'?T.amber:risk?T.green:T.text3
   return (
-    <div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:12,padding:'12px 16px'}}>
+    <div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:12,padding:secondary?'10px 14px':'12px 16px',
+      opacity:secondary?0.9:1}}>
       <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:10,marginBottom:8}}>
         <div style={{fontSize:10,fontWeight:800,color:T.text3,textTransform:'uppercase',letterSpacing:'.08em'}}>
           {tr('forecast_next_period')}
@@ -780,144 +808,7 @@ function ForecastNow({ fcData, tr }) {
   )
 }
 
-function BranchPerformance({ companyId, qs, tr }) {
-  const [d,setD]=useState(null)
-  useEffect(()=>{
-    if (!companyId || !qs) return
-    // Align with flagship semantics: same scope QS (lang + window + custom period scope)
-    fetch(`${API}/companies/${companyId}/branch-comparison?${qs}`, { headers: auth() })
-      .then(r=>r.ok?r.json():null)
-      .then(j=>{ if(j) setD(j) })
-      .catch(()=>{})
-  },[companyId, qs])
-
-  if (!d) return (
-    <div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:12,padding:'14px 16px'}}>
-      <div style={{height:22,display:'flex',alignItems:'center',gap:10}}>
-        <div style={{width:14,height:14,border:`2px solid ${T.border}`,borderTopColor:T.accent,borderRadius:'50%',animation:'spin .8s linear infinite'}}/>
-        <span style={{fontSize:11,color:T.text2}}>{tr('loading')}</span>
-      </div>
-    </div>
-  )
-  if (!d.has_data) return (
-    <div style={{background:T.surface,border:`1px dashed ${T.border}`,borderRadius:12,padding:'18px 16px',textAlign:'center'}}>
-      <div style={{fontSize:11,fontWeight:700,color:T.accent,marginBottom:8,letterSpacing:'.04em'}}>
-        {tr('data_source_branch_view_label')}
-      </div>
-      <div style={{fontSize:26,marginBottom:6,opacity:.3}}>🏢</div>
-      <div style={{fontSize:12,fontWeight:700,color:T.text2,marginBottom:4}}>{tr('branches_config')}</div>
-      <div style={{fontSize:11,color:T.text3}}>{tr('branches_hint')}</div>
-    </div>
-  )
-  const ranking = (d.ranking||[]).slice()
-  const topBranch = ranking[0] || null
-  const weakBranch = ranking.length ? ranking[ranking.length-1] : null
-  const top = ranking.slice(0,5)
-  return (
-    <div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:12,padding:'14px 16px'}}>
-      <div style={{marginBottom:10}}>
-        <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap',marginBottom:6}}>
-          <span style={{fontSize:11,fontWeight:800,color:T.accent,letterSpacing:'.06em'}}>
-            {tr('data_source_branch_view_label')}
-          </span>
-          <span
-            title={tr('data_source_branch_vs_company_note')}
-            aria-label={tr('data_source_branch_vs_company_note')}
-            style={{cursor:'help',fontSize:12,color:T.text3}}>
-            ℹ️
-          </span>
-        </div>
-        <div style={{fontSize:10,color:T.text3,lineHeight:1.45,marginBottom:8}}>
-          {tr('data_source_branch_vs_company_note')}
-        </div>
-        <div style={{display:'flex',alignItems:'baseline',justifyContent:'space-between',gap:10}}>
-          <div style={{fontSize:10,fontWeight:800,color:T.text3,textTransform:'uppercase',letterSpacing:'.08em'}}>
-            {tr('branch_performance')}
-          </div>
-          <div style={{fontSize:10,color:T.text3,fontFamily:'monospace'}}>{tr('window_label')}: {d.window||''}</div>
-        </div>
-      </div>
-      {(topBranch || weakBranch) && (
-        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:12}}>
-          {topBranch && (
-            <div style={{background:`linear-gradient(135deg,${T.card},rgba(52,211,153,0.10))`,
-              border:`1px solid rgba(52,211,153,0.25)`,borderTop:`4px solid ${T.green}`,
-              borderRadius:13,padding:'12px 12px'}}>
-              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:10,marginBottom:6}}>
-                <div style={{fontSize:9,fontWeight:900,color:T.green,textTransform:'uppercase',letterSpacing:'.1em'}}>
-                  {tr('best_branch') || tr('best_performing_branch') || tr('best')}
-                </div>
-                <span style={{fontSize:12,opacity:.9}}>🏆</span>
-              </div>
-              <div style={{fontSize:14,fontWeight:900,color:T.text1,marginBottom:4,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>
-                {topBranch.branch_name}
-              </div>
-              <div style={{display:'flex',alignItems:'baseline',justifyContent:'space-between',gap:10}}>
-                <div style={{fontFamily:'monospace',fontSize:16,fontWeight:900,color:T.accent,direction:'ltr'}}>
-                  {formatCompact(topBranch.revenue)}
-                </div>
-                {topBranch.net_margin!=null && (
-                  <div style={{fontFamily:'monospace',fontSize:12,fontWeight:900,color:(topBranch.net_margin>=0?T.green:T.red),direction:'ltr'}}>
-                    {fmtP(topBranch.net_margin)}
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-          {weakBranch && (
-            <div style={{background:`linear-gradient(135deg,${T.card},rgba(248,113,113,0.10))`,
-              border:`1px solid rgba(248,113,113,0.25)`,borderTop:`4px solid ${T.red}`,
-              borderRadius:13,padding:'12px 12px'}}>
-              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:10,marginBottom:6}}>
-                <div style={{fontSize:9,fontWeight:900,color:T.red,textTransform:'uppercase',letterSpacing:'.1em'}}>
-                  {tr('worst_branch') || tr('weakest_branch') || tr('weakest')}
-                </div>
-                <span style={{fontSize:12,opacity:.9}}>⚠</span>
-              </div>
-              <div style={{fontSize:14,fontWeight:900,color:T.text1,marginBottom:4,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>
-                {weakBranch.branch_name}
-              </div>
-              <div style={{display:'flex',alignItems:'baseline',justifyContent:'space-between',gap:10}}>
-                <div style={{fontFamily:'monospace',fontSize:16,fontWeight:900,color:T.accent,direction:'ltr'}}>
-                  {formatCompact(weakBranch.revenue)}
-                </div>
-                {weakBranch.net_margin!=null && (
-                  <div style={{fontFamily:'monospace',fontSize:12,fontWeight:900,color:(weakBranch.net_margin>=0?T.green:T.red),direction:'ltr'}}>
-                    {fmtP(weakBranch.net_margin)}
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-      <div>
-        {top.map((b,i)=>(
-          <div key={b.branch_id||i} style={{display:'flex',alignItems:'center',gap:10,padding:'8px 0',borderBottom:i<top.length-1?`1px solid ${T.border}`:'none'}}>
-            <span style={{width:20,height:20,borderRadius:6,background:i===0?`${T.accent}20`:T.card,
-              border:`1px solid ${i===0?T.accent:T.border}`,display:'flex',alignItems:'center',justifyContent:'center',
-              fontSize:9,fontWeight:800,color:i===0?T.accent:T.text2,flexShrink:0}}>{i+1}</span>
-            <div style={{flex:1,minWidth:0}}>
-              <div style={{fontSize:12,fontWeight:700,color:T.text1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{b.branch_name}</div>
-              {b.city&&<div style={{fontSize:10,color:T.text3}}>{b.city}</div>}
-            </div>
-            <div style={{textAlign:'right',flexShrink:0}}>
-              <div style={{fontSize:12,fontWeight:800,fontFamily:'monospace',color:T.accent,direction:'ltr'}}>{formatCompact(b.revenue)}</div>
-              {b.net_margin!=null&&<div style={{fontSize:9,color:(b.net_margin>=0?T.green:T.red),fontFamily:'monospace',direction:'ltr'}}>{fmtP(b.net_margin)}</div>}
-            </div>
-            {b.mom_revenue_pct!=null&&(
-              <span style={{fontSize:10,fontWeight:700,color:(b.mom_revenue_pct>0?T.green:b.mom_revenue_pct<0?T.red:T.text2),minWidth:44,textAlign:'right',direction:'ltr'}}>
-                {b.mom_revenue_pct>0?'▲':b.mom_revenue_pct<0?'▼':'─'}{Math.abs(b.mom_revenue_pct).toFixed(1)}%
-              </span>
-            )}
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
-
-function CommandNav({ tr, navigate }) {
+function CommandNav({ tr, navigate, secondary = false }) {
   const links = [
     { to:'/analysis', label: tr('nav_analysis') },
     { to:'/statements', label: tr('nav_statements') },
@@ -926,7 +817,7 @@ function CommandNav({ tr, navigate }) {
     { to:'/upload', label: tr('nav_upload') },
   ]
   return (
-    <div style={{marginTop:8,paddingTop:14,borderTop:`1px solid ${T.border}`}}>
+    <div style={{marginTop:8,paddingTop:14,borderTop:`1px solid ${T.border}`,opacity:secondary?0.88:1}}>
       <div style={{fontSize:9,fontWeight:800,color:T.text3,textTransform:'uppercase',letterSpacing:'.12em',marginBottom:8}}>
         {tr('navigation')}
       </div>
@@ -958,12 +849,11 @@ export default function CommandCenter() {
   const [causes,   setCauses]   = useState(null)
   const [alerts,   setAlerts]   = useState(null)
   const [main,     setMain]     = useState(null)
-  const [decSum,   setDecSum]   = useState(null)
-  const [alertSum, setAlertSum] = useState(null)
   const [fcData,   setFcData]   = useState(null)
   const [loading,  setLoading]  = useState(false)
   const [consolidate, setConsolidate] = useState(false)
   const [noDataMsg, setNoDataMsg] = useState(null)
+  const [narrative, setNarrative] = useState(null)
 
   const [impacts, setImpacts] = useState({})
   const [pType, setPType] = useState(null)
@@ -984,18 +874,18 @@ export default function CommandCenter() {
       if (!r.ok) {
         if (r.status === 422) {
           setMain(null)
+          setNarrative(null)
           setNoDataMsg(tr('err_no_financial_data'))
         }
         return
       }
       const j = await r.json(); const d = j.data||{}
+      setNarrative(buildExecutiveNarrative(d, { lang }))
       psSetResolved(j.meta?.scope || null)
       setIntel(d.intelligence||null)
       setDecs(d.decisions||[])
       setCauses(d.root_causes||[])
       setAlerts(d.alerts||[])
-      setDecSum(d.decisions_summary||{})
-      setAlertSum(d.alerts_summary||{})
       const impMap = {}
       ;(d.decision_impacts||[]).forEach(item => { impMap[item.decision_key||item.domain] = item })
       setImpacts(impMap)
@@ -1010,6 +900,9 @@ export default function CommandCenter() {
         pipeline_validation: j.meta?.pipeline_validation || null,
         scope_label:         j.meta?.scope?.label || null,
         all_periods:         j.meta?.all_periods || [],
+        comparative_intelligence: d.comparative_intelligence ?? null,
+        financial_brain:          d.financial_brain ?? null,
+        expense_decisions_v2:     d.expense_decisions_v2 ?? [],
       })
       try {
         const fqs = buildAnalysisQuery(scopeQS, { lang, window: win, consolidate: false })
@@ -1023,13 +916,13 @@ export default function CommandCenter() {
     }
   }, [selectedId, lang, consolidate, win, scopeQS, tr, psIncomplete, psSetResolved])
 
-  useEffect(() => { load() }, [selectedId, win, consolidate])
+  useEffect(() => { load() }, [load])
 
   if (!selectedId) {
     return (
       <div style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',height:'70vh',gap:12,background:T.bg}}>
         <span style={{fontSize:52,opacity:.15}}>🏢</span>
-        <div style={{fontSize:15,fontWeight:600,color:T.text2}}>{tr('exec_no_company')}</div>
+        <div style={{fontSize:15,fontWeight:600,color:T.text2}}>{Tx(tr,'exec_no_company','Select a company')}</div>
       </div>
     )
   }
@@ -1050,20 +943,18 @@ export default function CommandCenter() {
   const status = intel?.status ?? (health!=null ? health>=80?'excellent':health>=60?'good':health>=40?'warning':'risk' : 'neutral')
   const kpis   = main?.kpi_block?.kpis || {}
   const period = main?.intelligence?.latest_period || main?.periods?.slice(-1)[0]
-
-  const qs = buildAnalysisQuery(scopeQS, { lang, window: win })
+  const dupIneffBranch = keySignalsShowsInefficientBranch(main?.comparative_intelligence, narrative)
 
   return (
-    <div style={{padding:'18px 26px',display:'flex',flexDirection:'column',gap:14,minHeight:'calc(100vh - 62px)',background:T.bg}}>
+    <div style={{padding:'22px 28px',display:'flex',flexDirection:'column',gap:26,minHeight:'calc(100vh - 62px)',background:T.bg}}>
       <style>{`
         @keyframes spin { to { transform:rotate(360deg) } }
         @keyframes slideIn { from { transform:translateX(100%);opacity:0 } to { transform:translateX(0);opacity:1 } }
         @keyframes fadeUp { from { opacity:0;transform:translateY(5px) } to { opacity:1;transform:none } }
       `}</style>
 
-      {/* 1) Data quality + scope + period (before health / KPI strip) */}
       <DataQualityBanner validation={main?.pipeline_validation} lang={lang} tr={tr}/>
-      <div style={{display:'flex',flexDirection:'column',gap:8}}>
+      <div style={{display:'flex',flexDirection:'column',gap:10}}>
         <UniversalScopeSelector tr={tr} ps={ps} psUpdate={psUpdate} onApply={load}
           activeLabel={psActiveLabel()} allPeriods={main?.all_periods||[]}/>
         <div style={{display:'flex',alignItems:'center',gap:12,flexWrap:'wrap'}}>
@@ -1084,33 +975,73 @@ export default function CommandCenter() {
         </div>
       </div>
 
-      <div style={{padding:'8px 14px',borderRadius:10,border:`1px solid ${T.accent}35`,
-        background:`${T.accent}0f`,fontSize:12,fontWeight:700,color:T.accent,letterSpacing:'.02em'}}>
-        {tr('data_source_company_view_label')}
-      </div>
+      <ExecutiveNarrativeStrip narrative={narrative} tr={tr} lang={lang} />
 
-      {/* 2) Executive Health + KPI Strip */}
-      <TopBar tr={tr} health={health} status={status}
+      <HealthKpiSnapshot
+        tr={tr}
+        health={health}
+        status={status}
         companyName={selectedCompany?.name}
-        period={period} loading={loading} onRefresh={load}
-        periodCount={main?.periods?.length} scopeLabel={main?.scope_label}/>
-      {main && <ExecutiveKpiRow kpis={kpis} cashflow={main.cashflow||{}} main={main} tr={tr}
-        alerts={alerts} onSelect={open} ctxLabel={ctxLabel}/>}
+        period={period}
+        loading={loading}
+        onRefresh={load}
+        periodCount={main?.periods?.length}
+        scopeLabel={main?.scope_label}
+        kpis={kpis}
+        cashflow={main?.cashflow}
+        main={main}
+        alerts={alerts}
+        onSelect={open}
+        ctxLabel={ctxLabel}
+      />
 
-      {/* 3) What Matters Now (explicit forecast included) */}
-      <TopFocusBanner tr={tr} decSum={decSum} alertSum={alertSum} health={health}/>
-      {decs?.length>0 && <ActionStrip decisions={decs} tr={tr} causes={causes} impacts={impacts} onSelect={open}/>}
-      <ForecastNow fcData={fcData} tr={tr}/>
+      <KeySignalsSection
+        financialBrain={main?.financial_brain}
+        comparativeIntel={main?.comparative_intelligence}
+        alerts={alerts}
+        narrative={narrative}
+        tr={tr}
+        main={main}
+        intel={intel}
+      />
 
-      {/* 4) Branch Performance (aligned lang/window/scope) */}
-      <BranchPerformance companyId={selectedId} qs={qs} tr={tr}/>
+      <BranchIntelligenceSection
+        comparativeIntel={main?.comparative_intelligence}
+        tr={tr}
+        narrative={narrative}
+        duplicateIneffBranchName={dupIneffBranch}
+        onOpenBranches={() => navigate('/branches')}
+      />
 
-      {/* 5) Intelligence Grid */}
-      {intel && <DomainGrid intelligence={intel} tr={tr} rootCauses={causes} decisions={decs} alerts={alerts} onSelect={open}/>}
-      <AlertsBar alerts={alerts} tr={tr} onSelect={open}/>
+      <DecisionsSection expenseDecisionsV2={main?.expense_decisions_v2} tr={tr} />
 
-      {/* 6) Command Navigation (lightweight bottom launcher) */}
-      <CommandNav tr={tr} navigate={navigate}/>
+      <div
+        style={{
+          marginTop: 4,
+          paddingTop: 22,
+          borderTop: '1px solid rgba(148,163,184,0.12)',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 18,
+        }}
+      >
+        <div
+          style={{
+            fontSize: 10,
+            fontWeight: 800,
+            color: T.text3,
+            textTransform: 'uppercase',
+            letterSpacing: '.12em',
+            marginBottom: -6,
+          }}
+        >
+          {Tx(tr, 'cmd_secondary', 'Further detail')}
+        </div>
+        <ForecastNow fcData={fcData} tr={tr} secondary />
+        {intel ? <DomainGrid intelligence={intel} tr={tr} rootCauses={causes} decisions={decs} alerts={alerts} onSelect={open} secondary /> : null}
+        <AlertsBar alerts={alerts} tr={tr} onSelect={open} secondary />
+        <CommandNav tr={tr} navigate={navigate} secondary />
+      </div>
 
       {pType && (
         <ContextPanel

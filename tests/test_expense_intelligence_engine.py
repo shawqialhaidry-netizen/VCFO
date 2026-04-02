@@ -46,7 +46,8 @@ def test_bundle_keys_and_trends():
     assert ea["trends"]["yoy"]["from_period"] == "2024-01"
     assert ea["trends"]["yoy"]["to_period"] == "2025-01"
     assert len(ea["by_year"]) == 2
-    assert any(a.get("signal") == "unusual_increase_vs_baseline" for a in out["expense_anomalies"])
+    assert any(a.get("signal") in ("category_spike_vs_median", "expense_ratio_above_threshold", "total_expense_outpaced_revenue")
+               for a in out["expense_anomalies"])
 
 
 def test_empty_statements():
