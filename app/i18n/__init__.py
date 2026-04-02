@@ -3,16 +3,24 @@ from pathlib import Path
 
 _SUPPORTED = {"en", "ar", "tr"}
 _DEFAULT = "en"
-_cache: dict[str, dict] = {}
+# Per-language cache: re-read JSON when file mtime changes (uvicorn --reload does not reload .json).
+_cache: dict[str, tuple[float, dict]] = {}
+
 
 def _load(lang: str) -> dict:
-    if lang not in _cache:
-        path = Path(__file__).parent / f"{lang}.json"
-        if not path.exists():
-            path = Path(__file__).parent / f"{_DEFAULT}.json"
-        with open(path, encoding="utf-8") as f:
-            _cache[lang] = json.load(f)
-    return _cache[lang]
+    if lang not in _SUPPORTED:
+        lang = _DEFAULT
+    path = Path(__file__).parent / f"{lang}.json"
+    if not path.exists():
+        path = Path(__file__).parent / f"{_DEFAULT}.json"
+    mtime = path.stat().st_mtime
+    hit = _cache.get(lang)
+    if hit is not None and hit[0] == mtime:
+        return hit[1]
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
+    _cache[lang] = (mtime, data)
+    return data
 
 
 def cache_clear() -> None:

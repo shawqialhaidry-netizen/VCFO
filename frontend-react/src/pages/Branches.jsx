@@ -4,7 +4,9 @@
  * Company-isolated, auth-protected, i18n-ready (EN/AR/TR)
  */
 import { useState, useEffect, useCallback } from 'react'
+import { useLocation } from 'react-router-dom'
 import { useCompany } from '../context/CompanyContext.jsx'
+import DrillBackBar from '../components/DrillBackBar.jsx'
 import { useLang }    from '../context/LangContext.jsx'
 import { usePeriodScope } from '../context/PeriodScopeContext.jsx'
 import { formatCompact, formatFull, formatDual, formatPct, formatMultiple, formatDays } from '../utils/numberFormat.js'
@@ -294,6 +296,7 @@ function StatusBadge({ active, tr }) {
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function Branches() {
+  const location = useLocation()
   const { selectedId: companyId, selectedCompany, canWrite, canManage } = useCompany()
   const { tr, lang }                               = useLang()
   const { window: brWindow, toQueryString }       = usePeriodScope()
@@ -325,6 +328,18 @@ export default function Branches() {
   }, [companyId])
 
   useEffect(() => { load() }, [load])
+
+  useEffect(() => {
+    const st = location.state
+    if (!st?.focusBranchName && st?.focusBranchId == null) return
+    if (!branches.length) return
+    const match = branches.find(
+      (b) =>
+        (st.focusBranchId != null && String(b.id) === String(st.focusBranchId)) ||
+        (st.focusBranchName && String(b.name) === String(st.focusBranchName)),
+    )
+    if (match) setAnalysisBranch(match)
+  }, [location.state, branches])
 
   // ── Handlers ──────────────────────────────────────────────────────────────
   function handleSaved(saved, isEdit) {
@@ -395,6 +410,7 @@ useEffect(() => {
   // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div style={s.page}>
+      <DrillBackBar detailLabel={tr('nav_drill_branches')} />
       {/* ── Page header ── */}
       <div style={s.pageHeader}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>

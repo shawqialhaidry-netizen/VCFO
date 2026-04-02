@@ -35,18 +35,18 @@ class TestRegister:
 class TestLogin:
     def test_login_success(self, client, registered_user):
         r = client.post("/api/v1/auth/login", json={
-            "email": "test@vcfo.com",
+            "email": registered_user["_test_email"],
             "password": "TestPass123!",
         })
         assert r.status_code == 200
         d = r.json()
         assert "access_token" in d
         assert d["token_type"] == "bearer"
-        assert d["user"]["email"] == "test@vcfo.com"
+        assert d["user"]["email"] == registered_user["_test_email"]
 
     def test_login_wrong_password(self, client, registered_user):
         r = client.post("/api/v1/auth/login", json={
-            "email": "test@vcfo.com",
+            "email": registered_user["_test_email"],
             "password": "WrongPassword",
         })
         assert r.status_code == 401
@@ -63,7 +63,7 @@ class TestMe:
     def test_me_authenticated(self, client, auth_headers, registered_user):
         r = client.get("/api/v1/auth/me", headers=auth_headers)
         assert r.status_code == 200
-        assert r.json()["email"] == "test@vcfo.com"
+        assert r.json()["email"] == registered_user["_test_email"]
 
     def test_me_unauthenticated(self, client):
         r = client.get("/api/v1/auth/me")

@@ -1,4 +1,4 @@
-import { Routes, Route } from 'react-router-dom'
+import { Routes, Route, Navigate } from 'react-router-dom'
 import { useState } from 'react'
 import { useAuth } from './context/AuthContext.jsx'
 import { useCompany } from './context/CompanyContext.jsx'
@@ -6,7 +6,6 @@ import SessionExpiredBanner from './components/SessionExpiredBanner.jsx'
 import Sidebar from './components/Sidebar.jsx'
 import HeaderBar from './components/HeaderBar.jsx'
 import CommandCenter from './pages/CommandCenter.jsx'
-import ExecutiveDashboard from './pages/ExecutiveDashboard.jsx'
 import Upload from './pages/Upload.jsx'
 import CfoAI from './pages/CfoAI.jsx'
 import Statements from './pages/Statements.jsx'
@@ -100,7 +99,7 @@ export default function App() {
         <main style={s.main} className="grid-bg">
           <Routes>
             <Route path="/"           element={<CommandCenter />} />
-            <Route path="/executive"  element={<ExecutiveDashboard />} />
+            <Route path="/executive"  element={<Navigate to="/" replace />} />
             <Route path="/upload"     element={<Upload />} />
             <Route path="/cfo-ai"     element={<CfoAI />} />
             <Route path="/ai-advisor" element={<CfoAI />} />

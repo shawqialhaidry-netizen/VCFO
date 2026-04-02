@@ -6,17 +6,25 @@ import CompanySelector from './CompanySelector.jsx'
 
 // Page title keys map route → i18n key
 const PAGE_TITLE_KEYS = {
-  '/':           'nav_dashboard',
+  '/':           'nav_command_center',
   '/upload':     'nav_upload',
   '/statements': 'nav_statements',
-  '/analysis':   'nav_analysis',
+  '/analysis':   'nav_drill_analysis',
   '/cfo-ai':     'nav_cfo_ai',
   '/ai-advisor': 'nav_cfo_ai',
-  '/executive':  'nav_executive',
-  '/branches':   'nav_branches',
+  '/executive':  'nav_command_center',
+  '/branches':   'nav_drill_branches',
   '/board-report': 'nav_board_report',
   '/members':    'nav_members',
   '/settings':   'nav_settings',
+}
+
+function titleKeyForPath(pathname) {
+  if (!pathname) return 'nav_command_center'
+  if (pathname === '/') return 'nav_command_center'
+  if (pathname.startsWith('/analysis')) return 'nav_drill_analysis'
+  if (pathname.startsWith('/branches')) return 'nav_drill_branches'
+  return PAGE_TITLE_KEYS[pathname] || 'nav_command_center'
 }
 
 export default function HeaderBar({ onOpenSidebar, onOpenCfo }) {
@@ -26,7 +34,7 @@ export default function HeaderBar({ onOpenSidebar, onOpenCfo }) {
   const { auth, logout } = useAuth()
   const { companies, selectedId, setSelectedId, isTrial, isTrialExpired, trialDaysLeft } = useCompany()
 
-  const titleKey = PAGE_TITLE_KEYS[loc.pathname] || 'nav_dashboard'
+  const titleKey = titleKeyForPath(loc.pathname)
 
   // Locale-aware date
   const localeCode = lang === 'ar' ? 'ar-SA' : lang === 'tr' ? 'tr-TR' : 'en-US'

@@ -14,6 +14,7 @@
  */
 import { useState, useEffect, useCallback } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
+import DrillBackBar from '../components/DrillBackBar.jsx'
 import { useLang }    from '../context/LangContext.jsx'
 import { useCompany } from '../context/CompanyContext.jsx'
 import { usePeriodScope } from '../context/PeriodScopeContext.jsx'  // FIX-1.2
@@ -604,23 +605,21 @@ export default function Analysis() {
       gap:14,minHeight:'calc(100vh - 62px)',background:'var(--bg-void)'}}>
       <style>{`@keyframes slideIn{from{transform:translateX(100%);opacity:0}to{transform:translateX(0);opacity:1}}`}</style>
 
+      <DrillBackBar detailLabel={tr('nav_drill_analysis')} />
+
       {/* Header */}
       <div style={{display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
         <div style={{flex:1}}>
-          <h1 style={{fontSize:20,fontWeight:800,color:'#ffffff',margin:0}}>{tr('nav_analysis')}</h1>
+          <h1 style={{fontSize:20,fontWeight:800,color:'#ffffff',margin:0}}>{tr('nav_drill_analysis')}</h1>
           <p style={{fontSize:11,color:'var(--text-secondary)',margin:'3px 0 0'}}>
             {selectedCompany?.name} · {periods.at(-1)||'—'} {currency&&`· ${currency}`}
           </p>
         </div>
-        {[['← '+tr('nav_executive'),'/executive'],
-          [tr('nav_statements')+' →','/statements']
-        ].map(([lbl,path])=>(
-          <button key={path} onClick={()=>navigate(path)}
+        <button type="button" onClick={()=>navigate('/statements',{state:{focus:'cashflow'}})}
             style={{padding:'7px 14px',borderRadius:8,border:'1px solid var(--border)',
               background:'var(--bg-elevated)',color:'#aab4c3',fontSize:11,fontWeight:500,cursor:'pointer'}}>
-            {lbl}
-          </button>
-        ))}
+          {tr('nav_statements')} →
+        </button>
         <button onClick={load} disabled={loading}
           style={{padding:'7px 12px',borderRadius:8,border:'1px solid var(--border)',
             background:'var(--bg-elevated)',color:'#aab4c3',fontSize:12,cursor:'pointer'}}>

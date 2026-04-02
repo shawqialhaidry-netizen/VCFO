@@ -4261,20 +4261,34 @@ def get_executive(
         "efficiency_ranking": {},
         "category_comparison": {},
     }
+    company_expense_bundle: dict | None = None
     try:
         from app.services.expense_intelligence_engine import build_expense_intelligence_bundle
         from app.services.comparative_intelligence import build_comparative_intelligence
         from app.models.branch import Branch as _BranchModel
 
-        # Build branch bundles from branch uploads (same statement pipeline; no new math)
+        _periods_in_scope = set(resolved_scope.get("months") or [])
+
+        # Company bundle first (executive expense_intel + decisions + brain share this).
+        company_for_compare = None
+        try:
+            _cons_stmts = _build_consolidated_statements(company_id, db)
+            if _cons_stmts:
+                if _periods_in_scope:
+                    _cons_stmts = [s for s in _cons_stmts if (s.get("period") in _periods_in_scope)]
+                company_for_compare = _cons_stmts
+        except Exception:
+            company_for_compare = None
+
+        company_expense_bundle = build_expense_intelligence_bundle(
+            company_for_compare or windowed, lang=safe_lang
+        )
+
         _branches_active = (
             db.query(_BranchModel)
             .filter(_BranchModel.company_id == company_id, _BranchModel.is_active == True)  # noqa
             .all()
         )
-
-        # Use the *same* period set as executive scope/window for deterministic comparisons
-        _periods_in_scope = set(resolved_scope.get("months") or [])
 
         branch_bundles: list[dict] = []
         for _b in _branches_active:
@@ -4311,22 +4325,6 @@ def get_executive(
                 }
             )
 
-        # Denominator for "branch vs company" must be consistent with branch source.
-        # If branch uploads exist, prefer consolidated company statements derived from branches.
-        company_for_compare = None
-        try:
-            _cons_stmts = _build_consolidated_statements(company_id, db)
-            if _cons_stmts:
-                if _periods_in_scope:
-                    _cons_stmts = [s for s in _cons_stmts if (s.get("period") in _periods_in_scope)]
-                company_for_compare = _cons_stmts
-        except Exception:
-            company_for_compare = None
-
-        company_expense_bundle = build_expense_intelligence_bundle(
-            company_for_compare or windowed, lang=safe_lang
-        )
-
         if branch_bundles:
             comparative_intelligence = build_comparative_intelligence(
                 company_expense_bundle=company_expense_bundle,
@@ -4334,6 +4332,49 @@ def get_executive(
             )
     except Exception as _ci_exc:
         logger.warning("comparative_intelligence build failed: %s", _ci_exc)
+
+    if company_expense_bundle is None:
+        try:
+            from app.services.expense_intelligence_engine import build_expense_intelligence_bundle as _beb_fb
+
+            _periods_fb = set(resolved_scope.get("months") or [])
+            _cons_fb = None
+            try:
+                _cons_fb = _build_consolidated_statements(company_id, db)
+                if _cons_fb and _periods_fb:
+                    _cons_fb = [s for s in _cons_fb if (s.get("period") in _periods_fb)]
+            except Exception:
+                pass
+            company_expense_bundle = _beb_fb(_cons_fb or windowed, lang=safe_lang)
+        except Exception as _fb_exc:
+            logger.warning("expense bundle fallback failed: %s", _fb_exc)
+            company_expense_bundle = {
+                "expense_analysis": {
+                    "meta": {"error": "unavailable"},
+                    "by_period": [],
+                },
+                "expense_anomalies": [],
+                "expense_decisions": [],
+                "expense_explanation": {},
+            }
+
+    try:
+        from app.services.expense_intelligence_engine import build_expense_intelligence_executive_view
+
+        expense_intelligence = build_expense_intelligence_executive_view(company_expense_bundle)
+    except Exception as _ei_exc:
+        logger.warning("expense_intelligence executive view failed: %s", _ei_exc)
+        expense_intelligence = {
+            "available": False,
+            "reason": "build_failed",
+            "categories": {},
+            "totals": None,
+            "top_category": None,
+            "mom_change": None,
+            "expense_ratio": None,
+            "anomalies": [],
+            "decisions": [],
+        }
 
     # ── Decision impacts (Phase 32) ──────────────────────────────────────────
     decision_impacts = _build_impacts(
@@ -4359,26 +4400,13 @@ def get_executive(
     # ── Expense decisions upgrade (company-level; additive) ───────────────────
     expense_decisions_v2: list = []
     try:
-        from app.services.expense_intelligence_engine import build_expense_intelligence_bundle as _beb
         from app.services.expense_decisions_upgrade import build_company_expense_decisions_v2
 
-        # Use the same denominator choice as comparative_intelligence:
-        # prefer consolidated-from-branches if available (ensures branch contributions make sense).
-        _periods_in_scope = set(resolved_scope.get("months") or [])
-        _cons = None
-        try:
-            _cons = _build_consolidated_statements(company_id, db)
-            if _cons and _periods_in_scope:
-                _cons = [s for s in _cons if (s.get("period") in _periods_in_scope)]
-        except Exception:
-            _cons = None
-
-        _bundle_for_dec = _beb(_cons or windowed, lang=safe_lang)
         expense_decisions_v2 = build_company_expense_decisions_v2(
             company_id=company_id,
             company_name=company.name,
             currency=(company.currency or ""),
-            company_bundle=_bundle_for_dec,
+            company_bundle=company_expense_bundle,
             comparative_intelligence=comparative_intelligence,
             lang=safe_lang,
         )
@@ -4389,26 +4417,15 @@ def get_executive(
     financial_brain: dict = {"available": False, "reason": "unavailable"}
     try:
         from app.services.financial_brain import build_financial_brain_company
-        from app.services.expense_intelligence_engine import build_expense_intelligence_bundle as _beb2
 
-        _periods_in_scope = set(resolved_scope.get("months") or [])
-        _cons2 = None
-        try:
-            _cons2 = _build_consolidated_statements(company_id, db)
-            if _cons2 and _periods_in_scope:
-                _cons2 = [s for s in _cons2 if (s.get("period") in _periods_in_scope)]
-        except Exception:
-            _cons2 = None
-
-        _bundle_for_brain = _beb2(_cons2 or windowed, lang=safe_lang)
         financial_brain = build_financial_brain_company(
             company_id=company_id,
             company_name=company.name,
             currency=(company.currency or ""),
-            expense_bundle=_bundle_for_brain,
+            expense_bundle=company_expense_bundle,
             comparative_intelligence=comparative_intelligence,
             expense_decisions_v2=expense_decisions_v2,
-            anomalies=_bundle_for_brain.get("expense_anomalies") or [],
+            anomalies=(company_expense_bundle or {}).get("expense_anomalies") or [],
             lang=safe_lang,
         )
     except Exception as _fb_exc:
@@ -4471,6 +4488,9 @@ def get_executive(
 
             # ── Comparative intelligence (branches within company) ────────────
             "comparative_intelligence": comparative_intelligence,
+
+            # ── Expense intelligence (structured UI + same source as v2 decisions) ─
+            "expense_intelligence": expense_intelligence,
 
             # ── Expense decisions upgrade (additive; does not replace expense_decisions) ─
             "expense_decisions_v2": expense_decisions_v2,

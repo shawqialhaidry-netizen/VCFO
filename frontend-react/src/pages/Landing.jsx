@@ -50,10 +50,9 @@ const CAPABILITIES = [
 ]
 
 const SCREENS = [
-  { path: '/',           icon: '📊', color: T.accent,  label: { en: 'Dashboard',   ar: 'لوحة التحكم'   }, desc: { en: 'KPIs, trends, variance, what-if', ar: 'المؤشرات، الاتجاهات، التباين' } },
-  { path: '/executive',  icon: '🎯', color: T.amber,   label: { en: 'Executive',   ar: 'تنفيذي'         }, desc: { en: 'CFO cockpit — health, actions, root causes', ar: 'قمرة المدير المالي' } },
+  { path: '/',           icon: '🎯', color: T.accent,  label: { en: 'Command Center', ar: 'مركز القيادة' }, desc: { en: 'Main hub — health, KPIs, signals, branches, decisions; click through to detail views.', ar: 'المركز الرئيسي — الصحة والمؤشرات والقرارات؛ انتقل للتفاصيل بالنقر.' } },
   { path: '/statements', icon: '📋', color: T.blue,    label: { en: 'Statements',  ar: 'القوائم'        }, desc: { en: 'IS + BS + CF with comparison', ar: 'قوائم مالية مع مقارنة' } },
-  { path: '/analysis',   icon: '🔬', color: T.violet,  label: { en: 'Analysis',    ar: 'التحليل'        }, desc: { en: 'Ratios, trends, root causes', ar: 'نسب، اتجاهات، أسباب جذرية' } },
+  { path: '/analysis',   icon: '🔬', color: T.violet,  label: { en: 'Full analysis (drill-down)', ar: 'تحليل كامل' }, desc: { en: 'Opened from Command Center — ratios, tabs, root causes.', ar: 'يُفتح من مركز القيادة — النسب والتبويبات.' } },
 ]
 
 const EVAL_AREAS = [

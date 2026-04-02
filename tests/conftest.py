@@ -10,10 +10,17 @@ Connection resolution order:
 
 The engine is created lazily on first use so ``TEST_DATABASE_URL`` / ``.env.test``
 are visible even when set after ``settings`` was imported.
+
+Teardown: ``Base.metadata.drop_all`` runs after the session. On shared Postgres
+instances that have migrated tables not registered on ``Base``, drop may fail;
+the failure is logged and ignored. Set ``SKIP_TEST_DB_TEARDOWN=1`` to skip
+dropping entirely (leave schema as-is).
 """
 from __future__ import annotations
 
+import logging
 import os
+import uuid
 from pathlib import Path
 
 import pytest
@@ -26,6 +33,7 @@ from app.core.database import Base, get_db
 from app.main import app
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
+_log = logging.getLogger("vcfo.tests.conftest")
 _ENV_TEST = _REPO_ROOT / ".env.test"
 try:
     from dotenv import load_dotenv
@@ -87,7 +95,19 @@ def setup_test_db():
     engine = get_engine_test()
     Base.metadata.create_all(bind=engine)
     yield
-    Base.metadata.drop_all(bind=engine)
+    if os.environ.get("SKIP_TEST_DB_TEARDOWN", "").strip().lower() in ("1", "true", "yes"):
+        _log.info("SKIP_TEST_DB_TEARDOWN set — leaving tables in place for shared Postgres.")
+        return
+    try:
+        Base.metadata.drop_all(bind=engine)
+    except Exception as exc:
+        _log.warning(
+            "Test DB teardown skipped: %s. "
+            "Shared databases often have FKs to `companies` from tables not on "
+            "SQLAlchemy Base.metadata — use a disposable TEST_DATABASE_URL, or set "
+            "SKIP_TEST_DB_TEARDOWN=1 to silence this.",
+            exc,
+        )
 
 
 @pytest.fixture(autouse=True)
@@ -120,20 +140,23 @@ def client(setup_test_db):
 @pytest.fixture()
 def registered_user(client):
     """Create and return a registered test user."""
+    email = f"test_{uuid.uuid4().hex[:12]}@vcfo.com"
     r = client.post("/api/v1/auth/register", json={
-        "email": "test@vcfo.com",
+        "email": email,
         "password": "TestPass123!",
         "full_name": "Test User",
     })
     assert r.status_code == 201, r.text
-    return r.json()
+    data = r.json()
+    data["_test_email"] = email
+    return data
 
 
 @pytest.fixture()
 def auth_headers(client, registered_user):
     """Return Authorization headers for an authenticated user."""
     r = client.post("/api/v1/auth/login", json={
-        "email": "test@vcfo.com",
+        "email": registered_user["_test_email"],
         "password": "TestPass123!",
     })
     assert r.status_code == 200, r.text

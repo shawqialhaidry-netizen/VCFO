@@ -13,6 +13,7 @@
  */
 import { createContext, useContext, useEffect, useState, useCallback } from 'react'
 import { loadTranslations, LANGUAGES } from '../i18n/index.js'
+import { fallbackLabel } from '../i18n/criticalFallbacks.js'
 
 const STORAGE_KEY = 'vcfo_lang'
 const DEFAULT_LANG = 'en'
@@ -67,13 +68,19 @@ export function LangProvider({ children }) {
 
   // ── 5. Translation helper ─────────────────────────────────────────────────
   const tr = useCallback((key, params = null) => {
-    let s = translations[key] ?? key
+    let s = translations[key]
+    if (s == null || s === '') {
+      s = fallbackLabel(lang, key)
+    }
+    if (s == null || s === '') {
+      s = key
+    }
     if (!params) return s
     for (const [k, v] of Object.entries(params)) {
       s = s.replaceAll(`{${k}}`, String(v))
     }
     return s
-  }, [translations])
+  }, [translations, lang])
 
   return (
     <LangContext.Provider value={{ lang, setLang, tr, ready, translations }}>

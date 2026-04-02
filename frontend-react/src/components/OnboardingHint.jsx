@@ -10,20 +10,16 @@ import { useLang } from '../context/LangContext.jsx'
 
 const HINTS = {
   '/': {
-    en: '📊 Dashboard — Start here. See KPIs, trends, and AI insights for every metric. Click any KPI card for a drill-down.',
-    ar: '📊 لوحة التحكم — ابدأ هنا. اعرض المؤشرات والاتجاهات والرؤى الذكية. انقر على أي بطاقة للتفاصيل.',
+    en: '🎯 Command Center — Main screen. Narrative, health, KPIs, signals, branches, and decisions. Click any section to open full analysis or branch detail.',
+    ar: '🎯 مركز القيادة — الشاشة الرئيسية. السرد والصحة والمؤشرات والفروع والقرارات. انقر للتفاصيل.',
   },
   '/statements': {
     en: '📋 Statements — Source of truth. Income Statement, Balance Sheet, and Cash Flow with prior-period comparison.',
     ar: '📋 القوائم المالية — المصدر الأساسي. قائمة الدخل والميزانية والتدفق النقدي مع مقارنة الفترات.',
   },
   '/analysis': {
-    en: '🔬 Analysis — Drill into ratios, trends, and root causes by domain. Use tabs for Profitability, Liquidity, Efficiency.',
-    ar: '🔬 التحليل — فصّل النسب والاتجاهات والأسباب الجذرية. استخدم التبويبات للربحية والسيولة والكفاءة.',
-  },
-  '/executive': {
-    en: '🎯 Executive — CFO cockpit. Health score, top decisions, root causes, and domain performance grid.',
-    ar: '🎯 التنفيذي — قمرة المدير المالي. الصحة المالية وأهم القرارات والأسباب الجذرية وشبكة الأداء.',
+    en: '🔬 Full analysis — Drill-down from Command Center. Ratios, trends, root causes, and decision tabs.',
+    ar: '🔬 التحليل الكامل — من مركز القيادة. النسب والاتجاهات والأسباب وعلامات القرارات.',
   },
   '/upload': {
     en: '📁 Upload — Load a trial balance CSV. Supports monthly (YYYY-MM) and annual (YYYY) periods. All analysis updates automatically.',

@@ -43,6 +43,23 @@ function lex(lang) {
       whyNp: (amt) => `صافي الربح (سياق الفترة): ${amt}.`,
       whyNoNumber: 'لا سائد واحد؛ تابع اتجاهات الفترة.',
       doDefault: 'حافظ على الانضباط التشغيلي وراقب التدفق النقدي عن كثب.',
+      healthMarginDown: (pp, cat, branch) =>
+        branch && cat
+          ? `انخفض الهامش ${pp} بفعل تكلفة ${cat} في ${branch}`
+          : cat
+            ? `انخفض الهامش ${pp} بفعل تكلفة ${cat}`
+            : branch
+              ? `انخفض الهامش ${pp} — أعلى ضغط في ${branch}`
+              : `انخفض الهامش ${pp}`,
+      healthMarginUp: (pp, cat, branch) =>
+        branch && cat
+          ? `ارتفع الهامش ${pp} مع تكلفة ${cat} في ${branch}`
+          : cat
+            ? `ارتفع الهامش ${pp} مع تكلفة ${cat}`
+            : branch
+              ? `ارتفع الهامش ${pp}؛ أعلى ضغط في ${branch}`
+              : `ارتفع الهامش ${pp}`,
+      actionPrefix: 'إجراء:',
     }
   }
   if (l === 'tr') {
@@ -62,6 +79,23 @@ function lex(lang) {
       whyNp: (amt) => `Net kâr (dönem bağlamı): ${amt}.`,
       whyNoNumber: 'Tek bir sürükleyici yok; dönem eğilimlerini izleyin.',
       doDefault: 'Mevcut operasyon disiplinini koruyun ve nakdi yakından izleyin.',
+      healthMarginDown: (pp, cat, branch) =>
+        branch && cat
+          ? `Marj ${pp} düştü; ${branch}'de ${cat} maliyeti sürüklüyor`
+          : cat
+            ? `Marj ${pp} düştü; ${cat} maliyeti belirleyici`
+            : branch
+              ? `Marj ${pp} düştü; en yüksek baskı ${branch}`
+              : `Marj ${pp} düştü`,
+      healthMarginUp: (pp, cat, branch) =>
+        branch && cat
+          ? `Marj ${pp} arttı; ${branch}'de ${cat} maliyeti öne çıkıyor`
+          : cat
+            ? `Marj ${pp} arttı; ${cat} maliyeti öne çıkıyor`
+            : branch
+              ? `Marj ${pp} arttı; en yüksek baskı ${branch}`
+              : `Marj ${pp} arttı`,
+      actionPrefix: 'EYLEM:',
     }
   }
   return {
@@ -80,6 +114,23 @@ function lex(lang) {
     whyNp: (amt) => `Net profit (period context): ${amt}.`,
     whyNoNumber: 'No single driver dominates; keep monitoring period trends.',
     doDefault: 'Maintain current operational discipline and monitor cash flow closely.',
+    healthMarginDown: (pp, cat, branch) =>
+      branch && cat
+        ? `Margin dropped ${pp} driven by ${cat} cost in ${branch}`
+        : cat
+          ? `Margin dropped ${pp} driven by ${cat} cost`
+          : branch
+            ? `Margin dropped ${pp} with ${branch} as highest pressure`
+            : `Margin dropped ${pp}`,
+    healthMarginUp: (pp, cat, branch) =>
+      branch && cat
+        ? `Margin rose ${pp} with ${cat} cost in ${branch}`
+        : cat
+          ? `Margin rose ${pp} with ${cat} cost mix`
+          : branch
+            ? `Margin rose ${pp}; ${branch} highest pressure`
+            : `Margin rose ${pp}`,
+    actionPrefix: 'ACTION:',
   }
 }
 
@@ -286,6 +337,24 @@ function lineHasDigit(s) {
   return /\d/.test(String(s || ''))
 }
 
+function buildHealthHeadline(payload, L) {
+  const nmMomPct = payload.kpi_block?.kpis?.net_margin?.mom_pct
+  if (nmMomPct == null || !Number.isFinite(Number(nmMomPct))) return ''
+  const n = Number(nmMomPct)
+  const pp = `${Math.abs(n).toFixed(1)}%`
+  const ei = payload.expense_intelligence
+  const cat = ei?.top_category?.name ? String(ei.top_category.name) : ''
+  const cp = payload.comparative_intelligence?.cost_pressure
+  const branch =
+    (cp?.driving_expense_increase_mom?.branch_name &&
+      String(cp.driving_expense_increase_mom.branch_name)) ||
+    (cp?.most_inefficient_branch?.branch_name && String(cp.most_inefficient_branch.branch_name)) ||
+    ''
+  if (n < 0) return L.healthMarginDown(pp, cat, branch)
+  if (n > 0) return L.healthMarginUp(pp, cat, branch)
+  return ''
+}
+
 function buildDoLines(payload, L, lang = 'en') {
   const lines = []
   const ed2 = payload.expense_decisions_v2
@@ -326,6 +395,9 @@ export function buildExecutiveNarrative(payload = {}, options = {}) {
       why: { lines: [L.whyNoNumber], sources: ['fallback'] },
       whatToDo: { lines: [L.doDefault], sources: ['fallback'] },
       hasContent: true,
+      healthHeadline: '',
+      actionPrefix: L.actionPrefix,
+      actionLine: null,
     }
   }
 
@@ -345,6 +417,8 @@ export function buildExecutiveNarrative(payload = {}, options = {}) {
 
   const rawDoLines = buildDoLines(payload, L, lang)
   let doLines = rawDoLines.length ? rawDoLines.slice(0, MAX_COL) : [L.doDefault]
+  const healthHeadline = buildHealthHeadline(payload, L)
+  const actionLine = rawDoLines.length ? rawDoLines[0] : null
 
   const whatChanged = {
     lines: whatLines,
@@ -366,5 +440,8 @@ export function buildExecutiveNarrative(payload = {}, options = {}) {
     why: { lines: whyLines, sources: whySources },
     whatToDo: { lines: doLines, sources: doSources },
     hasContent: true,
+    healthHeadline,
+    actionPrefix: L.actionPrefix,
+    actionLine,
   }
 }

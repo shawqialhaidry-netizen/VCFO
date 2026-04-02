@@ -536,8 +536,8 @@ export default function Statements() {
             </button>
           ))}
         </div>
-        {[['← '+tr('nav_executive'),'/executive'],['↗ '+tr('nav_analysis'),'/analysis']].map(([lbl,path])=>(
-          <button key={path} onClick={()=>navigate(path)}
+        {[['← '+tr('nav_back_command_center'),'/'],['↗ '+tr('nav_drill_analysis'),'/analysis']].map(([lbl,path])=>(
+          <button key={path} type="button" onClick={()=>navigate(path, path==='/analysis'?{state:{focus:'overview'}}:undefined)}
             style={{padding:'6px 12px',borderRadius:8,border:'1px solid var(--border)',
               background:'var(--bg-elevated)',color:'#aab4c3',fontSize:11,cursor:'pointer'}}>
             {lbl}

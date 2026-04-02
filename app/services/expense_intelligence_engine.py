@@ -685,6 +685,145 @@ def _build_decisions(anomalies: list[dict], last_row: dict) -> list[dict]:
     return out[:12]
 
 
+def build_expense_intelligence_executive_view(bundle: dict[str, Any]) -> dict[str, Any]:
+    """
+    Compact, UI-oriented slice of ``build_expense_intelligence_bundle`` output
+    for GET /analysis/{id}/executive (deterministic, no new calculations).
+    """
+    ea = (bundle or {}).get("expense_analysis") or {}
+    meta = ea.get("meta") or {}
+    rows = ea.get("by_period") or []
+    if meta.get("error") == "no_statements" or not rows:
+        reason = meta.get("error") or "no_periods"
+        return {
+            "available": False,
+            "reason": reason,
+            "period": None,
+            "categories": {},
+            "totals": None,
+            "top_category": None,
+            "mom_change": None,
+            "expense_ratio": None,
+            "expense_ratio_prior": None,
+            "anomalies": [],
+            "decisions": [],
+            "largest_increasing_category": None,
+            "narrative_headline": "",
+            "narrative_excerpt": "",
+        }
+
+    latest = rows[-1]
+    prev = rows[-2] if len(rows) >= 2 else None
+    trends = ea.get("trends") or {}
+    mom = trends.get("mom")
+    cats = latest.get("categories") or {}
+    if not isinstance(cats, dict):
+        cats = {}
+
+    sorted_cats = sorted(
+        ((str(k), float(v or 0)) for k, v in cats.items()),
+        key=lambda kv: (-abs(kv[1]), kv[0]),
+    )
+    top_cat: dict[str, Any] | None = None
+    for name, amt in sorted_cats:
+        if name.lower() == "other" and len(sorted_cats) > 1:
+            continue
+        top_cat = {"name": name, "amount": _r2(amt)}
+        break
+    if top_cat is None and sorted_cats:
+        top_cat = {"name": sorted_cats[0][0], "amount": _r2(sorted_cats[0][1])}
+
+    cat_ts = ea.get("by_category_timeseries") or {}
+    if isinstance(top_cat, dict) and top_cat.get("name"):
+        te = float(latest.get("total_expense") or 0)
+        amt = float(top_cat.get("amount") or 0)
+        if te > 1e-6:
+            top_cat["share_of_cost_pct"] = _r2(amt / te * 100)
+        sname = str(top_cat.get("name") or "")
+        if isinstance(cat_ts, dict):
+            series = cat_ts.get(sname)
+            if isinstance(series, list) and len(series) >= 2:
+                a0 = float(series[-2].get("amount") or 0)
+                a1 = float(series[-1].get("amount") or 0)
+                if abs(a0) > 1e-6:
+                    top_cat["amount_mom_pct"] = _r2((a1 - a0) / abs(a0) * 100)
+
+    expl = (bundle or {}).get("expense_explanation") or {}
+    tm = expl.get("top_movers") or {}
+    inc = tm.get("increasing") or []
+    first_inc = inc[0] if isinstance(inc, list) and inc else None
+    largest_inc: dict[str, Any] | None = None
+    if isinstance(first_inc, dict) and first_inc.get("category"):
+        largest_inc = {
+            "name": str(first_inc.get("category")),
+            "absolute_change": _r2(first_inc.get("absolute_change")),
+            "pct_change": _r2(first_inc.get("pct_change")),
+            "direction": "up",
+        }
+
+    anomalies_out: list[dict[str, Any]] = []
+    for a in (bundle or {}).get("expense_anomalies") or []:
+        if not isinstance(a, dict):
+            continue
+        anomalies_out.append(
+            {
+                "anomaly_id": a.get("anomaly_id"),
+                "signal": a.get("signal"),
+                "severity": a.get("severity"),
+                "short_explanation": a.get("short_explanation"),
+                "observed": _r2(a.get("observed")),
+                "deviation_pct": _r2(a.get("deviation_pct")),
+            }
+        )
+        if len(anomalies_out) >= 8:
+            break
+
+    decisions_out: list[dict[str, Any]] = []
+    for d in (bundle or {}).get("expense_decisions") or []:
+        if not isinstance(d, dict):
+            continue
+        decisions_out.append(
+            {
+                "decision_id": d.get("decision_id"),
+                "title": d.get("title"),
+                "priority": d.get("priority"),
+                "rationale": d.get("rationale"),
+                "action": d.get("action"),
+                "expected_financial_impact": d.get("expected_financial_impact"),
+                "linked_anomaly_ids": d.get("linked_anomaly_ids"),
+            }
+        )
+        if len(decisions_out) >= 12:
+            break
+
+    narr = expl.get("narrative") or ""
+    if isinstance(narr, str) and len(narr) > 320:
+        narr = narr[:317] + "..."
+
+    return {
+        "available": True,
+        "reason": None,
+        "period": latest.get("period"),
+        "categories": {str(k): _r2(v) for k, v in sorted(cats.items(), key=lambda kv: kv[0])},
+        "totals": {
+            "revenue": latest.get("revenue"),
+            "total_expense": latest.get("total_expense"),
+            "cogs": latest.get("cogs"),
+            "operating_expenses": latest.get("operating_expenses"),
+            "unclassified_pnl_debits": latest.get("unclassified_pnl_debits"),
+        },
+        "top_category": top_cat,
+        "mom_change": mom,
+        "expense_ratio": latest.get("expense_pct_of_revenue"),
+        "expense_ratio_prior": prev.get("expense_pct_of_revenue") if prev else None,
+        "anomalies": anomalies_out,
+        "decisions": decisions_out,
+        "largest_increasing_category": largest_inc,
+        "narrative_headline": expl.get("headline") or "",
+        "narrative_excerpt": narr if isinstance(narr, str) else "",
+    }
+
+
 def build_expense_intelligence_bundle(
     period_statements: list[dict],
     *,
