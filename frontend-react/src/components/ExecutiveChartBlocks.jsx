@@ -54,6 +54,12 @@ function ExecTooltip({ active, payload, label, formatter }) {
   )
 }
 
+function trendLineVisuals(kpiType) {
+  if (kpiType === 'expenses') return { stroke: G.red, cursor: G.red }
+  if (kpiType === 'net_margin') return { stroke: G.violet, cursor: G.violet }
+  return { stroke: G.accent, cursor: G.accent }
+}
+
 export function ExecutiveKpiTrendChart({ kpiBlock, cashflow, kpiType, tr, lang }) {
   const data = useMemo(
     () => extractKpiTrendPoints(kpiBlock, cashflow, kpiType),
@@ -66,7 +72,16 @@ export function ExecutiveKpiTrendChart({ kpiBlock, cashflow, kpiType, tr, lang }
       ? st(tr, lang, 'cmd_chart_trend_ocf')
       : kpiType === 'revenue'
         ? st(tr, lang, 'cmd_chart_trend_revenue')
-        : st(tr, lang, 'cmd_chart_trend_net_profit')
+        : kpiType === 'expenses'
+          ? st(tr, lang, 'cmd_chart_trend_expenses')
+          : kpiType === 'net_margin'
+            ? st(tr, lang, 'cmd_chart_trend_net_margin')
+            : st(tr, lang, 'cmd_chart_trend_net_profit')
+
+  const { stroke, cursor } = trendLineVisuals(kpiType)
+  const pctAxis = kpiType === 'net_margin'
+  const tooltipFmt = (v) => (pctAxis && v != null && Number.isFinite(Number(v)) ? `${Number(v).toFixed(1)}%` : formatCompact(v))
+  const yAxisFmt = (v) => (pctAxis && v != null && Number.isFinite(Number(v)) ? `${Number(v).toFixed(0)}%` : formatCompact(v))
 
   return (
     <div className="cmd-chart-enter" style={{ marginTop: 18, marginBottom: 8 }}>
@@ -91,20 +106,20 @@ export function ExecutiveKpiTrendChart({ kpiBlock, cashflow, kpiType, tr, lang }
               tick={{ fill: G.text, fontSize: 9 }}
               axisLine={{ stroke: G.grid }}
               tickLine={false}
-              tickFormatter={(v) => formatCompact(v)}
+              tickFormatter={yAxisFmt}
               width={52}
             />
             <Tooltip
-              content={(props) => <ExecTooltip {...props} formatter={(v) => formatCompact(v)} />}
-              cursor={{ stroke: G.accent, strokeWidth: 1, strokeDasharray: '4 4' }}
+              content={(props) => <ExecTooltip {...props} formatter={tooltipFmt} />}
+              cursor={{ stroke: cursor, strokeWidth: 1, strokeDasharray: '4 4' }}
             />
             <Line
               type="monotone"
               dataKey="value"
-              stroke={G.accent}
+              stroke={stroke}
               strokeWidth={2}
-              dot={{ r: 3, fill: G.accent, strokeWidth: 0 }}
-              activeDot={{ r: 5, fill: G.accent }}
+              dot={{ r: 3, fill: stroke, strokeWidth: 0 }}
+              activeDot={{ r: 5, fill: stroke }}
               animationDuration={420}
               animationEasing="ease-out"
             />

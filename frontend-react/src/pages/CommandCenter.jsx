@@ -1,7 +1,7 @@
 /**
  * CommandCenter.jsx — Command Center orchestrator (state, fetch, drill, chrome).
- * Main body: CSS grid via CommandCenterDashboardGrid — optional row0 primary decision, row1 narrative|health,
- * row2 KPIs×4, row3 signals|branch, row4 expense|decisions, row5 secondary.
+ * Main body: CommandCenterDashboardGrid — full-width primary (optional in grid), desktop split
+ * (~68% KPIs + insights + narrative / ~32% health + branch + decisions + alerts), row5 secondary.
  */
 import { useState, useCallback, useEffect, useRef } from 'react'
 import '../styles/commandCenterMotion.css'
@@ -31,6 +31,7 @@ import {
 } from '../components/CommandCenterUnifiedSections.jsx'
 import ExpenseInsightsSection from '../components/ExpenseInsightsSection.jsx'
 import CommandCenterDashboardGrid from '../components/CommandCenterDashboardGrid.jsx'
+import CmdSparkline from '../components/CmdSparkline.jsx'
 import {
   ExecutiveBranchCompareChart,
   ExecutiveKpiTrendChart,
@@ -48,7 +49,7 @@ const T = {
   bg:'#0B0F14',      surface:'#111827',   panel:'#111827',    card:'#111827',
   border:'#1F2937',  accent:'#00d4aa',    green:'#34d399',    red:'#f87171',
   amber:'#fbbf24',   violet:'#7c5cfc',    blue:'#3b9eff',
-  text1:'#ffffff',   text2:'#9ca3af',     text3:'#6b7280',
+  text1:'#ffffff',   text2:'#b4bcc8',     text3:'#9ca8b8',
 }
 const stC  = {excellent:'#34d399', good:'#00d4aa', warning:'#fbbf24', risk:'#f87171', neutral:'#aab4c3'}
 const dClr = {liquidity:T.blue, profitability:T.green, efficiency:T.violet, leverage:T.amber, growth:T.accent}
@@ -64,14 +65,18 @@ function firstRecommendedLine(action) {
   return (nl >= 0 ? t.slice(0, nl) : t).trim()
 }
 
-const NEU_BD = '1px solid rgba(148,163,184,0.14)'
+const NEU_BD = '1px solid rgba(148,163,184,0.16)'
+/** Controlled accent — primary decision + key KPI only */
+const CMD_ACCENT_BD = '1px solid rgba(0,212,170,0.24)'
+const CMD_PRIMARY_SHADOW = '0 4px 28px rgba(0,0,0,0.3), 0 0 0 1px rgba(0,212,170,0.1)'
+const CMD_PRIMARY_SHADOW_HOVER = '0 6px 32px rgba(0,0,0,0.36), 0 0 0 1px rgba(0,212,170,0.14)'
 const CARD_BG = '#111827'
 const Pill = ({ label, critical }) => (
   <span
     style={{
-      fontSize: 9,
+      fontSize: 12,
       fontWeight: 800,
-      padding: '2px 9px',
+      padding: '3px 11px',
       borderRadius: 20,
       background: 'rgba(255,255,255,0.05)',
       color: critical ? T.red : T.text2,
@@ -119,15 +124,19 @@ function KpiMainNumber({ raw, mode, isHero, compact, na, signedTone }) {
   const text = !ok ? na : mode === 'percent' ? `${Number(v).toFixed(1)}%` : formatCompact(v)
   return (
     <div
-      className={`cmd-kpi-val ${toneClass}`}
+      className={`cmd-kpi-val cmd-data-num ${toneClass}`}
       style={{
         fontFamily: 'var(--font-display)',
-        fontSize: isHero ? 26 : compact ? 14 : 18,
+        fontSize: isHero
+          ? 'var(--cmd-fs-kpi-hero)'
+          : compact
+            ? 'var(--cmd-fs-kpi-compact)'
+            : 'var(--cmd-fs-kpi)',
         fontWeight: 900,
-        marginBottom: 2,
+        marginBottom: 4,
         direction: 'ltr',
         letterSpacing: '-0.025em',
-        lineHeight: 1,
+        lineHeight: 1.08,
       }}
     >
       {text}
@@ -156,23 +165,9 @@ function PrimaryDecisionHero({ resolution, impacts, tr, lang, causes, allDecisio
     const hasSav = sav != null && Number.isFinite(Number(sav)) && Number(sav) > 0
     const recLine = firstExpenseActionLine(ex)
 
-    const shell = isBaseline
-      ? {
-          border: NEU_BD,
-          borderRadius: 14,
-          padding: '14px 16px 14px',
-          background: CARD_BG,
-          boxShadow: 'none',
-          hoverLift: false,
-        }
-      : {
-          border: NEU_BD,
-          borderRadius: 14,
-          padding: '22px 22px 18px',
-          background: 'rgba(255,255,255,0.03)',
-          boxShadow: '0 4px 20px rgba(0,0,0,0.25)',
-          hoverLift: true,
-        }
+    const hoverLift = !isBaseline
+    const descText = ex.rationale && String(ex.rationale).trim() ? String(ex.rationale).trim() : ''
+    const numTone = hasSav ? 'cmd-hero-impact-pos' : pri === 'high' ? 'cmd-hero-impact-neg' : 'cmd-hero-impact-neu'
 
     return (
       <button
@@ -180,8 +175,8 @@ function PrimaryDecisionHero({ resolution, impacts, tr, lang, causes, allDecisio
         onClick={() => onOpen('expense_v2', ex, {})}
         className={[
           'cmd-primary-hero',
-          !isBaseline ? 'cmd-primary-intro' : '',
-          !isBaseline ? 'cmd-level-1' : '',
+          'cmd-hero',
+          isBaseline ? 'cmd-hero--baseline' : 'cmd-hero--accent cmd-primary-intro cmd-level-1',
         ]
           .filter(Boolean)
           .join(' ')}
@@ -189,153 +184,68 @@ function PrimaryDecisionHero({ resolution, impacts, tr, lang, causes, allDecisio
           width: '100%',
           textAlign: 'start',
           cursor: 'pointer',
-          border: shell.border,
-          borderRadius: shell.borderRadius,
-          padding: shell.padding,
-          background: shell.background,
-          boxShadow: shell.boxShadow,
           color: T.text1,
           display: 'block',
           opacity: isBaseline ? 0.92 : 1,
           transition: 'transform 0.18s ease, box-shadow 0.18s ease, opacity 0.18s ease',
         }}
         onMouseEnter={(e) => {
-          if (!shell.hoverLift) return
+          if (!hoverLift) return
           e.currentTarget.style.transform = 'translateY(-2px)'
-          e.currentTarget.style.boxShadow = '0 6px 28px rgba(0,0,0,0.35)'
+          e.currentTarget.style.boxShadow = CMD_PRIMARY_SHADOW_HOVER
         }}
         onMouseLeave={(e) => {
-          if (!shell.hoverLift) return
+          if (!hoverLift) return
           e.currentTarget.style.transform = ''
-          e.currentTarget.style.boxShadow = shell.boxShadow
+          e.currentTarget.style.boxShadow = ''
         }}
       >
-        <div
-          style={{
-            fontSize: isBaseline ? 9 : 10,
-            fontWeight: 800,
-            color: T.text3,
-            letterSpacing: '.1em',
-            textTransform: 'uppercase',
-            marginBottom: isBaseline ? 8 : 12,
-          }}
-        >
-          {strictT(tr, lang, isBaseline ? 'cmd_primary_baseline_eyebrow' : 'cmd_primary_decision_label')}
-        </div>
-        <div
-          style={{
-            fontSize: isBaseline ? 17 : 28,
-            fontWeight: isBaseline ? 700 : 800,
-            color: isBaseline ? T.text2 : T.text1,
-            lineHeight: 1.22,
-            marginBottom: isBaseline ? 8 : 16,
-            ...CLAMP_FADE_MASK_SHORT,
-          }}
-        >
-          <CmdServerText lang={lang} tr={tr} as="span">
-            {ex.title}
-          </CmdServerText>
-        </div>
-        {!isBaseline ? (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
-          <Pill label={strictT(tr, lang, `priority_${pri}`)} critical={pri === 'high'} />
-        </div>
-        ) : null}
-        {ex.rationale ? (
-          <div style={{ marginBottom: 12 }}>
-            <div
-              style={{
-                fontSize: 9,
-                fontWeight: 800,
-                color: T.text3,
-                textTransform: 'uppercase',
-                letterSpacing: '.08em',
-                marginBottom: 6,
-              }}
-            >
-              {strictT(tr, lang, 'exec_why')}
-            </div>
-            <p style={{ margin: 0, fontSize: 14, color: T.text2, lineHeight: 1.55, ...CLAMP_FADE_MASK_SHORT }}>
+        <div className="cmd-primary-hero-inner">
+          <div className="cmd-hero-eyebrow-wrap">
+            <span className="cmd-hero-eyebrow">
+              {strictT(tr, lang, isBaseline ? 'cmd_primary_baseline_eyebrow' : 'cmd_primary_decision_label')}
+            </span>
+          </div>
+          <div className="cmd-hero-title" style={CLAMP_FADE_MASK_SHORT}>
+            <CmdServerText lang={lang} tr={tr} as="span">
+              {ex.title}
+            </CmdServerText>
+          </div>
+          <div className={`cmd-hero-number cmd-data-num ${numTone}`.trim()}>
+            {hasSav ? <HeroExpenseSavings sav={sav} /> : '—'}
+          </div>
+          {descText ? (
+            <p className="cmd-hero-desc">
               <CmdServerText lang={lang} tr={tr} as="span">
-                {ex.rationale}
+                {descText}
               </CmdServerText>
             </p>
-          </div>
-        ) : null}
-        {hasSav ? (
-          <div
-            style={{
-              marginBottom: 12,
-              padding: '14px 16px',
-              borderRadius: 12,
-              background: 'rgba(255,255,255,0.04)',
-              border: NEU_BD,
-            }}
-          >
-            <div
-              style={{
-                fontSize: 9,
-                fontWeight: 800,
-                color: T.text3,
-                textTransform: 'uppercase',
-                letterSpacing: '.08em',
-                marginBottom: 6,
-              }}
-            >
-              {strictT(tr, lang, 'cmd_dec_impact_monthly')}
-            </div>
-            <div
-              className="cmd-primary-impact-num cmd-hero-impact-pos"
-              style={{ fontFamily: 'monospace', fontSize: 26, fontWeight: 800, direction: 'ltr' }}
-            >
-              <HeroExpenseSavings sav={sav} />
+          ) : null}
+          <div className="cmd-hero-actions">
+            {!isBaseline ? (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: recLine ? 10 : 0 }}>
+                <Pill label={strictT(tr, lang, `priority_${pri}`)} critical={pri === 'high'} />
+              </div>
+            ) : null}
+            {recLine ? (
+              <div style={{ fontWeight: 600, marginBottom: 8 }}>
+                <span className="cmd-muted-foreign" style={{ display: 'block', marginBottom: 4 }}>
+                  {strictT(tr, lang, 'exec_actions')}
+                </span>
+                <CmdServerText lang={lang} tr={tr} as="span">
+                  {recLine}
+                </CmdServerText>
+              </div>
+            ) : null}
+            <div className="cmd-muted-foreign" style={{ marginTop: recLine || !isBaseline ? 4 : 0 }}>
+              {strictT(
+                tr,
+                lang,
+                isBaseline ? 'cmd_primary_baseline_footer' : 'cmd_open_full_analysis_decisions',
+              )}
+              {!isBaseline ? ' →' : null}
             </div>
           </div>
-        ) : null}
-        {recLine ? (
-          <div className="cmd-primary-action-zone" style={{ marginBottom: 12 }}>
-            <div
-              style={{
-                fontSize: 9,
-                fontWeight: 800,
-                color: T.text3,
-                textTransform: 'uppercase',
-                letterSpacing: '.08em',
-                marginBottom: 6,
-              }}
-            >
-              {strictT(tr, lang, 'exec_actions')}
-            </div>
-            <p
-              style={{
-                margin: 0,
-                fontSize: 14,
-                fontWeight: 600,
-                color: T.text1,
-                lineHeight: 1.45,
-                ...CLAMP_FADE_MASK_SHORT,
-              }}
-            >
-              <CmdServerText lang={lang} tr={tr} as="span">
-                {recLine}
-              </CmdServerText>
-            </p>
-          </div>
-        ) : null}
-        <div
-          style={{
-            fontSize: isBaseline ? 9 : 10,
-            fontWeight: isBaseline ? 600 : 700,
-            color: isBaseline ? T.text3 : T.text2,
-            marginTop: isBaseline ? 8 : 8,
-          }}
-        >
-          {strictT(
-            tr,
-            lang,
-            isBaseline ? 'cmd_primary_baseline_footer' : 'cmd_open_full_analysis_decisions',
-          )}
-          {!isBaseline ? ' →' : null}
         </div>
       </button>
     )
@@ -348,177 +258,85 @@ function PrimaryDecisionHero({ resolution, impacts, tr, lang, causes, allDecisio
   const hasQuant =
     imp && imp.type !== 'qualitative' && imp.value != null && Number.isFinite(Number(imp.value))
   const recLine = firstRecommendedLine(decision.action)
+  const descText =
+    (decision.reason && String(decision.reason).trim()) ||
+    (!hasQuant && decision.expected_effect && String(decision.expected_effect).trim()) ||
+    (hasQuant && imp?.description && String(imp.description).trim()) ||
+    ''
+
+  let numTone = 'cmd-hero-impact-neu'
+  if (hasQuant) {
+    const n = Number(imp.value)
+    if (n > 0) numTone = 'cmd-hero-impact-pos'
+    else if (n < 0) numTone = 'cmd-hero-impact-neg'
+    else numTone = 'cmd-hero-impact-neu'
+  }
 
   return (
     <button
       type="button"
       onClick={() => onOpen('decision', decision, { causes, decisions: allDecisions })}
-      className="cmd-primary-hero cmd-primary-intro cmd-level-1"
+      className="cmd-primary-hero cmd-hero cmd-hero--accent cmd-primary-intro cmd-level-1"
       style={{
         width: '100%',
         textAlign: 'start',
         cursor: 'pointer',
-        border: NEU_BD,
-        borderRadius: 14,
-        padding: '22px 22px 18px',
-        background: 'rgba(255,255,255,0.03)',
-        boxShadow: '0 4px 20px rgba(0,0,0,0.25)',
         color: T.text1,
         display: 'block',
         transition: 'transform 0.18s ease, box-shadow 0.18s ease',
       }}
       onMouseEnter={(e) => {
         e.currentTarget.style.transform = 'translateY(-2px)'
-        e.currentTarget.style.boxShadow = '0 6px 28px rgba(0,0,0,0.35)'
+        e.currentTarget.style.boxShadow = CMD_PRIMARY_SHADOW_HOVER
       }}
       onMouseLeave={(e) => {
         e.currentTarget.style.transform = ''
-        e.currentTarget.style.boxShadow = '0 4px 20px rgba(0,0,0,0.25)'
+        e.currentTarget.style.boxShadow = ''
       }}
     >
-      <div
-        style={{
-          fontSize: 10,
-          fontWeight: 800,
-          color: T.text3,
-          letterSpacing: '.1em',
-          textTransform: 'uppercase',
-          marginBottom: 12,
-        }}
-      >
-        {strictT(tr, lang, 'cmd_primary_decision_label')}
-      </div>
-      <div
-        style={{
-          fontSize: 28,
-          fontWeight: 800,
-          color: T.text1,
-          lineHeight: 1.22,
-          marginBottom: 16,
-          ...CLAMP_FADE_MASK_SHORT,
-        }}
-      >
-        <CmdServerText lang={lang} tr={tr} as="span">
-          {decision.title}
-        </CmdServerText>
-      </div>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
-        <Pill label={strictT(tr, lang, `urgency_${decision.urgency}`)} critical={decision.urgency === 'high'} />
-        {decision.impact_level ? (
-          <Pill
-            label={strictT(tr, lang, `impact_${decision.impact_level}`)}
-            critical={decision.impact_level === 'high'}
-          />
-        ) : null}
-      </div>
-      <div style={{ marginBottom: 12 }}>
-        <div
-          style={{
-            fontSize: 9,
-            fontWeight: 800,
-            color: T.text3,
-            textTransform: 'uppercase',
-            letterSpacing: '.08em',
-            marginBottom: 6,
-          }}
-        >
-          {strictT(tr, lang, 'exec_why')}
+      <div className="cmd-primary-hero-inner">
+        <div className="cmd-hero-eyebrow-wrap">
+          <span className="cmd-hero-eyebrow">{strictT(tr, lang, 'cmd_primary_decision_label')}</span>
         </div>
-        <p style={{ margin: 0, fontSize: 14, color: T.text2, lineHeight: 1.55, ...CLAMP_FADE_MASK_SHORT }}>
+        <div className="cmd-hero-title" style={CLAMP_FADE_MASK_SHORT}>
           <CmdServerText lang={lang} tr={tr} as="span">
-            {decision.reason}
+            {decision.title}
           </CmdServerText>
-        </p>
-      </div>
-      {hasQuant ? (
-        <div
-          style={{
-            marginBottom: 12,
-            padding: '14px 16px',
-            borderRadius: 12,
-            background: 'rgba(255,255,255,0.04)',
-            border: NEU_BD,
-          }}
-        >
-          <div
-            style={{
-              fontSize: 9,
-              fontWeight: 800,
-              color: T.text3,
-              textTransform: 'uppercase',
-              letterSpacing: '.08em',
-              marginBottom: 6,
-            }}
-          >
-            {strictT(tr, lang, 'impact_expected_label')}
+        </div>
+        <div className={`cmd-hero-number cmd-data-num ${numTone}`.trim()}>
+          {hasQuant ? <HeroCfoImpactValue raw={imp.value} fmtQuantImpact={fmtQuantImpact} /> : '—'}
+        </div>
+        {descText ? (
+          <p className="cmd-hero-desc">
+            <CmdServerText lang={lang} tr={tr} as="span">
+              {descText}
+            </CmdServerText>
+          </p>
+        ) : null}
+        <div className="cmd-hero-actions">
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: recLine ? 10 : 0 }}>
+            <Pill label={strictT(tr, lang, `urgency_${decision.urgency}`)} critical={decision.urgency === 'high'} />
+            {decision.impact_level ? (
+              <Pill
+                label={strictT(tr, lang, `impact_${decision.impact_level}`)}
+                critical={decision.impact_level === 'high'}
+              />
+            ) : null}
           </div>
-          <div
-            className={`cmd-primary-impact-num ${Number(imp.value) >= 0 ? 'cmd-hero-impact-pos' : 'cmd-hero-impact-neg'}`}
-            style={{ fontFamily: 'monospace', fontSize: 26, fontWeight: 800, direction: 'ltr' }}
-          >
-            <HeroCfoImpactValue raw={imp.value} fmtQuantImpact={fmtQuantImpact} />
-          </div>
-          {imp.description ? (
-            <p style={{ margin: '6px 0 0', fontSize: 11, color: T.text2, lineHeight: 1.5, ...CLAMP_FADE_MASK_SHORT }}>
+          {recLine ? (
+            <div style={{ fontWeight: 600, marginBottom: 8 }}>
+              <span className="cmd-muted-foreign" style={{ display: 'block', marginBottom: 4 }}>
+                {strictT(tr, lang, 'exec_actions')}
+              </span>
               <CmdServerText lang={lang} tr={tr} as="span">
-                {imp.description}
+                {recLine}
               </CmdServerText>
-            </p>
+            </div>
           ) : null}
-        </div>
-      ) : decision.expected_effect ? (
-        <div style={{ marginBottom: 12 }}>
-          <div
-            style={{
-              fontSize: 9,
-              fontWeight: 800,
-              color: T.text3,
-              textTransform: 'uppercase',
-              letterSpacing: '.08em',
-              marginBottom: 6,
-            }}
-          >
-            {strictT(tr, lang, 'exec_effect')}
+          <div className="cmd-muted-foreign" style={{ marginTop: 4 }}>
+            {strictT(tr, lang, 'cmd_primary_decision_open')} →
           </div>
-          <p style={{ margin: 0, fontSize: 13, color: T.text2, lineHeight: 1.5, ...CLAMP_FADE_MASK_SHORT }}>
-            <CmdServerText lang={lang} tr={tr} as="span">
-              {decision.expected_effect}
-            </CmdServerText>
-          </p>
         </div>
-      ) : null}
-      {recLine ? (
-        <div className="cmd-primary-action-zone" style={{ marginBottom: 12 }}>
-          <div
-            style={{
-              fontSize: 9,
-              fontWeight: 800,
-              color: T.text3,
-              textTransform: 'uppercase',
-              letterSpacing: '.08em',
-              marginBottom: 6,
-            }}
-          >
-            {strictT(tr, lang, 'exec_actions')}
-          </div>
-          <p
-            style={{
-              margin: 0,
-              fontSize: 14,
-              fontWeight: 600,
-              color: T.text1,
-              lineHeight: 1.45,
-              ...CLAMP_FADE_MASK_SHORT,
-            }}
-          >
-            <CmdServerText lang={lang} tr={tr} as="span">
-              {recLine}
-            </CmdServerText>
-          </p>
-        </div>
-      ) : null}
-      <div style={{ fontSize: 10, fontWeight: 700, color: T.text2, marginTop: 8 }}>
-        {strictT(tr, lang, 'cmd_primary_decision_open')} →
       </div>
     </button>
   )
@@ -535,12 +353,12 @@ function DataQualityBanner({ validation, lang, tr }) {
     <div style={{display:'flex',flexWrap:'wrap',alignItems:'center',gap:8,
       padding:'8px 16px',borderRadius:10,textAlign:'left',
       background:bg,border:bdr}}>
-      <span style={{fontSize:11}}>{has_errors?'⚠':'ℹ'}</span>
-      <span style={{fontSize:9,fontWeight:800,color,letterSpacing:'.05em',textTransform:'uppercase'}}>
+      <span style={{fontSize:12}}>{has_errors?'⚠':'ℹ'}</span>
+      <span style={{fontSize:12,fontWeight:800,color,letterSpacing:'.05em',textTransform:'uppercase'}}>
         {has_errors ? strictT(tr, lang, 'dq_warning_title') : strictT(tr, lang, 'dq_notice_title')}
       </span>
       {warnings.map((w,i)=>(
-        <span key={i} style={{fontSize:9,color:'rgba(255,255,255,0.5)'}}>· {strictT(tr, lang, `dq_${w.code}`)}</span>
+        <span key={i} style={{fontSize:12,color:T.text3}}>· {strictT(tr, lang, `dq_${w.code}`)}</span>
       ))}
     </div>
   )
@@ -562,6 +380,7 @@ function HealthScorePanel({
   actionPrefix,
   actionLine,
   onDrillAnalysis,
+  pairedLayout = false,
 }) {
   const hc = stC[status] || T.text2
   const circ = 2 * Math.PI * 30
@@ -574,30 +393,22 @@ function HealthScorePanel({
 
   return (
     <div
-      className="cmd-level-1"
+      className={`cmd-level-1${pairedLayout ? ' cmd-health-panel--paired' : ''}`.trim()}
       style={{
         background: CARD_BG,
         border: NEU_BD,
         borderRadius: 14,
         boxShadow: 'none',
-        padding: '14px 16px 14px',
+        padding: pairedLayout ? '14px 16px 14px' : '16px 18px 16px',
         minHeight: 0,
       }}
     >
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, marginBottom: 16 }}>
         <div>
-          <div
-            style={{
-              fontSize: 11,
-              fontWeight: 800,
-              color: T.text1,
-              letterSpacing: '.08em',
-              textTransform: 'uppercase',
-            }}
-          >
-            {healthLabel}
+          <div className="cmd-card-title">{healthLabel}</div>
+          <div className="cmd-muted-foreign" style={{ marginTop: 4 }}>
+            {snapSub}
           </div>
-          <div style={{ fontSize: 10, color: T.text3, marginTop: 4, lineHeight: 1.4 }}>{snapSub}</div>
         </div>
         <button
           type="button"
@@ -677,12 +488,15 @@ function HealthScorePanel({
           <text x={44} y={43} textAnchor="middle" fontSize={17} fontWeight={800} fill={T.green} fontFamily="monospace">
             {h != null ? Math.round(h) : ''}
           </text>
-          <text x={44} y={57} textAnchor="middle" fontSize={8} fill={T.text3}>
+          <text x={44} y={57} textAnchor="middle" fontSize={10} fill={T.text3}>
             /100
           </text>
         </svg>
         <div style={{ minWidth: 0, flex: 1 }}>
-          <div style={{ fontSize: 18, fontWeight: 800, color: T.text1, lineHeight: 1.2, marginBottom: 8 }}>
+          <div
+            className={`cmd-display-headline${pairedLayout ? ' cmd-muted-foreign' : ''}`.trim()}
+            style={{ marginBottom: 8, fontWeight: pairedLayout ? 650 : undefined }}
+          >
             <CmdServerText lang={lang} tr={tr} as="span">
               {companyName || ''}
             </CmdServerText>
@@ -702,14 +516,14 @@ function HealthScorePanel({
             >
               {statusUi}
             </span>
-            {period ? <span style={{ fontSize: 11, color: T.text2, fontFamily: 'monospace' }}>{period}</span> : null}
-            {periodCount != null ? (
-              <span style={{ fontSize: 10, color: T.text3 }}>
-                · {periodCount}p
+            {period ? (
+              <span className="cmd-health-meta-muted" style={{ fontFamily: 'monospace' }}>
+                {period}
               </span>
             ) : null}
+            {periodCount != null ? <span className="cmd-health-meta-muted">· {periodCount}p</span> : null}
             {scopeLabel ? (
-              <span style={{ fontSize: 10, color: T.text3 }}>
+              <span className="cmd-health-meta-muted">
                 ·{' '}
                 <CmdServerText lang={lang} tr={tr} as="span">
                   {scopeLabel}
@@ -729,7 +543,10 @@ function HealthScorePanel({
           }}
         >
           {healthHeadline ? (
-            <div style={{ fontSize: 13, fontWeight: 650, color: T.text1, lineHeight: 1.45, ...CLAMP_FADE_MASK_SHORT }}>
+            <div
+              className="cmd-prose"
+              style={{ fontSize: 'var(--cmd-fs-body)', fontWeight: 650, color: T.text1, ...CLAMP_FADE_MASK_SHORT }}
+            >
               <CmdServerText lang={lang} tr={tr} as="span">
                 {healthHeadline}
               </CmdServerText>
@@ -737,18 +554,13 @@ function HealthScorePanel({
           ) : null}
           {actionLine ? (
             <div style={{ marginTop: healthHeadline ? 8 : 0 }}>
-              <div
-                style={{
-                  fontSize: 9,
-                  fontWeight: 800,
-                  color: T.accent,
-                  letterSpacing: '.1em',
-                  textTransform: 'uppercase',
-                }}
-              >
+              <div className="cmd-field-label cmd-field-label--sm" style={{ marginBottom: 4 }}>
                 {actionLbl}
               </div>
-              <div style={{ fontSize: 13, fontWeight: 700, color: T.text1, marginTop: 4, lineHeight: 1.45, ...CLAMP_FADE_MASK_SHORT }}>
+              <div
+                className="cmd-prose"
+                style={{ fontSize: 'var(--cmd-fs-body)', fontWeight: 700, color: T.text1, marginTop: 6, ...CLAMP_FADE_MASK_SHORT }}
+              >
                 <CmdServerText lang={lang} tr={tr} as="span">
                   {actionLine}
                 </CmdServerText>
@@ -927,58 +739,256 @@ function ContextPanel({ type, payload, extra, tr, lang, onClose, onNavigate, imp
     </>
   )
 
-  const Kpi = () => (
-    <>
-      <div style={{fontSize:17,fontWeight:800,color:T.text1,marginBottom:6}}>
-        {strictT(tr, lang, `kpi_label_${payload.type}`)}
-      </div>
-      <div style={{fontSize:12,color:T.text2,lineHeight:1.55,marginBottom:14}}>
-        {strictT(tr, lang, `kpi_explain_${payload.type}`)}
-      </div>
-      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:14}}>
-        {[
-          {lbl:strictT(tr, lang, 'exec_trend'), val:payload.mom!=null?`${payload.mom>0?'+':''}${payload.mom?.toFixed(1)}% ${strictT(tr, lang, 'mom_label')}`:'—', clr:payload.mom>0?T.green:payload.mom<0?T.red:T.text2},
-          {lbl:strictT(tr, lang, 'yoy_label'), val:payload.yoy!=null?`${payload.yoy>0?'+':''}${payload.yoy?.toFixed(1)}%`:'—',     clr:payload.yoy>0?T.green:payload.yoy<0?T.red:T.text2},
-        ].map(({lbl,val,clr}) => (
-          <div key={lbl} style={{background:T.card,borderRadius:8,padding:'12px 14px',border:`1px solid ${T.border}`}}>
-            <div style={{fontSize:9,color:T.text3,textTransform:'uppercase',letterSpacing:'.06em',marginBottom:4}}>{lbl}</div>
-            <div style={{fontFamily:'monospace',fontSize:17,fontWeight:800,color:clr}}>{val}</div>
+  const Kpi = () => {
+    const kbDrill = extra?.execChartBundle?.kpi_block
+    const ciDrill = extra?.execChartBundle?.comparative_intelligence
+    const periodsDrill = kbDrill?.periods || []
+    const li = periodsDrill.length - 1
+    const revL = li >= 0 ? kbDrill?.series?.revenue?.[li] : null
+    const expL = li >= 0 ? kbDrill?.series?.expenses?.[li] : null
+    const npL = li >= 0 ? kbDrill?.series?.net_profit?.[li] : null
+    const plab = li >= 0 && periodsDrill[li] != null ? String(periodsDrill[li]).slice(0, 7) : null
+    const topBr = ciDrill?.efficiency_ranking?.by_expense_pct_of_revenue_desc?.[0]
+    const branchInfluence =
+      topBr?.branch_name != null
+        ? `${topBr.branch_name}${
+            topBr.expense_pct_of_revenue != null
+              ? ` · ${Number(topBr.expense_pct_of_revenue).toFixed(1)}% ${strictT(tr, lang, 'cmd_branch_of_rev')}`
+              : ''
+          }`
+        : null
+
+    const nmRaw = payload.type === 'net_margin' ? payload.raw : null
+    const nmOk =
+      nmRaw != null &&
+      nmRaw !== '' &&
+      !Number.isNaN(Number(nmRaw)) &&
+      Number.isFinite(Number(nmRaw))
+    const headlinePct = nmOk ? `${Number(nmRaw).toFixed(1)}%` : null
+    const headlineColor =
+      nmOk && Number(nmRaw) < 0 ? T.red : nmOk && Number(nmRaw) > 0 ? T.green : T.text1
+
+    const chartTypes = ['revenue', 'net_profit', 'cashflow', 'expenses', 'net_margin']
+    const showTrend = chartTypes.includes(payload.type) && extra?.execChartBundle
+
+    const factorBlock =
+      payload.type === 'net_margin' && (revL != null || expL != null || npL != null) ? (
+        <Sec label={strictT(tr, lang, 'cmd_kpi_margin_factors')} color={T.text3}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {revL != null && Number.isFinite(Number(revL)) ? (
+              <div
+                key="rev"
+                style={{
+                  background: T.card,
+                  borderRadius: 8,
+                  padding: '10px 12px',
+                  border: `1px solid ${T.border}`,
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: 9,
+                    color: T.text3,
+                    textTransform: 'uppercase',
+                    letterSpacing: '.06em',
+                  }}
+                >
+                  {strictT(tr, lang, 'kpi_label_revenue')}
+                </div>
+                <div
+                  style={{
+                    fontFamily: 'monospace',
+                    fontSize: 15,
+                    fontWeight: 800,
+                    color: T.text1,
+                    direction: 'ltr',
+                  }}
+                >
+                  {formatCompact(Number(revL))}
+                </div>
+              </div>
+            ) : null}
+            {expL != null && Number.isFinite(Number(expL)) ? (
+              <div
+                key="exp"
+                style={{
+                  background: T.card,
+                  borderRadius: 8,
+                  padding: '10px 12px',
+                  border: `1px solid ${T.border}`,
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: 9,
+                    color: T.text3,
+                    textTransform: 'uppercase',
+                    letterSpacing: '.06em',
+                  }}
+                >
+                  {strictT(tr, lang, 'kpi_label_expenses')}
+                </div>
+                <div
+                  style={{
+                    fontFamily: 'monospace',
+                    fontSize: 15,
+                    fontWeight: 800,
+                    color: T.red,
+                    direction: 'ltr',
+                  }}
+                >
+                  {formatCompact(Number(expL))}
+                </div>
+              </div>
+            ) : null}
+            {npL != null && Number.isFinite(Number(npL)) ? (
+              <div
+                key="np"
+                style={{
+                  background: T.card,
+                  borderRadius: 8,
+                  padding: '10px 12px',
+                  border: `1px solid ${T.border}`,
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: 9,
+                    color: T.text3,
+                    textTransform: 'uppercase',
+                    letterSpacing: '.06em',
+                  }}
+                >
+                  {strictT(tr, lang, 'kpi_label_net_profit')}
+                </div>
+                <div
+                  style={{
+                    fontFamily: 'monospace',
+                    fontSize: 15,
+                    fontWeight: 800,
+                    color: Number(npL) >= 0 ? T.green : T.red,
+                    direction: 'ltr',
+                  }}
+                >
+                  {formatCompact(Number(npL))}
+                </div>
+              </div>
+            ) : null}
           </div>
-        ))}
-      </div>
-      {extra?.alerts?.length > 0 && (
-        <Sec label={strictT(tr, lang, 'alerts_title')} color={T.amber}>
-          {extra.alerts.slice(0,3).map((a,i) => (
-            <div key={i} style={{padding:'9px 11px',marginBottom:6,borderRadius:8,
-              background:`${uClr[a.severity]||T.text3}0d`,border:`1px solid ${uClr[a.severity]||T.text3}25`}}>
-              <div style={{fontSize:11,fontWeight:700,color:uClr[a.severity]||T.text2,marginBottom:2}}>
-                <CmdServerText lang={lang} tr={tr} as="span">
-                  {a.title}
-                </CmdServerText>
+        </Sec>
+      ) : null
+
+    const branchBlock =
+      payload.type === 'net_margin' && branchInfluence ? (
+        <Sec label={strictT(tr, lang, 'cmd_kpi_margin_branch')} color={T.violet}>
+          <p style={{ margin: 0, fontSize: 12, color: T.text2, lineHeight: 1.55, ...CLAMP_FADE_MASK_SHORT }}>
+            <CmdServerText lang={lang} tr={tr} as="span">
+              {branchInfluence}
+            </CmdServerText>
+          </p>
+        </Sec>
+      ) : null
+
+    return (
+      <>
+        <div style={{ fontSize: 17, fontWeight: 800, color: T.text1, marginBottom: 6 }}>
+          {strictT(tr, lang, `kpi_label_${payload.type}`)}
+        </div>
+        {payload.type === 'net_margin' && headlinePct ? (
+          <>
+            <div
+              style={{
+                fontFamily: 'monospace',
+                fontSize: 28,
+                fontWeight: 800,
+                color: headlineColor,
+                marginBottom: 6,
+                direction: 'ltr',
+              }}
+            >
+              {headlinePct}
+            </div>
+            <div className="cmd-muted-foreign" style={{ fontSize: 11, marginBottom: 12 }}>
+              {strictT(tr, lang, 'cmd_kpi_margin_period_note')}
+              {plab ? ` · ${plab}` : ''}
+            </div>
+          </>
+        ) : null}
+        <div style={{ fontSize: 12, color: T.text2, lineHeight: 1.55, marginBottom: 14 }}>
+          {strictT(tr, lang, `kpi_explain_${payload.type}`)}
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 14 }}>
+          {[
+            {
+              lbl: strictT(tr, lang, 'exec_trend'),
+              val:
+                payload.mom != null
+                  ? `${payload.mom > 0 ? '+' : ''}${payload.mom?.toFixed(1)}% ${strictT(tr, lang, 'mom_label')}`
+                  : '—',
+              clr: payload.mom > 0 ? T.green : payload.mom < 0 ? T.red : T.text2,
+            },
+            {
+              lbl: strictT(tr, lang, 'yoy_label'),
+              val: payload.yoy != null ? `${payload.yoy > 0 ? '+' : ''}${payload.yoy?.toFixed(1)}%` : '—',
+              clr: payload.yoy > 0 ? T.green : payload.yoy < 0 ? T.red : T.text2,
+            },
+          ].map(({ lbl, val, clr }) => (
+            <div key={lbl} style={{ background: T.card, borderRadius: 8, padding: '12px 14px', border: `1px solid ${T.border}` }}>
+              <div style={{ fontSize: 9, color: T.text3, textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 4 }}>
+                {lbl}
               </div>
-              <div style={{fontSize:10,color:T.text2,lineHeight:1.5, ...CLAMP_FADE_MASK_SHORT}}>
-                <CmdServerText lang={lang} tr={tr} as="span">
-                  {a.message}
-                </CmdServerText>
-              </div>
+              <div style={{ fontFamily: 'monospace', fontSize: 17, fontWeight: 800, color: clr }}>{val}</div>
             </div>
           ))}
-        </Sec>
-      )}
-      {['revenue', 'net_profit', 'cashflow'].includes(payload.type) && extra?.execChartBundle ? (
-        <ExecutiveKpiTrendChart
-          kpiBlock={extra.execChartBundle.kpi_block}
-          cashflow={extra.execChartBundle.cashflow}
-          kpiType={payload.type}
-          tr={tr}
-          lang={lang}
-        />
-      ) : null}
-      {payload.type === 'net_profit' && extra?.execChartBundle?.kpi_block ? (
-        <ExecutiveProfitBridgeChart kpiBlock={extra.execChartBundle.kpi_block} tr={tr} lang={lang} />
-      ) : null}
-    </>
-  )
+        </div>
+        {extra?.alerts?.length > 0 && (
+          <Sec label={strictT(tr, lang, 'alerts_title')} color={T.amber}>
+            {extra.alerts.slice(0, 3).map((a, i) => (
+              <div
+                key={i}
+                style={{
+                  padding: '9px 11px',
+                  marginBottom: 6,
+                  borderRadius: 8,
+                  background: `${uClr[a.severity] || T.text3}0d`,
+                  border: `1px solid ${uClr[a.severity] || T.text3}25`,
+                }}
+              >
+                <div style={{ fontSize: 11, fontWeight: 700, color: uClr[a.severity] || T.text2, marginBottom: 2 }}>
+                  <CmdServerText lang={lang} tr={tr} as="span">
+                    {a.title}
+                  </CmdServerText>
+                </div>
+                <div style={{ fontSize: 10, color: T.text2, lineHeight: 1.5, ...CLAMP_FADE_MASK_SHORT }}>
+                  <CmdServerText lang={lang} tr={tr} as="span">
+                    {a.message}
+                  </CmdServerText>
+                </div>
+              </div>
+            ))}
+          </Sec>
+        )}
+        {payload.type === 'net_margin' ? (
+          <>
+            {factorBlock}
+            {branchBlock}
+          </>
+        ) : null}
+        {showTrend ? (
+          <ExecutiveKpiTrendChart
+            kpiBlock={extra.execChartBundle.kpi_block}
+            cashflow={extra.execChartBundle.cashflow}
+            kpiType={payload.type}
+            tr={tr}
+            lang={lang}
+          />
+        ) : null}
+        {payload.type === 'net_profit' && extra?.execChartBundle?.kpi_block ? (
+          <ExecutiveProfitBridgeChart kpiBlock={extra.execChartBundle.kpi_block} tr={tr} lang={lang} />
+        ) : null}
+      </>
+    )
+  }
 
   const Domain = () => {
     const causes = extra?.causes?.filter(c=>c.domain===payload.domain||c.domain==='cross_domain')||[]
@@ -1239,7 +1249,7 @@ function ExecutiveKpiRow({
     { key:'expenses',        raw:kpis.expenses?.value,       mode:'money', signedTone:false, full:dispFull(kpis.expenses?.value),       mom:kpis.expenses?.mom_pct,   yoy:kpis.expenses?.yoy_pct,   color:T.text3,   icon:'📊' },
     { key:'net_profit',      raw:kpis.net_profit?.value,     mode:'money', signedTone:true,  full:dispFull(kpis.net_profit?.value),      mom:kpis.net_profit?.mom_pct, yoy:kpis.net_profit?.yoy_pct, color:T.text3,   icon:'💰' },
     { key:'cashflow',        raw:cashflow?.operating_cashflow, mode:'money', signedTone:true, full:dispFull(cashflow?.operating_cashflow), mom:cashflow?.operating_cashflow_mom, yoy:null, color:T.text3,   icon:'💧', estimated:cfEstimated },
-    { key:'net_margin',      raw:kpis.net_margin?.value,     mode:'percent', signedTone:false, full:null, mom:kpis.net_margin?.mom_pct, yoy:null, color:T.text3,  icon:'%'  },
+    { key:'net_margin',      raw:kpis.net_margin?.value,     mode:'percent', signedTone:true, full:null, mom:kpis.net_margin?.mom_pct, yoy:null, color:T.text3,  icon:'%'  },
     { key:'working_capital', raw:wc,                         mode:'money', signedTone:true,  full:dispFull(wc),                          mom:null,                     yoy:null, sub:wc!=null&&wc<0?strictT(tr, lang, 'wc_negative'):null, color:wcColor, icon:'⚖️' },
   ]
   const ordered = [
@@ -1258,28 +1268,33 @@ function ExecutiveKpiRow({
     const miss = localizedMissingPlaceholder(lang)
     const labelWithCtx =
       ctx && tplRaw !== miss ? tplRaw.replace(/\{label\}/g, base).replace(/\{context\}/g, ctx) : base
+    const cmdFocus = layout === 'command' && c.key === 'net_profit'
+    const expenseTone = c.key === 'expenses'
     return (
       <div key={c.key}
-        className="cmd-kpi-card cmd-card-hover"
-        onClick={()=>onSelect('kpi',{type:c.key,mom:c.mom,yoy:c.yoy},
+        className={`cmd-kpi-card cmd-card-hover${expenseTone ? ' cmd-kpi-card--expense-tone' : ''}`.trim()}
+        onClick={()=>onSelect('kpi',{type:c.key,mom:c.mom,yoy:c.yoy,raw:c.raw,mode:c.mode||'money'},
           {alerts:alerts?.filter(a=>a.impact==='profitability')||[], explanation:explain})}
         title={explain}
         style={{
           background: CARD_BG,
-          border: NEU_BD,
-          borderRadius: compact ? 12 : 14,
-          padding: isHero ? '14px 16px' : compact ? '12px 14px' : '14px 16px',
+          border: cmdFocus ? CMD_ACCENT_BD : NEU_BD,
+          borderRadius: 14,
+          padding: isHero ? '16px 18px' : compact ? '14px 16px' : '16px 18px',
+          boxShadow: cmdFocus ? 'inset 0 0 0 1px rgba(0,212,170,0.1), 0 4px 26px rgba(0,0,0,0.28)' : undefined,
           cursor: 'pointer',
         }}
       >
         <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:isHero?8:compact?6:6}}>
           <span style={{fontSize:isHero?16:compact?10:11,opacity:0.85}}>{c.icon}</span>
-          <span style={{fontSize:isHero?10:compact?8:9,color:T.text2,fontWeight:800,textTransform:'uppercase',
-            letterSpacing:'.06em'}}>
+          <span
+            className={`cmd-kpi-dimension-label ${isHero ? 'cmd-kpi-dimension-label--hero' : ''}`.trim()}
+            style={{ fontSize: isHero ? 11 : compact ? 9 : 10 }}
+          >
             {labelWithCtx}
           </span>
           {isHero && (
-            <span style={{marginLeft:'auto',fontSize:8,fontWeight:900,color:T.text3,letterSpacing:'.10em',textTransform:'uppercase'}}>
+            <span style={{marginLeft:'auto',fontSize:9,fontWeight:900,color:T.text3,letterSpacing:'.10em',textTransform:'uppercase'}}>
               {strictT(tr, lang, 'primary')}
             </span>
           )}
@@ -1293,32 +1308,33 @@ function ExecutiveKpiRow({
           signedTone={!!c.signedTone}
         />
         {c.full && (
-          <div style={{fontFamily:'var(--font-mono)',fontSize:compact?7:8,color:T.text3,marginBottom:2,letterSpacing:'.02em',direction:'ltr'}}>
+          <div className="cmd-kpi-full-amount">
             {c.full}
           </div>
         )}
         <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
           {c.mom!=null && (
-            <span className="cmd-kpi-mom-pill" style={{fontFamily:'var(--font-mono)',fontSize:10,fontWeight:700,color:mc,
-              padding:'1px 6px',borderRadius:8,background:'rgba(148,163,184,0.12)'}}>
+            <span className="cmd-kpi-mom-pill cmd-data-num" style={{fontFamily:'var(--font-mono)',fontSize:12,fontWeight:700,color:mc,
+              padding:'2px 8px',borderRadius:10,background:'rgba(148,163,184,0.14)'}}>
               {c.mom>0?'+':''}{c.mom?.toFixed(1)}% {strictT(tr, lang, 'mom_label')}
             </span>
           )}
           {c.yoy!=null && (
-            <span className="cmd-kpi-mom-pill" style={{fontFamily:'monospace',fontSize:10,
+            <span className="cmd-kpi-mom-pill cmd-data-num" style={{fontFamily:'monospace',fontSize:12,
               color:c.yoy>0?T.green:c.yoy<0?T.red:T.text2}}>
               {c.yoy>0?'+':''}{c.yoy?.toFixed(1)}% {strictT(tr, lang, 'yoy_label')}
             </span>
           )}
         </div>
         {c.estimated && (
-          <div style={{marginTop:6,fontSize:9,color:T.text3,
-            padding:'2px 7px',borderRadius:5,background:'rgba(255,255,255,0.05)',
+          <div style={{marginTop:8,fontSize:10,color:T.text3,
+            padding:'3px 9px',borderRadius:8,background:'rgba(255,255,255,0.055)',
             border:NEU_BD,display:'inline-block'}}>
             ⚠ {strictT(tr, lang, 'estimated')}
           </div>
         )}
-        {c.sub && <div style={{marginTop:4,fontSize:10,color:T.text3}}>{c.sub}</div>}
+        {c.sub && <div style={{marginTop:6,fontSize:12,color:T.text3}}>{c.sub}</div>}
+        <CmdSparkline mom={c.mom} />
       </div>
     )
   }
@@ -1344,8 +1360,8 @@ function ExecutiveKpiRow({
   return (
     <div>
       {!hideTitle ? (
-        <div style={{fontSize:10,fontWeight:700,color:T.text3,textTransform:'uppercase',
-          letterSpacing:'.08em',marginBottom:12}}>{strictT(tr, lang, 'exec_kpi_title')}</div>
+        <div style={{fontSize:11,fontWeight:700,color:T.text3,textTransform:'uppercase',
+          letterSpacing:'.08em',marginBottom:14}}>{strictT(tr, lang, 'exec_kpi_title')}</div>
       ) : null}
       {/* Hero KPI + secondary KPIs (avoid equal weight) */}
       <div style={{display:'grid',gridTemplateColumns:'1.25fr 1fr',gap:16,alignItems:'stretch'}}>
@@ -1389,8 +1405,9 @@ function DomainGrid({ intelligence, tr, lang, onSelect, rootCauses, decisions, a
   const ratioMap = key => ratios[key] || {}
   return (
     <div style={secondary ? { opacity: 0.88 } : undefined}>
-      <div style={{fontSize:secondary?8:10,fontWeight:700,color:T.text3,textTransform:'uppercase',
-        letterSpacing:'.1em',marginBottom:secondary?6:10}}>{strictT(tr, lang, 'exec_domain_title')}</div>
+      <div className="cmd-card-title" style={{ marginBottom: secondary ? 8 : 12 }}>
+        {strictT(tr, lang, 'exec_domain_title')}
+      </div>
       <div style={{display:'grid',gridTemplateColumns:'repeat(12,1fr)',gap:secondary?12:16}}>
         {blocks.map((b, idx) => {
           const s   = b.score
@@ -1404,6 +1421,7 @@ function DomainGrid({ intelligence, tr, lang, onSelect, rootCauses, decisions, a
                              : strictT(tr, lang, `domain_signal_${b.navigateDomain}_risk`))
           return (
             <div key={b.id}
+              className="cmd-secondary-card"
               onClick={()=>onSelect('domain',{domain:b.navigateDomain,score:s,status:st,ratios:ratioMap(b.ratiosKey)},{causes:rootCauses,decisions})}
               title={
                 b.id === 'risk'
@@ -1414,39 +1432,40 @@ function DomainGrid({ intelligence, tr, lang, onSelect, rootCauses, decisions, a
                 gridColumn: idx===0 ? 'span 4' : 'span 4',
                 background: `linear-gradient(135deg,${T.card},${dc}0a)`,
                 borderWidth:'1px',borderStyle:'solid',borderColor:`${dc}28`,
-                borderTopWidth:secondary?3:4,borderTopColor:dc,borderRadius:14,
-                padding:secondary?'12px 14px':'14px 16px',cursor:'pointer',
+                borderTopWidth:secondary?3:4,borderTopColor:dc,
+                cursor:'pointer',
                 transition:'transform .15s ease,box-shadow .15s ease'}}
               {...lift()}>
               <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:8,marginBottom:secondary?8:12}}>
                 <div style={{display:'flex',alignItems:'center',gap:6,minWidth:0}}>
                   <span style={{fontSize:secondary?15:18}}>{b.icon}</span>
                   <div style={{minWidth:0}}>
-                    <div style={{fontSize:secondary?10:11,fontWeight:900,color:dc,textTransform:'uppercase',letterSpacing:'.08em',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'clip'}}>
+                    <div className="cmd-card-title" style={{ fontSize: 14, fontWeight: 700, color: dc, marginBottom: 4, textTransform: 'none', letterSpacing: '0.02em' }}>
                       {b.label}
                     </div>
-                    <div style={{fontSize:secondary?9:10,color:T.text2,marginTop:1,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'clip'}}>
+                    <div className="cmd-health-label" style={{ marginTop: 2, whiteSpace:'nowrap',overflow:'hidden',textOverflow:'clip' }}>
                       {sig || strictT(tr, lang, `status_${st}_simple`)}
                     </div>
                   </div>
                 </div>
                 <div style={{textAlign:'right',flexShrink:0}}>
-                  <div style={{fontFamily:'monospace',fontSize:secondary?18:22,fontWeight:900,color:dc,lineHeight:1,direction:'ltr'}}>{s}</div>
-                  <div style={{fontSize:8,color:T.text3}}>/100</div>
+                  <div className="cmd-health-value" style={{ color: dc }}>{s}</div>
+                  <div className="cmd-health-label">/100</div>
                 </div>
               </div>
-              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:secondary?8:12}}>
+              <CmdSparkline mom={b.id === 'risk' ? null : s >= 70 ? 1 : s >= 45 ? 0 : -1} />
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:secondary?8:12,marginTop:10}}>
                 {Object.entries(ratioMap(b.ratiosKey)).slice(0,4).map(([k,r]) => {
                   const rc = {good:T.green,warning:T.amber,risk:T.red,neutral:T.text2}[r?.status]||T.text2
                   return (
                     <div key={k} style={{background:`${dc}08`,borderRadius:secondary?8:10,padding:secondary?'6px 7px':'10px 10px',
                       borderWidth:'1px 1px 1px 2px',borderStyle:'solid',borderColor:`${T.border} ${T.border} ${T.border} ${rc}`}}>
-                      <div style={{fontSize:7,color:T.text3,textTransform:'uppercase',letterSpacing:'.08em',marginBottom:2}}>
+                      <div className="cmd-health-label" style={{ textTransform:'uppercase',letterSpacing:'.08em',marginBottom:4 }}>
                         {strictT(tr, lang, `ratio_${k}`)}
                       </div>
-                      <div style={{fontFamily:'monospace',fontSize:secondary?11:12,fontWeight:800,color:rc,direction:'ltr'}}>
+                      <div style={{fontFamily:'monospace',fontSize:secondary?12:14,fontWeight:800,color:rc,direction:'ltr'}}>
                         {r?.value!=null?r.value:'—'}
-                        <span style={{fontSize:9,color:T.text3,marginLeft:3}}>{r?.unit||''}</span>
+                        <span className="cmd-muted-foreign" style={{ marginLeft:4 }}>{r?.unit||''}</span>
                       </div>
                     </div>
                   )
@@ -1454,10 +1473,10 @@ function DomainGrid({ intelligence, tr, lang, onSelect, rootCauses, decisions, a
                 {b.id==='risk' && (
                   <div style={{gridColumn:'1 / -1',background:`${T.red}08`,border:`1px solid ${T.red}20`,borderRadius:secondary?8:10,padding:secondary?'6px 8px':'10px 12px'}}>
                     <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:8}}>
-                      <div style={{fontSize:secondary?8:9,fontWeight:900,color:T.red,textTransform:'uppercase',letterSpacing:'.08em'}}>
+                      <div className="cmd-health-label" style={{ fontWeight:800,color:T.red,textTransform:'uppercase',letterSpacing:'.08em' }}>
                         {strictT(tr, lang, 'alerts_title')}
                       </div>
-                      <div style={{fontFamily:'monospace',fontSize:secondary?11:12,fontWeight:900,color:T.red,direction:'ltr'}}>
+                      <div style={{fontFamily:'monospace',fontSize:secondary?12:14,fontWeight:900,color:T.red,direction:'ltr'}}>
                         {(alerts||[]).length ?? 0}
                       </div>
                     </div>
@@ -1485,13 +1504,13 @@ function AlertsBar({ alerts, tr, lang, onSelect, secondary = false }) {
     <div style={{display:'flex',alignItems:'center',gap:8,
       background:T.surface,border:`1px solid ${T.border}`,
       borderRadius:11,padding:secondary?'8px 14px':'10px 16px',flexWrap:'wrap',opacity:secondary?0.9:1}}>
-      <span style={{fontSize:11,fontWeight:700,color:T.amber,flexShrink:0}}>
+      <span style={{fontSize:12,fontWeight:700,color:T.amber,flexShrink:0}}>
         ⚠ {alerts.length} {strictT(tr, lang, 'alerts_title')}
       </span>
       <div style={{display:'flex',gap:6,flexWrap:'wrap',flex:1}}>
         {alerts.slice(0,4).map((a,i) => (
           <button key={i} onClick={()=>onSelect('alert',a,{})} title={a.message}
-            style={{padding:'3px 10px',borderRadius:20,cursor:'pointer',fontSize:10,fontWeight:600,
+            style={{padding:'3px 10px',borderRadius:20,cursor:'pointer',fontSize:12,fontWeight:600,
               border:`1px solid ${uClr[a.severity]||T.text3}35`,
               background:`${uClr[a.severity]||T.text3}12`,
               color:uClr[a.severity]||T.text3,transition:'all .15s ease',
@@ -1571,37 +1590,11 @@ function ForecastNow({ fcData, tr, lang, secondary = false }) {
         </div>
         <div style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:8,padding:secondary?'6px 8px':'8px 10px'}}>
           <div style={{fontSize:8,color:T.text3,textTransform:'uppercase',letterSpacing:'.08em',marginBottom:2}}>{strictT(tr, lang, 'net_profit')}</div>
-          <div style={{fontFamily:'monospace',fontSize:secondary?14:15,fontWeight:800,color:T.green,direction:'ltr'}}>
+          <div style={{fontFamily:'monospace',fontSize:secondary?14:15,fontWeight:800,color:bNp?.point!=null&&Number(bNp.point)<0?T.red:T.green,direction:'ltr'}}>
             {bNp?.point!=null?formatCompact(bNp.point):'—'}
           </div>
           {bNp?.confidence!=null&&<div style={{fontSize:8,color:T.text3,marginTop:2}}>{strictT(tr, lang, 'fc_confidence')}: {bNp.confidence}%</div>}
         </div>
-      </div>
-    </div>
-  )
-}
-
-function CommandNav({ tr, lang, navigate, secondary = false }) {
-  /* Analysis / branches are drill-down only (from Command Center), not peer hubs. */
-  const links = [
-    { to:'/statements', label: strictT(tr, lang, 'nav_statements') },
-    { to:'/board-report', label: strictT(tr, lang, 'nav_board_report') },
-    { to:'/upload', label: strictT(tr, lang, 'nav_upload') },
-  ]
-  return (
-    <div style={{marginTop:6,paddingTop:10,borderTop:`1px solid ${T.border}`,opacity:secondary?0.85:1}}>
-      <div style={{fontSize:8,fontWeight:800,color:T.text3,textTransform:'uppercase',letterSpacing:'.12em',marginBottom:6}}>
-        {strictT(tr, lang, 'navigation')}
-      </div>
-      <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
-        {links.map(l=>(
-          <button key={l.to} onClick={()=>navigate(l.to)}
-            style={{padding:'4px 9px',borderRadius:999,border:`1px solid ${T.border}`,
-              background:'transparent',color:T.text2,fontSize:10,fontWeight:700,cursor:'pointer',
-              opacity:.85,transition:'opacity .15s, border-color .15s'}}>
-            {l.label}
-          </button>
-        ))}
       </div>
     </div>
   )
@@ -1663,22 +1656,24 @@ function CommandCenterRail({ tr, lang, showPrimaryRow = false }) {
   )
 }
 
-function SecondaryInsightsGrid({
-  fcData,
-  intel,
-  alerts,
-  tr,
-  lang,
-  navigate,
-  drillAnalysis,
-  onSelect,
-  rootCauses,
-  decisions,
-}) {
+function SecondaryCompactCard({ emoji, title, status, why, onClick }) {
+  return (
+    <button type="button" className="cmd-secondary-compact-card cmd-card-hover" onClick={onClick} {...lift()}>
+      <span style={{ fontSize: 14, lineHeight: 1, marginBottom: 4 }} aria-hidden>
+        {emoji}
+      </span>
+      <div className="cmd-secondary-compact-title">{title}</div>
+      <div className="cmd-secondary-compact-metric">{status}</div>
+      <div className="cmd-secondary-compact-why">{why}</div>
+    </button>
+  )
+}
+
+function SecondaryInsightsGrid({ fcData, alerts, tr, lang, navigate, drillAnalysis, onSelect }) {
   const nAlert = Array.isArray(alerts) ? alerts.length : 0
   const tileBase = {
     textAlign: 'left',
-    padding: '14px 16px',
+    padding: '16px 18px',
     borderRadius: 14,
     border: NEU_BD,
     background: CARD_BG,
@@ -1686,91 +1681,103 @@ function SecondaryInsightsGrid({
     cursor: 'pointer',
     transition: 'transform .15s ease, border-color .15s ease',
   }
+  const fullRow = { width: '100%', display: 'block', boxSizing: 'border-box' }
+  const fcSparkMom =
+    fcData?.scenarios?.base?.revenue?.length > 1
+      ? Number(fcData.scenarios.base.revenue[1]?.point) - Number(fcData.scenarios.base.revenue[0]?.point || 0)
+      : null
+
   return (
-    <div
-      style={{
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(168px, 1fr))',
-        gap: 16,
-      }}
-    >
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       <button
         type="button"
+        className="cmd-secondary-full-row"
         onClick={() => drillAnalysis?.('forecast')}
-        style={{ ...tileBase, opacity: 0.92, textAlign: 'left' }}
+        style={{ ...tileBase, ...fullRow, opacity: 0.95, textAlign: 'left' }}
         {...lift()}
       >
-        <div style={{ fontSize: 15, marginBottom: 4 }}>📉</div>
-        <div style={{ fontSize: 11, fontWeight: 800, color: T.text1, marginBottom: 4 }}>
-          {strictT(tr, lang, 'cmd_secondary_tile_forecast')}
-        </div>
-        {fcData?.available ? (
-          <ForecastNow fcData={fcData} tr={tr} lang={lang} secondary />
-        ) : (
-          <div style={{ fontSize: 10, color: T.text3, lineHeight: 1.4 }}>
-            {strictT(tr, lang, 'cmd_secondary_fc_empty')}
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
+          <div style={{ minWidth: 0, flex: '1 1 200px' }}>
+            <div style={{ fontSize: 15, marginBottom: 6 }}>📉</div>
+            <div className="cmd-card-title" style={{ marginBottom: 6, fontSize: 15 }}>
+              {strictT(tr, lang, 'cmd_secondary_tile_forecast')}
+            </div>
+            <div className="cmd-secondary-why cmd-secondary-why--clamp2">{strictT(tr, lang, 'cmd_secondary_why_forecast')}</div>
           </div>
-        )}
+          <div style={{ flex: '1 1 220px', minWidth: 0 }}>
+            {fcData?.available ? (
+              <ForecastNow fcData={fcData} tr={tr} lang={lang} secondary />
+            ) : (
+              <div className="cmd-muted-foreign" style={{ fontSize: 12, lineHeight: 1.45 }}>
+                {strictT(tr, lang, 'cmd_secondary_fc_empty')}
+              </div>
+            )}
+          </div>
+        </div>
+        <CmdSparkline mom={fcSparkMom} />
       </button>
+
       <button
         type="button"
-        onClick={() => drillAnalysis?.('overview')}
-        style={tileBase}
-        {...lift()}
-      >
-        <div style={{ fontSize: 15, marginBottom: 4 }}>📊</div>
-        <div style={{ fontSize: 11, fontWeight: 800, color: T.text1 }}>
-          {strictT(tr, lang, 'cmd_secondary_tile_domains')}
-        </div>
-        <div style={{ fontSize: 10, color: T.text3, marginTop: 3, lineHeight: 1.35 }}>
-          {strictT(tr, lang, 'cmd_secondary_tile_domains_sub')}
-        </div>
-      </button>
-      <button
-        type="button"
+        className="cmd-secondary-full-row"
         onClick={() => {
           if (alerts?.[0]) onSelect('alert', alerts[0], {})
           else drillAnalysis?.('alerts')
         }}
-        style={tileBase}
+        style={{ ...tileBase, ...fullRow }}
         {...lift()}
       >
-        <div style={{ fontSize: 15, marginBottom: 4 }}>⚠️</div>
-        <div style={{ fontSize: 11, fontWeight: 800, color: T.text1 }}>
-          {strictT(tr, lang, 'cmd_secondary_tile_alerts')}
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
+          <div style={{ minWidth: 0, flex: '1 1 180px' }}>
+            <div style={{ fontSize: 15, marginBottom: 6 }}>⚠️</div>
+            <div className="cmd-card-title" style={{ marginBottom: 6, fontSize: 15 }}>
+              {strictT(tr, lang, 'cmd_secondary_tile_alerts')}
+            </div>
+            <div className="cmd-secondary-why cmd-secondary-why--clamp2">{strictT(tr, lang, 'cmd_secondary_why_alerts')}</div>
+          </div>
+          <div style={{ flex: '0 0 auto', minWidth: 0, textAlign: 'right' }}>
+            <div
+              className="cmd-muted-foreign"
+              style={{ fontSize: 15, fontWeight: 800, fontFamily: 'monospace', direction: 'ltr' }}
+            >
+              {nAlert
+                ? strictT(tr, lang, 'cmd_secondary_tile_alerts_count').replace('{n}', String(nAlert))
+                : strictT(tr, lang, 'cmd_secondary_tile_alerts_none')}
+            </div>
+          </div>
         </div>
-        <div style={{ fontSize: 10, color: T.text3, marginTop: 3, lineHeight: 1.35 }}>
-          {nAlert
-            ? strictT(tr, lang, 'cmd_secondary_tile_alerts_count').replace('{n}', String(nAlert))
-            : strictT(tr, lang, 'cmd_secondary_tile_alerts_none')}
-        </div>
+        <CmdSparkline mom={nAlert > 0 ? -1 : 0} />
       </button>
-      <button type="button" onClick={() => navigate('/statements')} style={tileBase} {...lift()}>
-        <div style={{ fontSize: 15, marginBottom: 4 }}>📑</div>
-        <div style={{ fontSize: 11, fontWeight: 800, color: T.text1 }}>
-          {strictT(tr, lang, 'cmd_secondary_tile_statements')}
-        </div>
-        <div style={{ fontSize: 10, color: T.text3, marginTop: 3, lineHeight: 1.35 }}>
-          {strictT(tr, lang, 'cmd_secondary_tile_statements_sub')}
-        </div>
-      </button>
-      {intel ? (
-        <div style={{ gridColumn: '1 / -1' }}>
-          <DomainGrid
-            intelligence={intel}
-            tr={tr}
-            lang={lang}
-            onSelect={onSelect}
-            rootCauses={rootCauses}
-            decisions={decisions}
-            alerts={alerts}
-            secondary
-          />
-        </div>
-      ) : null}
-      {nAlert ? <AlertsBar alerts={alerts} tr={tr} lang={lang} onSelect={onSelect} secondary /> : null}
-      <div style={{ gridColumn: '1 / -1' }}>
-        <CommandNav tr={tr} lang={lang} navigate={navigate} secondary />
+
+      <div className="cmd-secondary-compact-row" role="group" aria-label={strictT(tr, lang, 'cmd_secondary_section')}>
+        <SecondaryCompactCard
+          emoji="📊"
+          title={strictT(tr, lang, 'cmd_secondary_tile_domains')}
+          status={strictT(tr, lang, 'cmd_secondary_compact_domains_status')}
+          why={strictT(tr, lang, 'cmd_secondary_compact_domains_why')}
+          onClick={() => drillAnalysis?.('overview')}
+        />
+        <SecondaryCompactCard
+          emoji="📑"
+          title={strictT(tr, lang, 'cmd_secondary_tile_statements')}
+          status={strictT(tr, lang, 'cmd_secondary_compact_statements_status')}
+          why={strictT(tr, lang, 'cmd_secondary_compact_statements_why')}
+          onClick={() => navigate('/statements')}
+        />
+        <SecondaryCompactCard
+          emoji="📋"
+          title={strictT(tr, lang, 'nav_board_report')}
+          status={strictT(tr, lang, 'cmd_secondary_compact_board_status')}
+          why={strictT(tr, lang, 'cmd_secondary_compact_board_why')}
+          onClick={() => navigate('/board-report')}
+        />
+        <SecondaryCompactCard
+          emoji="⬆️"
+          title={strictT(tr, lang, 'nav_upload')}
+          status={strictT(tr, lang, 'cmd_secondary_compact_upload_status')}
+          why={strictT(tr, lang, 'cmd_secondary_compact_upload_why')}
+          onClick={() => navigate('/upload')}
+        />
       </div>
     </div>
   )
@@ -1968,16 +1975,35 @@ export default function CommandCenter() {
         ? `h-cfo-${primaryResolution.decision?.key || primaryResolution.decision?.domain || 'd'}`
         : 'h-none'
 
+  const showPairedTop = !!primaryResolution
+  const healthPanelProps = {
+    tr,
+    lang,
+    health,
+    status,
+    companyName: selectedCompany?.name,
+    period,
+    loading,
+    onRefresh: load,
+    periodCount: main?.periods?.length,
+    scopeLabel: main?.scope_label,
+    healthHeadline: narrative?.healthHeadline,
+    actionPrefix: narrative?.actionPrefix,
+    actionLine: narrative?.actionLine,
+    onDrillAnalysis: () => drillAnalysis('overview'),
+  }
+
   return (
     <div className="cmd-page">
       <style>{`
         @keyframes spin { to { transform:rotate(360deg) } }
         @keyframes slideIn { from { transform:translateX(100%);opacity:0 } to { transform:translateX(0);opacity:1 } }
         @keyframes fadeUp { from { opacity:0;transform:translateY(5px) } to { opacity:1;transform:none } }
-        @media (max-width: 1100px) {
-          .cmd-dashboard-grid .cmd-r1 { grid-template-columns: 1fr !important; }
-          .cmd-dashboard-grid { grid-template-columns: 1fr !important; }
-          .cmd-dashboard-grid .cmd-full { grid-column: 1 / -1 !important; }
+        @media (max-width: 1180px) {
+          .cmd-desktop-split { grid-template-columns: 1fr !important; }
+        }
+        @media (max-width: 880px) {
+          .cmd-desktop-insights-grid { grid-template-columns: 1fr !important; }
         }
         @media (max-width: 960px) {
           .cmd-kpi-four { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
@@ -2006,117 +2032,125 @@ export default function CommandCenter() {
               <div className="cmd-page-title">{strictT(tr, lang, 'nav_command_center')}</div>
               <div className="cmd-page-subtitle">
                 <span style={{ color: T.text2, fontWeight: 600 }}>{selectedCompany?.name || '—'}</span>
-                <span style={{ marginLeft: 8 }}>· {strictT(tr, lang, 'cmd_page_sub')}</span>
+                <span className="cmd-muted-foreign" style={{ marginLeft: 8 }}>
+                  · {strictT(tr, lang, 'cmd_page_sub')}
+                </span>
               </div>
             </header>
-            <div className="cmd-tool-row">
-              <PeriodSelector window={win} setWindow={setWin} disabled={loading} />
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 0,
-                  background: T.card,
-                  border: `1px solid ${T.border}`,
-                  borderRadius: 8,
-                  overflow: 'hidden',
-                  flexShrink: 0,
-                }}
-              >
-                {[
-                  { v: false, l: strictT(tr, lang, 'company_uploads') },
-                  { v: true, l: strictT(tr, lang, 'branch_consolidation') },
-                ].map((opt) => (
-                  <button
-                    key={String(opt.v)}
-                    type="button"
-                    onClick={() => setConsolidate(opt.v)}
-                    style={{
-                      padding: '5px 12px',
-                      fontSize: 11,
-                      fontWeight: 600,
-                      border: 'none',
-                      cursor: 'pointer',
-                      background: consolidate === opt.v ? T.accent : 'transparent',
-                      color: consolidate === opt.v ? '#000' : T.text2,
-                      transition: 'all .15s',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    {opt.l}
-                  </button>
-                ))}
+            <div className="cmd-tool-bar">
+              <div className="cmd-tool-bar__group">
+                <PeriodSelector window={win} setWindow={setWin} disabled={loading} />
               </div>
-              <UniversalScopeSelector
-                tr={tr}
-                lang={lang}
-                ps={ps}
-                psUpdate={psUpdate}
-                onApply={load}
-                activeLabel={psActiveLabel()}
-                allPeriods={main?.all_periods || []}
-              />
-              {loading ? (
+              <div className="cmd-tool-bar__group">
                 <div
                   style={{
-                    width: 14,
-                    height: 14,
-                    border: `2px solid ${T.border}`,
-                    borderTopColor: T.accent,
-                    borderRadius: '50%',
-                    animation: 'spin .8s linear infinite',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 0,
+                    background: T.card,
+                    border: `1px solid ${T.border}`,
+                    borderRadius: 8,
+                    overflow: 'hidden',
+                    flexShrink: 0,
                   }}
+                >
+                  {[
+                    { v: false, l: strictT(tr, lang, 'company_uploads') },
+                    { v: true, l: strictT(tr, lang, 'branch_consolidation') },
+                  ].map((opt) => (
+                    <button
+                      key={String(opt.v)}
+                      type="button"
+                      onClick={() => setConsolidate(opt.v)}
+                      style={{
+                        padding: '8px 14px',
+                        fontSize: 11,
+                        fontWeight: 600,
+                        border: 'none',
+                        cursor: 'pointer',
+                        background: consolidate === opt.v ? T.accent : 'transparent',
+                        color: consolidate === opt.v ? '#000' : T.text2,
+                        transition: 'all .15s',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {opt.l}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="cmd-tool-bar__group cmd-tool-bar__group--grow">
+                <UniversalScopeSelector
+                  tr={tr}
+                  lang={lang}
+                  ps={ps}
+                  psUpdate={psUpdate}
+                  onApply={load}
+                  activeLabel={psActiveLabel()}
+                  allPeriods={main?.all_periods || []}
                 />
+              </div>
+              {loading ? (
+                <div className="cmd-tool-bar__group">
+                  <div
+                    style={{
+                      width: 14,
+                      height: 14,
+                      border: `2px solid ${T.border}`,
+                      borderTopColor: T.accent,
+                      borderRadius: '50%',
+                      animation: 'spin .8s linear infinite',
+                    }}
+                  />
+                </div>
               ) : null}
             </div>
           </div>
 
           <div className={main ? `${dashEnterCls} cmd-stack-major`.trim() : 'cmd-stack-major'}>
-          {primaryResolution ? (
-            <div key={primaryHeroKey} id="cmd-row-0" className="cmd-scroll-anchor cmd-primary-outer">
-              <PrimaryDecisionHero
-                resolution={primaryResolution}
-                impacts={impacts}
-                tr={tr}
-                lang={lang}
-                causes={causes}
-                allDecisions={decs}
-                onOpen={open}
-              />
-            </div>
-          ) : null}
-
           <DataQualityBanner validation={main?.pipeline_validation} lang={lang} tr={tr} />
 
           <CommandCenterDashboardGrid
+            key={primaryHeroKey}
             supportingDemoted={!!primaryResolution}
             primaryHero={null}
+            rowTopHealth={showPairedTop ? <HealthScorePanel {...healthPanelProps} pairedLayout /> : null}
+            rowTopHero={
+              showPairedTop ? (
+                <PrimaryDecisionHero
+                  resolution={primaryResolution}
+                  impacts={impacts}
+                  tr={tr}
+                  lang={lang}
+                  causes={causes}
+                  allDecisions={decs}
+                  onOpen={open}
+                />
+              ) : null
+            }
+            row1Health={showPairedTop ? null : <HealthScorePanel {...healthPanelProps} />}
             row1Narrative={
               <ExecutiveNarrativeStrip
                 narrative={narrative}
                 tr={tr}
                 lang={lang}
-                compact
+                compact={false}
                 onOpenFullAnalysis={() => drillAnalysis('overview')}
               />
             }
-            row1Health={
-              <HealthScorePanel
-                tr={tr}
-                lang={lang}
-                health={health}
-                status={status}
-                companyName={selectedCompany?.name}
-                period={period}
-                loading={loading}
-                onRefresh={load}
-                periodCount={main?.periods?.length}
-                scopeLabel={main?.scope_label}
-                healthHeadline={narrative?.healthHeadline}
-                actionPrefix={narrative?.actionPrefix}
-                actionLine={narrative?.actionLine}
-                onDrillAnalysis={() => drillAnalysis('overview')}
-              />
+            rowDomainHealth={
+              main && intel ? (
+                <DomainGrid
+                  intelligence={intel}
+                  tr={tr}
+                  lang={lang}
+                  onSelect={open}
+                  rootCauses={causes}
+                  decisions={decs}
+                  alerts={alerts}
+                  secondary={false}
+                />
+              ) : null
             }
             row2Kpis={
               main ? (
@@ -2206,22 +2240,27 @@ export default function CommandCenter() {
               </div>
             }
             secondarySubtitle={
-              <div style={{ fontSize: 9, color: T.text3, lineHeight: 1.35, textAlign: 'left' }}>
+              <div
+                className="cmd-card-section-subtitle cmd-card-section-subtitle--t3"
+                style={{ textAlign: 'left', marginTop: 0 }}
+              >
                 {strictT(tr, lang, 'cmd_secondary_section_sub')}
               </div>
+            }
+            sidebarAlerts={
+              Array.isArray(alerts) && alerts.length > 0 ? (
+                <AlertsBar alerts={alerts} tr={tr} lang={lang} onSelect={open} secondary />
+              ) : null
             }
             secondaryBlock={
               <SecondaryInsightsGrid
                 fcData={fcData}
-                intel={intel}
                 alerts={alerts}
                 tr={tr}
                 lang={lang}
                 navigate={navigate}
                 drillAnalysis={drillAnalysis}
                 onSelect={open}
-                rootCauses={causes}
-                decisions={decs}
               />
             }
           />

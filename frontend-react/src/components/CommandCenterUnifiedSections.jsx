@@ -1,6 +1,7 @@
 /**
  * Command Center sections — GET /executive payload only; presentation only.
  */
+import '../styles/commandCenterStructure.css'
 import { useState } from 'react'
 import { useCountUp } from '../hooks/useCountUp.js'
 import { formatCompact, formatMultiple } from '../utils/numberFormat.js'
@@ -8,63 +9,45 @@ import { factOverlapsWhy } from '../utils/buildExecutiveNarrative.js'
 import { strictT as st } from '../utils/strictI18n.js'
 import { CLAMP_FADE_MASK_SHORT } from '../utils/serverTextUi.js'
 import CmdServerText from './CmdServerText.jsx'
+import CmdSparkline from './CmdSparkline.jsx'
 
 const P = {
   surface: 'linear-gradient(165deg, rgba(17,24,39,0.98) 0%, rgba(15,23,42,0.99) 100%)',
-  border: 'rgba(148,163,184,0.14)',
-  cardShadow: '0 4px 24px rgba(0,0,0,0.22)',
+  border: 'rgba(148,163,184,0.16)',
+  cardShadow: '0 4px 28px rgba(0,0,0,0.32)',
   accent: '#00d4aa',
   green: '#34d399',
   red: '#f87171',
   amber: '#fbbf24',
-  text1: '#f8fafc',
-  text2: '#94a3b8',
-  text3: '#64748b',
+  text1: '#ffffff',
+  text2: '#d1dae6',
+  text3: '#9ca8b8',
 }
 
-function sectionShell(title, subtitle, children, visualTier = 2, headerAction = null) {
+function sectionShell(title, subtitle, children, visualTier = 2, headerAction = null, panelExtraClass = '') {
   const tier = Number(visualTier) || 2
-  const boxShadow =
-    tier === 2 ? P.cardShadow : tier === 3 ? '0 2px 16px rgba(0,0,0,0.2)' : P.cardShadow
-  const titleFs = tier === 3 ? 9 : 10
-  const titleOpacity = tier === 3 ? 0.88 : 1
-  const subOpacity = tier === 3 ? 0.85 : 0.95
+  const panelCls = [
+    'cmd-panel',
+    panelExtraClass,
+    tier === 3 ? 'cmd-panel--tier3' : '',
+    tier === 3 ? 'cmd-panel--pad-3' : 'cmd-panel--pad-2',
+  ]
+    .filter(Boolean)
+    .join(' ')
+  const subTierCls = tier === 3 ? 'cmd-card-section-subtitle--t3' : ''
   const titleBlock = (
     <>
-      <div
-        style={{
-          fontSize: titleFs,
-          fontWeight: 800,
-          color: P.text1,
-          letterSpacing: '.08em',
-          textTransform: 'uppercase',
-          opacity: titleOpacity,
-        }}
-      >
-        {title}
-      </div>
+      <div className="cmd-card-title">{title}</div>
       {subtitle ? (
-        <div
-          style={{ fontSize: tier === 3 ? 8 : 9, color: P.text3, marginTop: 3, lineHeight: 1.35, opacity: subOpacity }}
-        >
+        <div className={`cmd-muted-foreign ${subTierCls}`.trim()} style={{ marginTop: 4 }}>
           {subtitle}
         </div>
       ) : null}
     </>
   )
   return (
-    <div
-      style={{
-        background: P.surface,
-        border: `1px solid ${P.border}`,
-        borderRadius: 14,
-        boxShadow,
-        padding: tier === 3 ? '12px 14px 14px' : '14px 16px 16px',
-        height: '100%',
-        opacity: tier === 3 ? 0.96 : 1,
-      }}
-    >
-      <div style={{ marginBottom: tier === 3 ? 8 : 12 }}>
+    <div className={panelCls}>
+      <div style={{ marginBottom: tier === 3 ? 10 : 14 }}>
         {headerAction ? (
           <button
             type="button"
@@ -79,7 +62,7 @@ function sectionShell(title, subtitle, children, visualTier = 2, headerAction = 
               background: 'transparent',
               cursor: 'pointer',
               textAlign: 'inherit',
-              borderRadius: 8,
+              borderRadius: 10,
             }}
           >
             {titleBlock}
@@ -88,7 +71,7 @@ function sectionShell(title, subtitle, children, visualTier = 2, headerAction = 
           titleBlock
         )}
         {headerAction?.hint ? (
-          <div style={{ fontSize: 8, color: P.text3, marginTop: 4, opacity: 0.9, lineHeight: 1.35 }}>
+          <div style={{ fontSize: 11, color: P.text3, marginTop: 6, opacity: 0.95, lineHeight: 1.45 }}>
             {headerAction.hint}
           </div>
         ) : null}
@@ -343,11 +326,11 @@ export function KeySignalsSection({
   return sectionShell(
     st(tr, lang, 'cmd_key_signals'),
     st(tr, lang, 'cmd_key_signals_subcritical'),
-    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
-      {displayCards.map((c) => (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14 }}>
+      {displayCards.map((c, idx) => (
         <div
           key={c.key}
-          className="cmd-card-hover"
+          className={`cmd-signal-tile cmd-card-hover${idx === 0 ? ' cmd-signal-tile--featured' : ''}`.trim()}
           role={onOpenAnalysis ? 'button' : undefined}
           tabIndex={onOpenAnalysis ? 0 : undefined}
           onClick={onOpenAnalysis ? () => onOpenAnalysis(analysisTabForSignal(c.key)) : undefined}
@@ -363,35 +346,24 @@ export function KeySignalsSection({
           }
           title={onOpenAnalysis ? st(tr, lang, 'cmd_drill_signal_hint') : undefined}
           style={{
-            flex: '1 1 180px',
-            minWidth: 152,
-            background: 'rgba(255,255,255,0.03)',
-            border: `1px solid ${P.border}`,
-            borderRadius: 14,
-            padding: '12px 14px',
-            boxShadow: 'none',
             cursor: onOpenAnalysis ? 'pointer' : undefined,
             outline: 'none',
-            transition: 'border-color .15s ease, background .15s ease',
           }}
         >
-          <div
-            style={{
-              fontSize: 8,
-              fontWeight: 800,
-              color: P.text3,
-              textTransform: 'uppercase',
-              letterSpacing: '.08em',
-              marginBottom: 6,
-            }}
-          >
+          <div className="cmd-field-label" style={{ marginBottom: 6 }}>
             {c.label}
           </div>
-          <div style={{ fontSize: 12, fontWeight: 650, color: P.text1, lineHeight: 1.35, ...CLAMP_FADE_MASK_SHORT }}>
+          <div
+            className="cmd-card-data-value"
+            style={{
+              ...CLAMP_FADE_MASK_SHORT,
+            }}
+          >
             <CmdServerText lang={lang} tr={tr} as="span" style={{ color: 'inherit' }}>
               {c.value}
             </CmdServerText>
           </div>
+          <CmdSparkline mom={null} />
         </div>
       ))}
     </div>,
@@ -467,16 +439,7 @@ export function BranchIntelligenceSection({
   const rankingBlock =
     effList.length > 0 ? (
       <div style={{ marginBottom: 8 }}>
-        <div
-          style={{
-            fontSize: 8,
-            fontWeight: 800,
-            color: P.text3,
-            textTransform: 'uppercase',
-            letterSpacing: '.08em',
-            marginBottom: 8,
-          }}
-        >
+        <div className="cmd-field-label cmd-field-label--sm" style={{ marginBottom: 8 }}>
           {st(tr, lang, 'cmd_branch_rank_title')}
         </div>
         {effList.map((b, i) => {
@@ -517,20 +480,20 @@ export function BranchIntelligenceSection({
                 gap: 8,
                 padding: '8px 10px',
                 marginBottom: 6,
-                borderRadius: 8,
-                background: 'rgba(255,255,255,0.02)',
+                borderRadius: 10,
+                background: 'rgba(255,255,255,0.03)',
                 border: `1px solid ${P.border}`,
                 borderLeft: `3px solid ${bc === P.text3 ? P.border : bc}`,
                 cursor: onBranchRankClick ? 'pointer' : undefined,
                 outline: 'none',
               }}
             >
-              <div style={{ fontFamily: 'monospace', fontSize: 11, fontWeight: 800, color: P.text3, width: 20 }}>
+              <div className="cmd-data-num cmd-branch-rank-idx" style={{ width: 20 }}>
                 {i + 1}
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 12, fontWeight: 700, color: P.text1, lineHeight: 1.25 }}>{name}</div>
-                <div style={{ fontSize: 10, color: P.text2, marginTop: 1 }}>
+                <div style={{ fontSize: 13, fontWeight: 800, color: P.text1, lineHeight: 1.25 }}>{name}</div>
+                <div className="cmd-branch-metric-line cmd-data-num">
                   {pct != null && Number.isFinite(Number(pct))
                     ? `${Number(pct).toFixed(2)}% ${ofRevBr}`
                     : '—'}
@@ -565,15 +528,8 @@ export function BranchIntelligenceSection({
     <>
       {rankingBlock}
       <div
-        style={{
-          fontSize: 8,
-          fontWeight: 800,
-          color: P.text3,
-          textTransform: 'uppercase',
-          letterSpacing: '.08em',
-          marginBottom: 8,
-          marginTop: rankingBlock ? 8 : 0,
-        }}
+        className="cmd-field-label cmd-field-label--sm"
+        style={{ marginBottom: 8, marginTop: rankingBlock ? 8 : 0 }}
       >
         {st(tr, lang, 'cmd_branch_detail_signals')}
       </div>
@@ -588,18 +544,13 @@ export function BranchIntelligenceSection({
                 borderBottom: i < visible.length - 1 ? `1px solid ${P.border}` : 'none',
               }}
             >
-              <div
-                style={{
-                  fontSize: 8,
-                  fontWeight: 800,
-                  color: P.text3,
-                  textTransform: 'uppercase',
-                  letterSpacing: '.07em',
-                }}
-              >
+              <div className="cmd-field-label cmd-field-label--sm" style={{ marginBottom: 4 }}>
                 {r.label}
               </div>
-              <div style={{ fontSize: 12, color: P.text1, marginTop: 3, lineHeight: 1.35, ...CLAMP_FADE_MASK_SHORT }}>
+              <div
+                className="cmd-card-data-value"
+                style={{ marginTop: 4, lineHeight: 1.4, ...CLAMP_FADE_MASK_SHORT }}
+              >
               <CmdServerText lang={lang} tr={tr} as="span" style={{ color: 'inherit' }}>
                 {r.text}
               </CmdServerText>
@@ -607,7 +558,7 @@ export function BranchIntelligenceSection({
             </div>
           ))
         ) : !rankingBlock ? (
-          <div style={{ fontSize: 12, color: P.text2, lineHeight: 1.45, padding: '4px 0' }}>{emptyMsg}</div>
+          <div style={{ fontSize: 13, color: P.text2, lineHeight: 1.5, padding: '6px 0' }}>{emptyMsg}</div>
         ) : null}
       </div>
       {onOpenBranches ? (
@@ -643,6 +594,7 @@ export function BranchIntelligenceSection({
           title: st(tr, lang, 'cmd_chart_branch_header_title'),
         }
       : null,
+    'cmd-branch-intel-heading',
   )
 }
 
@@ -751,7 +703,7 @@ export function DecisionsSection({
         return (
           <div
             key={d.decision_id || d.title}
-            className="cmd-decision-tile cmd-card-hover"
+            className={`cmd-decision-tile cmd-card-hover${first ? ' cmd-decision-priority-ring' : ''}`.trim()}
             role={onOpenDecision ? 'button' : undefined}
             tabIndex={onOpenDecision ? 0 : undefined}
             onClick={onOpenDecision ? () => onOpenDecision(d) : undefined}
@@ -767,36 +719,33 @@ export function DecisionsSection({
             }
             title={onOpenDecision ? st(tr, lang, 'cmd_drill_decision_hint') : undefined}
             style={{
-              padding: first ? '14px 16px' : '12px 14px',
+              padding: first ? '16px 18px' : '14px 16px',
               borderRadius: 14,
-              border: first ? `1px solid rgba(0,212,170,0.35)` : `1px solid ${P.border}`,
+              border: first ? '1px solid rgba(0,212,170,0.28)' : `1px solid ${P.border}`,
               borderLeft: first ? `4px solid ${pc}` : `3px solid ${pc}`,
-              background: first ? 'rgba(0,212,170,0.06)' : 'rgba(255,255,255,0.02)',
+              background: first ? 'rgba(0,212,170,0.055)' : 'rgba(255,255,255,0.025)',
               boxShadow: first
-                ? '0 0 16px rgba(0,212,170,0.1), inset 0 1px 0 rgba(255,255,255,0.04)'
-                : 'inset 0 1px 0 rgba(255,255,255,0.03)',
+                ? 'inset 0 0 0 1px rgba(0,212,170,0.1), 0 4px 24px rgba(0,0,0,0.26)'
+                : 'inset 0 1px 0 rgba(255,255,255,0.035)',
               cursor: onOpenDecision ? 'pointer' : undefined,
               outline: 'none',
             }}
           >
             <div
+              className="cmd-decision-eyebrow"
               style={{
-                fontSize: first ? 9 : 8,
-                fontWeight: 800,
+                fontSize: 12,
                 color: pc,
-                textTransform: 'uppercase',
-                letterSpacing: '.07em',
               }}
             >
               {idx + 1}. {pr}
             </div>
             <div
+              className="cmd-decision-card-title cmd-card-title"
               style={{
-                fontSize: first ? 15 : 13,
+                fontSize: first ? 16 : 14,
                 fontWeight: 800,
-                color: P.text1,
-                lineHeight: 1.3,
-                marginTop: first ? 6 : 5,
+                marginTop: first ? 8 : 6,
                 ...CLAMP_FADE_MASK_SHORT,
               }}
             >
@@ -809,25 +758,15 @@ export function DecisionsSection({
                 display: 'flex',
                 flexWrap: 'wrap',
                 alignItems: 'baseline',
-                gap: '6px 14px',
-                marginTop: first ? 8 : 6,
-                paddingTop: first ? 8 : 6,
+                gap: '8px 16px',
+                marginTop: first ? 10 : 8,
+                paddingTop: first ? 10 : 8,
                 borderTop: `1px solid ${P.border}`,
               }}
             >
               <div style={{ flex: '1 1 90px', minWidth: 0 }}>
-                <span style={{ fontSize: 7, fontWeight: 800, color: P.text3, letterSpacing: '.05em' }}>
-                  {st(tr, lang, 'cmd_dec_meta_impact')}
-                </span>
-                <div
-                  style={{
-                    fontSize: 10,
-                    color: P.text2,
-                    marginTop: 2,
-                    lineHeight: 1.3,
-                    ...CLAMP_FADE_MASK_SHORT,
-                  }}
-                >
+                <span className="cmd-decision-meta-label">{st(tr, lang, 'cmd_dec_meta_impact')}</span>
+                <div className="cmd-decision-impact-line cmd-data-num" style={{ ...CLAMP_FADE_MASK_SHORT }}>
                   {savingsOk ? (
                     <DecisionImpactAmount savingsRaw={savingsRaw} tr={tr} lang={lang} />
                   ) : (
@@ -836,25 +775,25 @@ export function DecisionsSection({
                 </div>
               </div>
               <div style={{ flex: '0 1 auto', minWidth: 0 }}>
-                <span style={{ fontSize: 7, fontWeight: 800, color: P.text3, letterSpacing: '.05em' }}>
-                  {st(tr, lang, 'cmd_dec_meta_owner')}
-                </span>
-                <div style={{ fontSize: 10, color: P.text2, marginTop: 2, lineHeight: 1.2 }}>{owner || '—'}</div>
+                <span className="cmd-decision-meta-label">{st(tr, lang, 'cmd_dec_meta_owner')}</span>
+                <div className="cmd-decision-impact-line" style={{ lineHeight: 1.2 }}>
+                  {owner || '—'}
+                </div>
               </div>
               <div style={{ flex: '0 1 auto', minWidth: 0 }}>
-                <span style={{ fontSize: 7, fontWeight: 800, color: P.text3, letterSpacing: '.05em' }}>
-                  {st(tr, lang, 'cmd_dec_meta_horizon')}
-                </span>
-                <div style={{ fontSize: 10, color: P.text2, marginTop: 2, lineHeight: 1.2 }}>{horizon || '—'}</div>
+                <span className="cmd-decision-meta-label">{st(tr, lang, 'cmd_dec_meta_horizon')}</span>
+                <div className="cmd-decision-impact-line" style={{ lineHeight: 1.2 }}>
+                  {horizon || '—'}
+                </div>
               </div>
             </div>
             {d.rationale ? (
               <div
                 style={{
-                  fontSize: first ? 11 : 10,
+                  fontSize: first ? 12 : 11,
                   color: P.text2,
-                  marginTop: first ? 8 : 6,
-                  lineHeight: 1.4,
+                  marginTop: first ? 10 : 8,
+                  lineHeight: 1.45,
                   maxHeight: first ? '5.6em' : '4.2em',
                   overflow: 'hidden',
                   WebkitMaskImage: 'linear-gradient(to bottom, #000 75%, transparent 100%)',
@@ -879,12 +818,12 @@ export function DecisionsSection({
         onClick={() => setExpanded(true)}
         style={{
           width: '100%',
-          padding: '10px 14px',
-          borderRadius: 12,
+          padding: '11px 16px',
+          borderRadius: 10,
           border: `1px solid ${P.border}`,
           background: 'rgba(255,255,255,0.03)',
           color: P.text2,
-          fontSize: 10,
+          fontSize: 11,
           fontWeight: 700,
           cursor: 'pointer',
           textAlign: 'center',

@@ -1,42 +1,33 @@
 /**
  * ExpenseInsightsSection — structured expense intelligence from GET /executive data.expense_intelligence
  */
+import '../styles/commandCenterStructure.css'
 import { formatCompact } from '../utils/numberFormat.js'
 import { strictT as st } from '../utils/strictI18n.js'
 import { CLAMP_FADE_MASK_SHORT } from '../utils/serverTextUi.js'
 import CmdServerText from './CmdServerText.jsx'
+import CmdSparkline from './CmdSparkline.jsx'
 
 const P = {
   surface: 'linear-gradient(165deg, rgba(17,24,39,0.98) 0%, rgba(15,23,42,0.99) 100%)',
-  border: 'rgba(148,163,184,0.14)',
-  cardShadow: '0 4px 24px rgba(0,0,0,0.22)',
+  border: 'rgba(148,163,184,0.16)',
+  cardShadow: '0 4px 28px rgba(0,0,0,0.32)',
   accent: '#00d4aa',
-  text1: '#f8fafc',
-  text2: '#94a3b8',
-  text3: '#64748b',
+  text1: '#ffffff',
+  text2: '#d1dae6',
+  text3: '#9ca8b8',
 }
 
 function row(label, value, lang, tr) {
   return (
     <div style={{ padding: '6px 0', borderBottom: `1px solid ${P.border}` }}>
-      <div
-        style={{
-          fontSize: 8,
-          fontWeight: 800,
-          color: P.text3,
-          textTransform: 'uppercase',
-          letterSpacing: '.07em',
-        }}
-      >
+      <div className="cmd-field-label" style={{ marginBottom: 4 }}>
         {label}
       </div>
       <div
+        className="cmd-card-data-value"
         style={{
-          fontSize: 12,
-          fontWeight: 650,
-          color: P.text1,
-          marginTop: 3,
-          lineHeight: 1.35,
+          marginTop: 4,
           ...CLAMP_FADE_MASK_SHORT,
         }}
       >
@@ -107,13 +98,18 @@ export default function ExpenseInsightsSection({
       ? `${st(tr, lang, 'cmd_expense_total_label')} ${formatCompact(totals.total_expense)} · ${st(tr, lang, 'cmd_expense_rev_label')} ${formatCompact(totals.revenue)}`
       : null
 
-  const titleFs = tier === 3 ? 9 : 10
-  const subFs = tier === 3 ? 8 : 9
-  const headerOpacity = tier === 3 ? 0.88 : 1
+  const shellCls = [
+    'cmd-card-hover',
+    embedded ? '' : 'cmd-panel',
+    embedded ? '' : tier === 3 ? 'cmd-panel--tier3' : '',
+    embedded ? '' : tier === 3 ? 'cmd-panel--pad-3' : 'cmd-panel--pad-2',
+  ]
+    .filter(Boolean)
+    .join(' ')
 
   return (
     <div
-      className="cmd-card-hover"
+      className={shellCls}
       role={onDrillExpense ? 'button' : undefined}
       tabIndex={onDrillExpense ? 0 : undefined}
       onClick={onDrillExpense || undefined}
@@ -129,40 +125,65 @@ export default function ExpenseInsightsSection({
       }
       title={onDrillExpense ? st(tr, lang, 'cmd_drill_expense_hint') : undefined}
       style={{
-        background: embedded ? 'rgba(255,255,255,0.02)' : P.surface,
-        border: `1px solid ${P.border}`,
+        background: embedded ? 'rgba(255,255,255,0.032)' : undefined,
+        border: embedded ? `1px solid ${P.border}` : undefined,
         borderRadius: 14,
-        boxShadow: embedded ? 'none' : P.cardShadow,
-        padding: embedded ? (tier === 3 ? '12px 14px' : '14px 16px') : tier === 3 ? '12px 14px' : '14px 16px',
+        boxShadow: embedded ? 'none' : undefined,
+        padding: embedded ? (tier === 3 ? '14px 16px' : '16px 18px') : undefined,
         cursor: onDrillExpense ? 'pointer' : undefined,
         outline: 'none',
-        opacity: tier === 3 ? 0.96 : 1,
+        opacity: tier === 3 ? 0.98 : 1,
       }}
     >
-      <div style={{ marginBottom: tier === 3 ? 8 : 12 }}>
-        <div
-          style={{
-            fontSize: titleFs,
-            fontWeight: 800,
-            color: P.text1,
-            letterSpacing: '.08em',
-            textTransform: 'uppercase',
-            opacity: headerOpacity,
-          }}
-        >
-          {st(tr, lang, 'cmd_expense_insights')}
-        </div>
-        <div style={{ fontSize: subFs, color: P.text3, marginTop: 4, lineHeight: 1.35, opacity: tier === 3 ? 0.85 : 1 }}>
+      <div style={{ marginBottom: tier === 3 ? 10 : 14 }}>
+        <div className="cmd-card-title">{st(tr, lang, 'cmd_expense_insights')}</div>
+        <div className="cmd-muted-foreign" style={{ marginTop: 4 }}>
           {st(tr, lang, 'cmd_expense_insights_sub')}
         </div>
       </div>
 
+      {avail && ratio != null && Number.isFinite(Number(ratio)) ? (
+        <div style={{ marginBottom: 14, paddingBottom: 12, borderBottom: `1px solid ${P.border}` }}>
+          <div className="cmd-field-label" style={{ marginBottom: 2 }}>
+            {st(tr, lang, 'cmd_expense_ratio_row')}
+          </div>
+          <div
+            className="cmd-ei-metric-hero"
+            style={{
+              color:
+                pp != null && Number.isFinite(Number(pp))
+                  ? Number(pp) > 0.5
+                    ? P.red
+                    : Number(pp) < -0.5
+                      ? P.green
+                      : P.text1
+                  : P.text1,
+            }}
+          >
+            {Number(ratio).toFixed(1)}%
+            <span className="cmd-muted-foreign" style={{ fontSize: '0.5em', fontWeight: 700, marginLeft: 6 }}>
+              {ofRev}
+            </span>
+          </div>
+          {momTeStr != null ? (
+            <div className="cmd-muted-foreign" style={{ marginTop: 8, fontSize: 11 }}>
+              {st(tr, lang, 'cmd_expense_mom_te')}: {momTeStr}
+            </div>
+          ) : null}
+          {ratioTrend ? (
+            <div className="cmd-muted-foreign" style={{ marginTop: 4, fontSize: 11 }}>
+              {ratioTrend}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
       {!avail ? (
-        <div style={{ fontSize: 12, color: P.text2, lineHeight: 1.45, padding: '6px 0' }}>{weakMsg}</div>
+        <div style={{ fontSize: 14, color: P.text2, lineHeight: 1.55, padding: '10px 0' }}>{weakMsg}</div>
       ) : (
         <div>
           {period ? (
-            <div style={{ fontSize: tier === 3 ? 8 : 9, color: P.text3, marginBottom: 8, fontWeight: 600 }}>
+            <div style={{ fontSize: 12, color: P.text3, marginBottom: 10, fontWeight: 600 }}>
               {st(tr, lang, 'cmd_expense_period')}: {period}
             </div>
           ) : null}
@@ -178,10 +199,13 @@ export default function ExpenseInsightsSection({
                 tr
               )
             : row(st(tr, lang, 'cmd_expense_mom_te'), st(tr, lang, 'cmd_expense_mom_na'), lang, tr)}
-          {ratioLine ? row(st(tr, lang, 'cmd_expense_ratio_row'), ratioLine, lang, tr) : null}
+          {ratioLine && !(avail && ratio != null && Number.isFinite(Number(ratio)))
+            ? row(st(tr, lang, 'cmd_expense_ratio_row'), ratioLine, lang, tr)
+            : null}
           {growLine
             ? row(st(tr, lang, 'cmd_expense_fastest_growing'), growLine, lang, tr)
             : row(st(tr, lang, 'cmd_expense_fastest_growing'), st(tr, lang, 'cmd_expense_no_mover'), lang, tr)}
+          <CmdSparkline mom={momTe} />
         </div>
       )}
     </div>

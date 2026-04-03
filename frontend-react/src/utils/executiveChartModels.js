@@ -23,7 +23,15 @@ export function extractKpiTrendPoints(kpiBlock, cashflow, kpiType) {
   const kb = kpiBlock || {}
   const periods = kb.periods || []
   const key =
-    kpiType === 'revenue' ? 'revenue' : kpiType === 'net_profit' ? 'net_profit' : null
+    kpiType === 'revenue'
+      ? 'revenue'
+      : kpiType === 'expenses'
+        ? 'expenses'
+        : kpiType === 'net_profit'
+          ? 'net_profit'
+          : kpiType === 'net_margin'
+            ? 'net_margin'
+            : null
   if (!key || periods.length < 2) return null
   const ser = kb.series?.[key] || []
   const out = []

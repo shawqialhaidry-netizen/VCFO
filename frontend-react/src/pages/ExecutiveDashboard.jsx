@@ -4,6 +4,7 @@
  * Hover = simple explanation. Click = deep panel.
  * Arabic = plain language, zero jargon.
  */
+import '../styles/commandCenterStructure.css'
 import { useState, useCallback, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useLang }        from '../context/LangContext.jsx'
@@ -609,30 +610,55 @@ function ExecutiveKpiRow({ kpis, cashflow, main, tr, lang, onSelect, alerts, ctx
               {...lift(c.color)}>
               <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:8}}>
                 <span style={{fontSize:12}}>{c.icon}</span>
-                <span style={{fontSize:10,color:T.text2,fontWeight:700,textTransform:'uppercase',
-                  letterSpacing:'.05em'}}>{kpiLabel(st(`kpi_label_${c.key}`), ctxLabel(), st)}</span>
+                <span className="cmd-kpi-dimension-label" style={{ fontSize: 10, color: T.text2 }}>
+                  {kpiLabel(st(`kpi_label_${c.key}`), ctxLabel(), st)}
+                </span>
               </div>
-              <div style={{
-                fontFamily:'var(--font-display)',fontSize:22,fontWeight:800,color:'#ffffff',
-                marginBottom:3,direction:'ltr',
-                letterSpacing:'-0.025em',lineHeight:1,
-                animation:'fadeUp .35s ease',
-                transition:'text-shadow 0.2s ease',
-              }}>
+              <div
+                className="cmd-data-num"
+                style={{
+                  fontFamily: 'var(--font-display)',
+                  fontSize: 22,
+                  fontWeight: 800,
+                  color: 'var(--cmd-num-neutral, #f1f5f9)',
+                  marginBottom: 3,
+                  direction: 'ltr',
+                  letterSpacing: '-0.025em',
+                  lineHeight: 1,
+                  animation: 'fadeUp .35s ease',
+                  transition: 'text-shadow 0.2s ease',
+                }}
+              >
                 {c.value}
               </div>
-              {c.full&&<div style={{fontFamily:'var(--font-mono)',fontSize:9,color:T.text3,marginBottom:4,letterSpacing:'.02em',direction:'ltr'}}>{c.full}</div>}
-              <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
-                {c.mom!=null && <span style={{
-                  fontFamily:'var(--font-mono)',fontSize:10,fontWeight:700,color:mc,
-                  padding:'1px 5px',borderRadius:8,background:`${mc}14`,
-                }}>
-                  {c.mom>0?'+':''}{c.mom?.toFixed(1)}% {st('mom_label')}
-                </span>}
-                {c.yoy!=null && <span style={{fontFamily:'monospace',fontSize:10,
-                  color:c.yoy>0?T.green:c.yoy<0?T.red:T.text2}}>
-                  {c.yoy>0?'+':''}{c.yoy?.toFixed(1)}% {st('yoy_label')}
-                </span>}
+              {c.full ? <div className="cmd-kpi-full-amount" style={{ fontSize: 9, marginBottom: 4 }}>{c.full}</div> : null}
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                {c.mom != null && (
+                  <span
+                    className="cmd-data-num"
+                    style={{
+                      fontFamily: 'var(--font-mono)',
+                      fontSize: 10,
+                      fontWeight: 700,
+                      color: mc,
+                      padding: '1px 5px',
+                      borderRadius: 8,
+                      background: `${mc}14`,
+                    }}
+                  >
+                    {c.mom > 0 ? '+' : ''}
+                    {c.mom?.toFixed(1)}% {st('mom_label')}
+                  </span>
+                )}
+                {c.yoy != null && (
+                  <span
+                    className="cmd-data-num"
+                    style={{ fontFamily: 'monospace', fontSize: 10, color: c.yoy > 0 ? T.green : c.yoy < 0 ? T.red : T.text2 }}
+                  >
+                    {c.yoy > 0 ? '+' : ''}
+                    {c.yoy?.toFixed(1)}% {st('yoy_label')}
+                  </span>
+                )}
               </div>
               {/* FIX-3.5: estimated badge for cashflow card */}
               {c.estimated&&(

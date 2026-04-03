@@ -5,15 +5,10 @@
 
 @keyframes cmdPrimaryIntro {
   0% {
-    filter: brightness(0.99);
-    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.05), 0 10px 28px rgba(0, 0, 0, 0.34);
-  }
-  50% {
-    filter: brightness(1.025);
-    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.07), 0 14px 36px rgba(0, 0, 0, 0.4);
+    opacity: 0.97;
   }
   100% {
-    filter: brightness(1);
+    opacity: 1;
   }
 }
 
@@ -33,7 +28,7 @@
 }
 
 .cmd-primary-action-zone {
-  border-radius: 10px;
+  border-radius: var(--cmd-radius-inner, 10px);
   margin-left: -6px;
   margin-right: -6px;
   padding: 6px 8px;
@@ -89,18 +84,41 @@
 /* Signed KPI main figure — subtle green / red tone */
 .cmd-kpi-val {
   transition: color 0.4s ease;
+  font-variant-numeric: tabular-nums lining-nums;
+  font-feature-settings: 'tnum' 1, 'lnum' 1;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: geometricPrecision;
 }
 
 .cmd-kpi-val.cmd-kpi-val-pos {
-  color: rgba(209, 250, 229, 0.98);
+  color: var(--cmd-num-positive, #c4f7e4);
 }
 
 .cmd-kpi-val.cmd-kpi-val-neg {
-  color: rgba(254, 202, 202, 0.96);
+  color: var(--cmd-num-negative, #fecaca);
 }
 
 .cmd-kpi-val.cmd-kpi-val-neu {
-  color: #ffffff;
+  color: var(--cmd-num-neutral, #f8fafc);
+}
+
+/* Figures: lift via contrast + hairline glow (not neon) */
+.cmd-kpi-val.cmd-kpi-val-neu,
+.cmd-kpi-val.cmd-kpi-val-pos {
+  text-shadow: 0 0 20px rgba(248, 250, 252, 0.07);
+}
+
+.cmd-kpi-val.cmd-kpi-val-neg {
+  text-shadow: 0 0 18px rgba(254, 202, 202, 0.06);
+}
+
+.cmd-type-hero-metric.cmd-data-num,
+.cmd-primary-impact-num.cmd-type-hero-metric {
+  text-shadow: 0 0 22px rgba(248, 250, 252, 0.08);
+}
+
+.cmd-hero .cmd-hero-number {
+  text-shadow: none;
 }
 
 .cmd-kpi-mom-pill {
@@ -109,16 +127,16 @@
 
 /* Branch row hover target (ranking + detail lines use cmd-card-hover) */
 .cmd-branch-row.cmd-card-hover {
-  border-radius: 8px;
+  border-radius: 10px;
 }
 
 .cmd-hero-impact-pos {
-  color: #ffffff;
+  color: var(--cmd-num-neutral, #f1f5f9);
   transition: color 0.4s ease;
 }
 
 .cmd-hero-impact-neg {
-  color: #f87171;
+  color: var(--cmd-num-negative, #fecaca);
   transition: color 0.4s ease;
 }
 

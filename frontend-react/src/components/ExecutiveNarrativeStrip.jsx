@@ -1,6 +1,7 @@
 /**
  * Executive narrative — primary Command Center block; shared with Executive Dashboard.
  */
+import '../styles/commandCenterStructure.css'
 import { buildExecutiveNarrative } from '../utils/buildExecutiveNarrative.js'
 import { strictT as st } from '../utils/strictI18n.js'
 import { CLAMP_FADE_MASK_SHORT } from '../utils/serverTextUi.js'
@@ -10,19 +11,9 @@ const P = {
   surface: 'linear-gradient(165deg, rgba(17,24,39,1) 0%, rgba(15,23,42,1) 100%)',
   border: 'rgba(148,163,184,0.14)',
   cardShadow: '0 4px 24px rgba(0,0,0,0.22)',
-  accent: '#00d4aa',
-  green: '#34d399',
-  red: '#f87171',
-  text1: '#f8fafc',
-  text2: '#cbd5e1',
-  text3: '#64748b',
-}
-
-function toneForWhatLine(text) {
-  const s = String(text || '')
-  if (s.includes('↓')) return P.red
-  if (s.includes('↑')) return P.green
-  return P.text2
+  text1: '#ffffff',
+  text2: '#d1dae6',
+  text3: '#9ca8b8',
 }
 
 export default function ExecutiveNarrativeStrip({
@@ -35,39 +26,43 @@ export default function ExecutiveNarrativeStrip({
   const n = narrative ?? buildExecutiveNarrative({}, { lang })
   const { whatChanged, why, whatToDo } = n
 
-  const pad = compact ? '12px 14px 14px' : '14px 16px 16px'
+  const pad = compact ? '14px 16px 16px' : '16px 18px 18px'
   const gap = 16
-  const titleFs = compact ? 13 : 14
-  const lineFs = compact ? 12 : 13
-  const secMinW = compact ? 160 : 200
+  const lineFs = compact ? 13 : 14
+  const secMinW = compact ? 160 : 220
   const emojiFs = compact ? 16 : 18
 
-  const Sec = ({ label, children, labelColor = P.text1 }) => (
+  const Sec = ({ label, children, labelColor = P.text1, step }) => (
     <div style={{ flex: 1, minWidth: secMinW }}>
-      <div
-        style={{
-          fontSize: compact ? 8 : 9,
-          fontWeight: 800,
-          color: labelColor,
-          letterSpacing: '.09em',
-          textTransform: 'uppercase',
-          marginBottom: compact ? 6 : 8,
-        }}
-      >
-        {label}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: compact ? 8 : 10 }}>
+        {step != null ? (
+          <span className="cmd-exec-sec-step" aria-hidden>
+            {step}
+          </span>
+        ) : null}
+        <div
+          className={`cmd-exec-sec-label ${compact ? 'cmd-exec-sec-label--compact' : ''}`.trim()}
+          style={{
+            fontSize: compact ? 'var(--cmd-fs-section-tight)' : 'var(--cmd-fs-section)',
+            color: labelColor,
+            marginBottom: 0,
+          }}
+        >
+          {label}
+        </div>
       </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>{children}</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>{children}</div>
     </div>
   )
 
-  const Line = ({ children, color = P.text2 }) => (
+  const Line = ({ children }) => (
     <p
+      className="cmd-prose"
       style={{
         margin: 0,
         fontSize: lineFs,
-        color,
-        lineHeight: 1.45,
-        fontWeight: 480,
+        color: P.text2,
+        fontWeight: 500,
         ...CLAMP_FADE_MASK_SHORT,
       }}
     >
@@ -83,6 +78,7 @@ export default function ExecutiveNarrativeStrip({
 
   return (
     <div
+      className="cmd-typography-scope"
       role={onOpenFullAnalysis ? 'button' : undefined}
       tabIndex={onOpenFullAnalysis ? 0 : undefined}
       onClick={onOpenFullAnalysis || undefined}
@@ -116,31 +112,21 @@ export default function ExecutiveNarrativeStrip({
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: compact ? 8 : 12 }}>
           <span style={{ fontSize: emojiFs, lineHeight: 1 }}>🧠</span>
           <div>
-            <div style={{ fontSize: titleFs, fontWeight: 800, color: P.text1, letterSpacing: '.03em' }}>
+            <div className={`cmd-card-title ${compact ? 'cmd-exec-strip-title--compact' : ''}`.trim()}>
               {st(tr, lang, 'exec_narrative_title')}
             </div>
-            <div
-              style={{
-                fontSize: compact ? 8 : 9,
-                color: P.text3,
-                marginTop: 4,
-                letterSpacing: '.06em',
-                textTransform: 'uppercase',
-              }}
-            >
+            <div className="cmd-muted-foreign" style={{ marginTop: 4 }}>
               {st(tr, lang, 'cmd_exec_narrative_sub')}
             </div>
           </div>
         </div>
       </div>
-      <Sec label={st(tr, lang, 'exec_narr_what')}>
+      <Sec label={st(tr, lang, 'exec_narr_what')} step={1}>
         {whatLines.map((ln, i) => (
-          <Line key={i} color={toneForWhatLine(ln)}>
-            {ln}
-          </Line>
+          <Line key={i}>{ln}</Line>
         ))}
       </Sec>
-      <Sec label={st(tr, lang, 'exec_narr_why')}>
+      <Sec label={st(tr, lang, 'exec_narr_why')} step={2}>
         {whyLines.map((ln, i) => (
           <Line key={i}>{ln}</Line>
         ))}
