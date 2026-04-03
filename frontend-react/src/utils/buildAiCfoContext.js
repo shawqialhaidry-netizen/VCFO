@@ -1,0 +1,206 @@
+/**
+ * Unified executive snapshot for AI CFO (client-side only; shapes data already fetched).
+ */
+
+import { formatCompact } from './numberFormat.js'
+
+function num(v) {
+  const n = Number(v)
+  return Number.isFinite(n) ? n : null
+}
+
+function fmtMoney(v) {
+  const n = num(v)
+  return n == null ? null : formatCompact(n)
+}
+
+function fmtPctRaw(v) {
+  const n = num(v)
+  return n == null ? null : `${n.toFixed(1)}%`
+}
+
+function momDir(m) {
+  const n = num(m)
+  if (n == null) return 'flat'
+  if (n > 0.5) return 'up'
+  if (n < -0.5) return 'down'
+  return 'flat'
+}
+
+function fmtMom(m) {
+  const n = num(m)
+  if (n == null) return null
+  return `${n > 0 ? '+' : ''}${n.toFixed(1)}%`
+}
+
+function primaryBlock(res) {
+  if (!res) return null
+  if (res.kind === 'expense' && res.expense) {
+    const ex = res.expense
+    const rat = ex.rationale && String(ex.rationale).trim()
+    return {
+      kind: 'expense',
+      title: ex.title ? String(ex.title).trim() : '',
+      domain: 'profitability',
+      rationaleSnippet: rat ? rat.slice(0, 140) : '',
+      priority: String(ex.priority || 'medium').toLowerCase(),
+    }
+  }
+  if (res.decision) {
+    const d = res.decision
+    const reason = d.reason && String(d.reason).trim()
+    return {
+      kind: 'cfo',
+      title: d.title ? String(d.title).trim() : '',
+      domain: d.domain ? String(d.domain).toLowerCase() : '',
+      rationaleSnippet: reason ? reason.slice(0, 140) : '',
+      urgency: String(d.urgency || 'medium').toLowerCase(),
+    }
+  }
+  return null
+}
+
+function riskLines(alerts) {
+  if (!Array.isArray(alerts) || !alerts.length) return []
+  const hi = alerts.filter((a) => a?.severity === 'high')
+  const out = []
+  for (const a of hi.slice(0, 2)) {
+    const t = a?.title && String(a.title).trim()
+    if (t) out.push(t)
+  }
+  if (out.length) return out
+  for (const a of alerts.slice(0, 3)) {
+    const t = a?.title && String(a.title).trim()
+    if (t) out.push(t)
+  }
+  return out
+}
+
+/**
+ * @param {{
+ *   kpis?: Record<string, any>,
+ *   main?: Record<string, any>,
+ *   narrative?: { whatChanged?: { lines?: string[] }, why?: { lines?: string[] }, whatToDo?: { lines?: string[] }, healthHeadline?: string },
+ *   decisions?: unknown[],
+ *   expenseIntel?: Record<string, any>,
+ *   primaryResolution?: Record<string, any>,
+ *   health?: number | null,
+ *   companyName?: string | null,
+ *   scopeLabel?: string | null,
+ *   scopeSummary?: string | null,
+ *   alerts?: unknown[],
+ * }} p
+ */
+export function buildAiCfoExecutiveContext(p) {
+  const kpis = p.kpis || {}
+  const main = p.main || {}
+  const cf = main.cashflow || {}
+
+  const rev = kpis.revenue
+  const np = kpis.net_profit
+  const nm = kpis.net_margin
+  const ex = kpis.expenses
+
+  const expenseTop =
+    p.expenseIntel?.available === true && p.expenseIntel?.top_category?.name
+      ? {
+          name: String(p.expenseIntel.top_category.name),
+          amountFmt: fmtMoney(p.expenseIntel.top_category.amount),
+          share: num(p.expenseIntel.top_category.share_of_cost_pct),
+        }
+      : null
+
+  return {
+    companyName: p.companyName ? String(p.companyName).trim() : '',
+    scopeLabel: p.scopeLabel ? String(p.scopeLabel).trim() : '',
+    scopeSummary: p.scopeSummary ? String(p.scopeSummary).trim() : '',
+    periodHint: main?.intelligence?.latest_period ? String(main.intelligence.latest_period).slice(0, 12) : '',
+
+    revenue: {
+      value: num(rev?.value),
+      valueFmt: fmtMoney(rev?.value),
+      mom: num(rev?.mom_pct),
+      momFmt: fmtMom(rev?.mom_pct),
+      momDir: momDir(rev?.mom_pct),
+      yoy: num(rev?.yoy_pct),
+    },
+    profit: {
+      value: num(np?.value),
+      valueFmt: fmtMoney(np?.value),
+      mom: num(np?.mom_pct),
+      momFmt: fmtMom(np?.mom_pct),
+      momDir: momDir(np?.mom_pct),
+    },
+    margin: {
+      value: num(nm?.value),
+      valueFmt: fmtPctRaw(nm?.value),
+      mom: num(nm?.mom_pct),
+      momFmt: fmtMom(nm?.mom_pct),
+      momDir: momDir(nm?.mom_pct),
+    },
+    expenses: {
+      value: num(ex?.value),
+      valueFmt: fmtMoney(ex?.value),
+      mom: num(ex?.mom_pct),
+      momFmt: fmtMom(ex?.mom_pct),
+      momDir: momDir(ex?.mom_pct),
+      topCategory: expenseTop,
+    },
+    cashflow: {
+      ocf: num(cf?.operating_cashflow),
+      ocfFmt: fmtMoney(cf?.operating_cashflow),
+      ocfMom: num(cf?.operating_cashflow_mom),
+      ocfMomFmt: fmtMom(cf?.operating_cashflow_mom),
+      ocfMomDir: momDir(cf?.operating_cashflow_mom),
+      wc: num(kpis.working_capital?.value ?? cf?.working_capital),
+      wcFmt: fmtMoney(kpis.working_capital?.value ?? cf?.working_capital),
+    },
+    health_score: p.health != null && Number.isFinite(Number(p.health)) ? Math.round(Number(p.health)) : null,
+    primary_decision: primaryBlock(p.primaryResolution),
+    top_changes: (p.narrative?.whatChanged?.lines || [])
+      .filter((x) => x && String(x).trim())
+      .slice(0, 3)
+      .map((x) => String(x).trim()),
+    risks: riskLines(p.alerts),
+    narrative_why: (p.narrative?.why?.lines || [])
+      .filter((x) => x && String(x).trim())
+      .slice(0, 3)
+      .map((x) => String(x).trim()),
+    narrative_do: (p.narrative?.whatToDo?.lines || [])
+      .filter((x) => x && String(x).trim())
+      .slice(0, 3)
+      .map((x) => String(x).trim()),
+    ranked_decision_titles: (Array.isArray(p.decisions) ? p.decisions : [])
+      .filter((d) => d && d.title)
+      .slice(0, 3)
+      .map((d) => String(d.title).trim()),
+  }
+}
+
+/**
+ * @param {ReturnType<typeof buildAiCfoExecutiveContext>} cx
+ * @param {string} intent
+ */
+export function primaryDecisionRelevant(cx, intent) {
+  const pd = cx.primary_decision
+  if (!pd?.title) return false
+  if (pd.kind === 'expense') {
+    return (
+      intent === 'WHY_PROFIT' ||
+      intent === 'EXPENSE' ||
+      intent === 'MARGIN' ||
+      intent === 'WHAT_NOW' ||
+      intent === 'REVENUE' ||
+      intent === 'GENERAL'
+    )
+  }
+  const dom = pd.domain || ''
+  if (intent === 'CASH' && (dom.includes('liquid') || dom.includes('cash') || dom === 'liquidity')) return true
+  if (intent === 'WHY_PROFIT' || intent === 'MARGIN' || intent === 'EXPENSE') {
+    return dom.includes('profit') || dom.includes('expense') || dom.includes('efficiency') || dom === 'profitability'
+  }
+  if (intent === 'WHAT_NOW' || intent === 'DECISION') return true
+  if (intent === 'REVENUE' && (dom.includes('revenue') || dom.includes('growth') || dom.includes('scale'))) return true
+  if (intent === 'RISK' || intent === 'HEALTH') return true
+  return intent === 'GENERAL'
+}

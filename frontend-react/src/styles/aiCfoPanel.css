@@ -1,0 +1,311 @@
+/**
+ * AI CFO chat — Command Center overlay; matches cmd-page tokens.
+ */
+.ai-cfo-fab {
+  position: fixed;
+  z-index: 920;
+  bottom: 22px;
+  right: 22px;
+  padding: 10px 16px;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  background: linear-gradient(165deg, rgba(17, 24, 39, 0.98) 0%, rgba(15, 23, 42, 0.99) 100%);
+  color: #e2e8f0;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+  transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.ai-cfo-fab:hover {
+  transform: translateY(-2px);
+  border-color: rgba(0, 212, 170, 0.35);
+  box-shadow: 0 10px 36px rgba(0, 0, 0, 0.5);
+}
+
+.ai-cfo-panel {
+  position: fixed;
+  z-index: 921;
+  bottom: 22px;
+  right: 22px;
+  width: min(380px, calc(100vw - 36px));
+  max-height: min(520px, calc(100vh - 100px));
+  display: flex;
+  flex-direction: column;
+  border-radius: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: linear-gradient(165deg, rgba(17, 24, 39, 0.99) 0%, rgba(11, 15, 20, 0.99) 100%);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(0, 212, 170, 0.08);
+  overflow: hidden;
+  animation: aiCfoPanelIn 0.22s ease-out;
+}
+
+@keyframes aiCfoPanelIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.ai-cfo-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 14px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+  flex-shrink: 0;
+}
+
+.ai-cfo-panel__title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.ai-cfo-panel__title-text {
+  font-size: 14px;
+  font-weight: 800;
+  color: #f8fafc;
+  letter-spacing: -0.02em;
+}
+
+.ai-cfo-panel__status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.ai-cfo-panel__status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #34d399;
+  box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.2);
+}
+
+.ai-cfo-panel__close {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  background: rgba(255, 255, 255, 0.04);
+  color: #94a3b8;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.ai-cfo-panel__close:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #e2e8f0;
+  border-color: rgba(148, 163, 184, 0.35);
+}
+
+.ai-cfo-panel__chat {
+  flex: 1;
+  min-height: 200px;
+  max-height: 340px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 12px 12px 8px;
+  scroll-behavior: smooth;
+}
+
+.ai-cfo-panel__empty {
+  font-size: 12px;
+  color: #64748b;
+  line-height: 1.5;
+  padding: 8px 6px 12px;
+}
+
+.ai-cfo-msg {
+  margin-bottom: 12px;
+  max-width: 100%;
+}
+
+.ai-cfo-msg--user {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.ai-cfo-msg--user .ai-cfo-msg__bubble {
+  background: rgba(0, 212, 170, 0.12);
+  border: 1px solid rgba(0, 212, 170, 0.22);
+  color: #ecfdf5;
+  border-radius: 12px 12px 4px 12px;
+  padding: 10px 12px;
+  font-size: 13px;
+  line-height: 1.45;
+  max-width: 92%;
+  text-align: start;
+}
+
+.ai-cfo-msg--assistant .ai-cfo-msg__bubble {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 12px 12px 12px 4px;
+  padding: 10px 12px;
+  max-width: 100%;
+  text-align: start;
+}
+
+.ai-cfo-block + .ai-cfo-block {
+  margin-top: 10px;
+}
+
+.ai-cfo-block__label {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #64748b;
+  margin-bottom: 4px;
+}
+
+.ai-cfo-block__list {
+  margin: 0;
+  padding-left: 16px;
+  color: #cbd5e1;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.ai-cfo-block__list li {
+  margin-bottom: 4px;
+}
+
+.ai-cfo-panel__suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 12px 8px;
+  border-top: 1px solid rgba(148, 163, 184, 0.08);
+}
+
+.ai-cfo-suggest-chip {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  background: rgba(255, 255, 255, 0.04);
+  color: #94a3b8;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+  max-width: 100%;
+  text-align: start;
+  line-height: 1.25;
+}
+
+.ai-cfo-suggest-chip:hover {
+  border-color: rgba(0, 212, 170, 0.28);
+  background: rgba(0, 212, 170, 0.06);
+  color: #cbd5e1;
+}
+
+.ai-cfo-follow {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(148, 163, 184, 0.1);
+}
+
+.ai-cfo-follow__chip {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 6px 11px;
+  border-radius: 999px;
+  border: 1px dashed rgba(148, 163, 184, 0.28);
+  background: transparent;
+  color: #7dd3c0;
+  cursor: pointer;
+  text-align: start;
+  line-height: 1.35;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.ai-cfo-follow__chip:hover {
+  border-color: rgba(0, 212, 170, 0.45);
+  background: rgba(0, 212, 170, 0.05);
+}
+
+.ai-cfo-panel__input-row {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  padding: 10px 12px 12px;
+  border-top: 1px solid rgba(148, 163, 184, 0.12);
+  flex-shrink: 0;
+}
+
+.ai-cfo-panel__input {
+  flex: 1;
+  min-width: 0;
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(0, 0, 0, 0.25);
+  color: #f1f5f9;
+  font-size: 13px;
+  padding: 10px 12px;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+.ai-cfo-panel__input::placeholder {
+  color: #64748b;
+}
+
+.ai-cfo-panel__input:focus {
+  border-color: rgba(0, 212, 170, 0.35);
+}
+
+.ai-cfo-panel__send {
+  flex-shrink: 0;
+  padding: 0 14px;
+  border-radius: 10px;
+  border: 1px solid rgba(0, 212, 170, 0.28);
+  background: rgba(0, 212, 170, 0.1);
+  color: #5eead4;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.ai-cfo-panel__send:hover:not(:disabled) {
+  background: rgba(0, 212, 170, 0.16);
+  border-color: rgba(0, 212, 170, 0.4);
+}
+
+.ai-cfo-panel__send:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+@media (max-width: 480px) {
+  .ai-cfo-panel {
+    right: 12px;
+    bottom: 12px;
+    width: calc(100vw - 24px);
+    max-height: min(70vh, 480px);
+  }
+
+  .ai-cfo-fab {
+    right: 12px;
+    bottom: 12px;
+  }
+}

@@ -31,6 +31,7 @@ import {
 } from '../components/CommandCenterUnifiedSections.jsx'
 import ExpenseInsightsSection from '../components/ExpenseInsightsSection.jsx'
 import CommandCenterDashboardGrid from '../components/CommandCenterDashboardGrid.jsx'
+import AiCfoPanel from '../components/AiCfoPanel.jsx'
 import CmdSparkline from '../components/CmdSparkline.jsx'
 import {
   ExecutiveBranchCompareChart,
@@ -2267,6 +2268,22 @@ export default function CommandCenter() {
           </div>
         </div>
       </div>
+
+      <AiCfoPanel
+        tr={tr}
+        hasExecutiveData={!!main}
+        narrative={narrative}
+        kpis={kpis}
+        main={main}
+        decisions={decs}
+        expenseIntel={expenseIntel}
+        primaryResolution={primaryResolution}
+        health={health}
+        alerts={alerts}
+        companyName={selectedCompany?.name}
+        scopeLabel={main?.scope_label}
+        scopeSummary={psActiveLabel()}
+      />
 
       {pType && (
         <ContextPanel
