@@ -8,10 +8,9 @@ import CmdServerText from './CmdServerText.jsx'
 
 const P = {
   surface: 'linear-gradient(165deg, rgba(17,24,39,1) 0%, rgba(15,23,42,1) 100%)',
-  border: 'rgba(148,163,184,0.16)',
-  glow: '0 0 0 1px rgba(124,92,252,0.2), 0 24px 64px rgba(0,0,0,0.5), 0 0 120px -28px rgba(124,92,252,0.28)',
+  border: 'rgba(148,163,184,0.14)',
+  cardShadow: '0 4px 24px rgba(0,0,0,0.22)',
   accent: '#00d4aa',
-  violet: '#a78bfa',
   green: '#34d399',
   red: '#f87171',
   text1: '#f8fafc',
@@ -36,14 +35,14 @@ export default function ExecutiveNarrativeStrip({
   const n = narrative ?? buildExecutiveNarrative({}, { lang })
   const { whatChanged, why, whatToDo } = n
 
-  const pad = compact ? '10px 12px 12px' : '14px 16px 16px'
-  const gap = compact ? 12 : 16
+  const pad = compact ? '12px 14px 14px' : '14px 16px 16px'
+  const gap = 16
   const titleFs = compact ? 13 : 14
   const lineFs = compact ? 12 : 13
   const secMinW = compact ? 160 : 200
   const emojiFs = compact ? 16 : 18
 
-  const Sec = ({ label, children, labelColor = P.accent }) => (
+  const Sec = ({ label, children, labelColor = P.text1 }) => (
     <div style={{ flex: 1, minWidth: secMinW }}>
       <div
         style={{
@@ -52,12 +51,12 @@ export default function ExecutiveNarrativeStrip({
           color: labelColor,
           letterSpacing: '.09em',
           textTransform: 'uppercase',
-          marginBottom: compact ? 4 : 6,
+          marginBottom: compact ? 6 : 8,
         }}
       >
         {label}
       </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: compact ? 4 : 6 }}>{children}</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>{children}</div>
     </div>
   )
 
@@ -100,22 +99,21 @@ export default function ExecutiveNarrativeStrip({
       title={onOpenFullAnalysis ? st(tr, lang, 'cmd_drill_narrative_hint') : undefined}
       style={{
         background: P.surface,
-        border: `1px solid rgba(167,139,250,0.28)`,
+        border: `1px solid ${P.border}`,
         borderRadius: 14,
-        borderLeftWidth: 4,
-        borderLeftColor: P.violet,
         padding: pad,
         display: 'flex',
         flexWrap: 'wrap',
         gap,
         alignItems: 'flex-start',
-        boxShadow: P.glow,
+        textAlign: 'left',
+        boxShadow: P.cardShadow,
         cursor: onOpenFullAnalysis ? 'pointer' : undefined,
         outline: 'none',
       }}
     >
       <div style={{ width: '100%' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: compact ? 2 : 4 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: compact ? 8 : 12 }}>
           <span style={{ fontSize: emojiFs, lineHeight: 1 }}>🧠</span>
           <div>
             <div style={{ fontSize: titleFs, fontWeight: 800, color: P.text1, letterSpacing: '.03em' }}>
@@ -125,7 +123,7 @@ export default function ExecutiveNarrativeStrip({
               style={{
                 fontSize: compact ? 8 : 9,
                 color: P.text3,
-                marginTop: 2,
+                marginTop: 4,
                 letterSpacing: '.06em',
                 textTransform: 'uppercase',
               }}
@@ -135,14 +133,14 @@ export default function ExecutiveNarrativeStrip({
           </div>
         </div>
       </div>
-      <Sec label={st(tr, lang, 'exec_narr_what')} labelColor={P.violet}>
+      <Sec label={st(tr, lang, 'exec_narr_what')}>
         {whatLines.map((ln, i) => (
           <Line key={i} color={toneForWhatLine(ln)}>
             {ln}
           </Line>
         ))}
       </Sec>
-      <Sec label={st(tr, lang, 'exec_narr_why')} labelColor={P.violet}>
+      <Sec label={st(tr, lang, 'exec_narr_why')}>
         {whyLines.map((ln, i) => (
           <Line key={i}>{ln}</Line>
         ))}
@@ -162,15 +160,15 @@ export default function ExecutiveNarrativeStrip({
                 width: compact ? 20 : 22,
                 height: compact ? 20 : 22,
                 borderRadius: 6,
-                background: 'rgba(124,92,252,0.22)',
-                color: P.violet,
+                background: 'rgba(255,255,255,0.06)',
+                color: P.text2,
                 fontSize: compact ? 10 : 11,
                 fontWeight: 800,
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 flexShrink: 0,
-                border: '1px solid rgba(124,92,252,0.35)',
+                border: `1px solid ${P.border}`,
               }}
             >
               {i + 1}

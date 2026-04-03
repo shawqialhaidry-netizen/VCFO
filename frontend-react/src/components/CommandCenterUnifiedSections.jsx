@@ -2,6 +2,7 @@
  * Command Center sections — GET /executive payload only; presentation only.
  */
 import { useState } from 'react'
+import { useCountUp } from '../hooks/useCountUp.js'
 import { formatCompact, formatMultiple } from '../utils/numberFormat.js'
 import { factOverlapsWhy } from '../utils/buildExecutiveNarrative.js'
 import { strictT as st } from '../utils/strictI18n.js'
@@ -11,29 +12,46 @@ import CmdServerText from './CmdServerText.jsx'
 const P = {
   surface: 'linear-gradient(165deg, rgba(17,24,39,0.98) 0%, rgba(15,23,42,0.99) 100%)',
   border: 'rgba(148,163,184,0.14)',
-  glow: '0 0 0 1px rgba(0,212,170,0.08), 0 12px 40px rgba(0,0,0,0.42), 0 0 100px -24px rgba(124,92,252,0.12)',
+  cardShadow: '0 4px 24px rgba(0,0,0,0.22)',
   accent: '#00d4aa',
   green: '#34d399',
   red: '#f87171',
   amber: '#fbbf24',
-  orange: '#fb923c',
-  violet: '#7c5cfc',
   text1: '#f8fafc',
   text2: '#94a3b8',
   text3: '#64748b',
 }
 
-function sectionShell(title, subtitle, children, visualTier = 2) {
+function sectionShell(title, subtitle, children, visualTier = 2, headerAction = null) {
   const tier = Number(visualTier) || 2
   const boxShadow =
-    tier === 2
-      ? P.glow
-      : tier === 3
-        ? '0 0 0 1px rgba(148,163,184,0.1), 0 6px 18px rgba(0,0,0,0.28)'
-        : '0 0 0 1px rgba(0,212,170,0.05), 0 8px 22px rgba(0,0,0,0.32)'
+    tier === 2 ? P.cardShadow : tier === 3 ? '0 2px 16px rgba(0,0,0,0.2)' : P.cardShadow
   const titleFs = tier === 3 ? 9 : 10
   const titleOpacity = tier === 3 ? 0.88 : 1
   const subOpacity = tier === 3 ? 0.85 : 0.95
+  const titleBlock = (
+    <>
+      <div
+        style={{
+          fontSize: titleFs,
+          fontWeight: 800,
+          color: P.text1,
+          letterSpacing: '.08em',
+          textTransform: 'uppercase',
+          opacity: titleOpacity,
+        }}
+      >
+        {title}
+      </div>
+      {subtitle ? (
+        <div
+          style={{ fontSize: tier === 3 ? 8 : 9, color: P.text3, marginTop: 3, lineHeight: 1.35, opacity: subOpacity }}
+        >
+          {subtitle}
+        </div>
+      ) : null}
+    </>
+  )
   return (
     <div
       style={{
@@ -41,29 +59,37 @@ function sectionShell(title, subtitle, children, visualTier = 2) {
         border: `1px solid ${P.border}`,
         borderRadius: 14,
         boxShadow,
-        padding: tier === 3 ? '10px 12px 12px' : '12px 14px 14px',
+        padding: tier === 3 ? '12px 14px 14px' : '14px 16px 16px',
         height: '100%',
         opacity: tier === 3 ? 0.96 : 1,
       }}
     >
-      <div style={{ marginBottom: tier === 3 ? 6 : 8 }}>
-        <div
-          style={{
-            fontSize: titleFs,
-            fontWeight: 800,
-            color: P.accent,
-            letterSpacing: '.08em',
-            textTransform: 'uppercase',
-            opacity: titleOpacity,
-          }}
-        >
-          {title}
-        </div>
-        {subtitle ? (
-          <div
-            style={{ fontSize: tier === 3 ? 8 : 9, color: P.text3, marginTop: 3, lineHeight: 1.35, opacity: subOpacity }}
+      <div style={{ marginBottom: tier === 3 ? 8 : 12 }}>
+        {headerAction ? (
+          <button
+            type="button"
+            onClick={headerAction.onClick}
+            title={headerAction.title || undefined}
+            style={{
+              display: 'block',
+              width: '100%',
+              margin: 0,
+              padding: 0,
+              border: 'none',
+              background: 'transparent',
+              cursor: 'pointer',
+              textAlign: 'inherit',
+              borderRadius: 8,
+            }}
           >
-            {subtitle}
+            {titleBlock}
+          </button>
+        ) : (
+          titleBlock
+        )}
+        {headerAction?.hint ? (
+          <div style={{ fontSize: 8, color: P.text3, marginTop: 4, opacity: 0.9, lineHeight: 1.35 }}>
+            {headerAction.hint}
           </div>
         ) : null}
       </div>
@@ -211,15 +237,6 @@ function expenseIntelSignalCards(expenseIntel, comparativeIntel, tr, lang) {
   return out
 }
 
-function signalStripColor(key) {
-  const k = String(key || '')
-  if (k === 'ei_top' || k === 'cd' || k === 'ei_grow') return P.orange
-  if (k === 'ineff' || k === 'ei_branch_pressure') return P.amber
-  if (k === 'alert' || k === 'ei_ratio') return P.red
-  if (k.startsWith('syn_')) return P.accent
-  return P.violet
-}
-
 /** Always renders at least one signal (synthetic or stable ops message). */
 export function KeySignalsSection({
   financialBrain,
@@ -326,10 +343,11 @@ export function KeySignalsSection({
   return sectionShell(
     st(tr, lang, 'cmd_key_signals'),
     st(tr, lang, 'cmd_key_signals_subcritical'),
-    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
       {displayCards.map((c) => (
         <div
           key={c.key}
+          className="cmd-card-hover"
           role={onOpenAnalysis ? 'button' : undefined}
           tabIndex={onOpenAnalysis ? 0 : undefined}
           onClick={onOpenAnalysis ? () => onOpenAnalysis(analysisTabForSignal(c.key)) : undefined}
@@ -349,10 +367,9 @@ export function KeySignalsSection({
             minWidth: 152,
             background: 'rgba(255,255,255,0.03)',
             border: `1px solid ${P.border}`,
-            borderRadius: 10,
-            padding: '10px 12px',
-            borderTop: `3px solid ${signalStripColor(c.key)}`,
-            boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.04)',
+            borderRadius: 14,
+            padding: '12px 14px',
+            boxShadow: 'none',
             cursor: onOpenAnalysis ? 'pointer' : undefined,
             outline: 'none',
             transition: 'border-color .15s ease, background .15s ease',
@@ -365,7 +382,7 @@ export function KeySignalsSection({
               color: P.text3,
               textTransform: 'uppercase',
               letterSpacing: '.08em',
-              marginBottom: 4,
+              marginBottom: 6,
             }}
           >
             {c.label}
@@ -391,6 +408,7 @@ export function BranchIntelligenceSection({
   lang,
   onOpenBranches,
   onBranchRankClick,
+  onOpenBranchChart,
   duplicateIneffBranchName,
   narrative,
   visualTier = 2,
@@ -448,7 +466,7 @@ export function BranchIntelligenceSection({
 
   const rankingBlock =
     effList.length > 0 ? (
-      <div style={{ marginBottom: 6 }}>
+      <div style={{ marginBottom: 8 }}>
         <div
           style={{
             fontSize: 8,
@@ -456,7 +474,7 @@ export function BranchIntelligenceSection({
             color: P.text3,
             textTransform: 'uppercase',
             letterSpacing: '.08em',
-            marginBottom: 6,
+            marginBottom: 8,
           }}
         >
           {st(tr, lang, 'cmd_branch_rank_title')}
@@ -478,6 +496,7 @@ export function BranchIntelligenceSection({
           return (
             <div
               key={String(b.branch_id || name) + i}
+              className="cmd-branch-row cmd-card-hover"
               role={onBranchRankClick ? 'button' : undefined}
               tabIndex={onBranchRankClick ? 0 : undefined}
               onClick={onBranchRankClick ? () => onBranchRankClick(b) : undefined}
@@ -496,12 +515,12 @@ export function BranchIntelligenceSection({
                 display: 'flex',
                 alignItems: 'center',
                 gap: 8,
-                padding: '6px 8px',
-                marginBottom: 4,
+                padding: '8px 10px',
+                marginBottom: 6,
                 borderRadius: 8,
                 background: 'rgba(255,255,255,0.02)',
                 border: `1px solid ${P.border}`,
-                borderLeft: `3px solid ${bc === P.text3 ? 'rgba(124,92,252,0.5)' : bc}`,
+                borderLeft: `3px solid ${bc === P.text3 ? P.border : bc}`,
                 cursor: onBranchRankClick ? 'pointer' : undefined,
                 outline: 'none',
               }}
@@ -552,8 +571,8 @@ export function BranchIntelligenceSection({
           color: P.text3,
           textTransform: 'uppercase',
           letterSpacing: '.08em',
-          marginBottom: 6,
-          marginTop: rankingBlock ? 6 : 0,
+          marginBottom: 8,
+          marginTop: rankingBlock ? 8 : 0,
         }}
       >
         {st(tr, lang, 'cmd_branch_detail_signals')}
@@ -563,6 +582,7 @@ export function BranchIntelligenceSection({
           visible.map((r, i) => (
             <div
               key={r.k}
+              className="cmd-branch-row cmd-card-hover"
               style={{
                 padding: '6px 0',
                 borderBottom: i < visible.length - 1 ? `1px solid ${P.border}` : 'none',
@@ -593,26 +613,36 @@ export function BranchIntelligenceSection({
       {onOpenBranches ? (
         <button
           type="button"
-          onClick={onOpenBranches}
+          onClick={(e) => {
+            e.stopPropagation()
+            onOpenBranches()
+          }}
           style={{
-            marginTop: 10,
-            padding: '7px 12px',
-            borderRadius: 8,
+            marginTop: 12,
+            padding: '8px 14px',
+            borderRadius: 10,
             border: `1px solid ${P.border}`,
-            background: 'rgba(0,212,170,0.08)',
-            color: P.accent,
+            background: 'rgba(255,255,255,0.04)',
+            color: P.text2,
             fontSize: 12,
             fontWeight: 700,
             cursor: 'pointer',
             width: 'auto',
-            boxShadow: '0 0 20px rgba(0,212,170,0.12)',
+            boxShadow: 'none',
           }}
         >
           {st(tr, lang, 'cmd_open_branches')}
         </button>
       ) : null}
     </>,
-    visualTier
+    visualTier,
+    onOpenBranchChart && eff.length > 0
+      ? {
+          onClick: onOpenBranchChart,
+          hint: st(tr, lang, 'cmd_chart_branch_header_hint'),
+          title: st(tr, lang, 'cmd_chart_branch_header_title'),
+        }
+      : null,
   )
 }
 
@@ -650,6 +680,17 @@ function decisionImpactSummary(d, tr, lang) {
     return `${st(tr, lang, 'cmd_dec_impact_monthly')}: ${formatCompact(savings)}`
   }
   return null
+}
+
+function DecisionImpactAmount({ savingsRaw, tr, lang }) {
+  const ok = savingsRaw != null && Number.isFinite(Number(savingsRaw)) && Number(savingsRaw) > 0
+  const v = useCountUp(ok ? Number(savingsRaw) : null, { durationMs: 560, enabled: ok })
+  if (!ok) return '—'
+  return (
+    <>
+      {st(tr, lang, 'cmd_dec_impact_monthly')}: {formatCompact(v)}
+    </>
+  )
 }
 
 /** expense_decisions_v2; max 3; always at least one row (baseline if empty). */
@@ -697,16 +738,20 @@ export function DecisionsSection({
   const n = displayList.length
 
   const listBody = (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+    <div className="cmd-section-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       {displayList.map((d, idx) => {
         const pr = priorityLabel(d.priority, tr, lang)
         const pc = priorityColor(d.priority)
         const first = idx === 0
         const { owner, horizon } = decisionActionMeta(d, tr, lang)
         const impactOneLine = decisionImpactSummary(d, tr, lang)
+        const savingsRaw = d.expected_financial_impact?.estimated_monthly_savings
+        const savingsOk =
+          savingsRaw != null && Number.isFinite(Number(savingsRaw)) && Number(savingsRaw) > 0
         return (
           <div
             key={d.decision_id || d.title}
+            className="cmd-decision-tile cmd-card-hover"
             role={onOpenDecision ? 'button' : undefined}
             tabIndex={onOpenDecision ? 0 : undefined}
             onClick={onOpenDecision ? () => onOpenDecision(d) : undefined}
@@ -722,8 +767,8 @@ export function DecisionsSection({
             }
             title={onOpenDecision ? st(tr, lang, 'cmd_drill_decision_hint') : undefined}
             style={{
-              padding: first ? '12px 14px' : '9px 12px',
-              borderRadius: 11,
+              padding: first ? '14px 16px' : '12px 14px',
+              borderRadius: 14,
               border: first ? `1px solid rgba(0,212,170,0.35)` : `1px solid ${P.border}`,
               borderLeft: first ? `4px solid ${pc}` : `3px solid ${pc}`,
               background: first ? 'rgba(0,212,170,0.06)' : 'rgba(255,255,255,0.02)',
@@ -783,7 +828,11 @@ export function DecisionsSection({
                     ...CLAMP_FADE_MASK_SHORT,
                   }}
                 >
-                  {impactOneLine || '—'}
+                  {savingsOk ? (
+                    <DecisionImpactAmount savingsRaw={savingsRaw} tr={tr} lang={lang} />
+                  ) : (
+                    impactOneLine || '—'
+                  )}
                 </div>
               </div>
               <div style={{ flex: '0 1 auto', minWidth: 0 }}>
@@ -830,8 +879,8 @@ export function DecisionsSection({
         onClick={() => setExpanded(true)}
         style={{
           width: '100%',
-          padding: '8px 10px',
-          borderRadius: 10,
+          padding: '10px 14px',
+          borderRadius: 12,
           border: `1px solid ${P.border}`,
           background: 'rgba(255,255,255,0.03)',
           color: P.text2,
@@ -839,6 +888,7 @@ export function DecisionsSection({
           fontWeight: 700,
           cursor: 'pointer',
           textAlign: 'center',
+          transition: 'background 0.18s ease, border-color 0.18s ease, color 0.18s ease',
         }}
       >
         {st(tr, lang, 'cmd_decisions_expand')} ({n})
@@ -850,8 +900,8 @@ export function DecisionsSection({
         style={{
           width: '100%',
           marginBottom: 8,
-          padding: '6px 10px',
-          borderRadius: 8,
+          padding: '8px 12px',
+          borderRadius: 10,
           border: `1px solid ${P.border}`,
           background: 'transparent',
           color: P.accent,
@@ -859,6 +909,7 @@ export function DecisionsSection({
           fontWeight: 800,
           cursor: 'pointer',
           textAlign: 'center',
+          transition: 'background 0.18s ease, border-color 0.18s ease, color 0.18s ease',
         }}
       >
         {st(tr, lang, 'cmd_decisions_collapse')}

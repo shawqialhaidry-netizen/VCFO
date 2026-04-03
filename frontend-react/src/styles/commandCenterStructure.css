@@ -1,0 +1,102 @@
+/**
+ * Command Center — structural tokens only (spacing, alignment, card rhythm).
+ * No motion; complements commandCenterMotion.css
+ */
+.cmd-page {
+  --cmd-max-width: 1280px;
+  --cmd-pad-x: 24px;
+  --cmd-gap-section: 24px;
+  --cmd-gap-inner: 16px;
+  --cmd-gap-sm: 8px;
+  --cmd-card-radius: 14px;
+  --cmd-border-card: rgba(148, 163, 184, 0.14);
+  --cmd-surface-card: linear-gradient(165deg, rgba(17, 24, 39, 0.98) 0%, rgba(15, 23, 42, 0.99) 100%);
+  --cmd-bg: #0b0f14;
+  min-height: calc(100vh - 62px);
+  background: var(--cmd-bg);
+  padding: var(--cmd-pad-x);
+  box-sizing: border-box;
+}
+
+.cmd-page-constrain {
+  max-width: var(--cmd-max-width);
+  margin-inline: auto;
+  width: 100%;
+  display: flex;
+  gap: var(--cmd-gap-section);
+  align-items: flex-start;
+  box-sizing: border-box;
+}
+
+.cmd-page-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--cmd-gap-section);
+}
+
+.cmd-page-header {
+  position: sticky;
+  top: 0;
+  z-index: 24;
+  background: var(--cmd-bg);
+  padding-bottom: var(--cmd-gap-inner);
+  margin-bottom: 2px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+  text-align: left;
+}
+
+.cmd-page-title {
+  font-size: 24px;
+  font-weight: 800;
+  color: #ffffff;
+  letter-spacing: -0.02em;
+  margin: 0;
+  line-height: 1.2;
+}
+
+.cmd-page-subtitle {
+  font-size: 12px;
+  color: #6b7280;
+  margin: 6px 0 0;
+  line-height: 1.45;
+  text-align: left;
+}
+
+.cmd-tool-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--cmd-gap-inner);
+  margin-top: var(--cmd-gap-inner);
+}
+
+.cmd-stack-major {
+  display: flex;
+  flex-direction: column;
+  gap: var(--cmd-gap-section);
+}
+
+.cmd-section-label {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* Scroll targets: clear sticky header + consistent section jumps */
+.cmd-scroll-anchor {
+  scroll-margin-top: 24px;
+}
+
+/* Full-width primary hero wrapper (grid lives inside main column) */
+.cmd-primary-outer {
+  width: 100%;
+  min-width: 0;
+}
+
+/* KPI band: aligns with section inner padding rhythm */
+.cmd-kpi-strip {
+  box-sizing: border-box;
+}

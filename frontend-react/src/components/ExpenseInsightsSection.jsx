@@ -9,7 +9,7 @@ import CmdServerText from './CmdServerText.jsx'
 const P = {
   surface: 'linear-gradient(165deg, rgba(17,24,39,0.98) 0%, rgba(15,23,42,0.99) 100%)',
   border: 'rgba(148,163,184,0.14)',
-  glow: '0 0 0 1px rgba(0,212,170,0.08), 0 12px 40px rgba(0,0,0,0.42)',
+  cardShadow: '0 4px 24px rgba(0,0,0,0.22)',
   accent: '#00d4aa',
   text1: '#f8fafc',
   text2: '#94a3b8',
@@ -113,6 +113,7 @@ export default function ExpenseInsightsSection({
 
   return (
     <div
+      className="cmd-card-hover"
       role={onDrillExpense ? 'button' : undefined}
       tabIndex={onDrillExpense ? 0 : undefined}
       onClick={onDrillExpense || undefined}
@@ -129,21 +130,21 @@ export default function ExpenseInsightsSection({
       title={onDrillExpense ? st(tr, lang, 'cmd_drill_expense_hint') : undefined}
       style={{
         background: embedded ? 'rgba(255,255,255,0.02)' : P.surface,
-        border: embedded ? `1px dashed ${P.border}` : `1px solid ${P.border}`,
-        borderRadius: embedded ? 14 : 16,
-        boxShadow: embedded ? 'none' : P.glow,
-        padding: embedded ? (tier === 3 ? '10px 12px' : '12px 14px') : tier === 3 ? '12px 14px' : '14px 16px',
+        border: `1px solid ${P.border}`,
+        borderRadius: 14,
+        boxShadow: embedded ? 'none' : P.cardShadow,
+        padding: embedded ? (tier === 3 ? '12px 14px' : '14px 16px') : tier === 3 ? '12px 14px' : '14px 16px',
         cursor: onDrillExpense ? 'pointer' : undefined,
         outline: 'none',
         opacity: tier === 3 ? 0.96 : 1,
       }}
     >
-      <div style={{ marginBottom: tier === 3 ? 6 : 8 }}>
+      <div style={{ marginBottom: tier === 3 ? 8 : 12 }}>
         <div
           style={{
             fontSize: titleFs,
             fontWeight: 800,
-            color: P.accent,
+            color: P.text1,
             letterSpacing: '.08em',
             textTransform: 'uppercase',
             opacity: headerOpacity,
@@ -151,7 +152,7 @@ export default function ExpenseInsightsSection({
         >
           {st(tr, lang, 'cmd_expense_insights')}
         </div>
-        <div style={{ fontSize: subFs, color: P.text3, marginTop: 3, lineHeight: 1.35, opacity: tier === 3 ? 0.85 : 1 }}>
+        <div style={{ fontSize: subFs, color: P.text3, marginTop: 4, lineHeight: 1.35, opacity: tier === 3 ? 0.85 : 1 }}>
           {st(tr, lang, 'cmd_expense_insights_sub')}
         </div>
       </div>
@@ -161,7 +162,7 @@ export default function ExpenseInsightsSection({
       ) : (
         <div>
           {period ? (
-            <div style={{ fontSize: tier === 3 ? 8 : 9, color: P.text3, marginBottom: 6, fontWeight: 600 }}>
+            <div style={{ fontSize: tier === 3 ? 8 : 9, color: P.text3, marginBottom: 8, fontWeight: 600 }}>
               {st(tr, lang, 'cmd_expense_period')}: {period}
             </div>
           ) : null}

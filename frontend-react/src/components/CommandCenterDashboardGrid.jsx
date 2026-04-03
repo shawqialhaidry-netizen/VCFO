@@ -5,7 +5,7 @@
 const gridShell = {
   display: 'grid',
   gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
-  gap: 12,
+  gap: 16,
   alignItems: 'stretch',
 }
 
@@ -13,45 +13,41 @@ const row1 = {
   gridColumn: '1 / -1',
   display: 'grid',
   gridTemplateColumns: 'minmax(0, 1.12fr) minmax(0, 0.88fr)',
-  gap: 12,
+  gap: 16,
   alignItems: 'stretch',
-  scrollMarginTop: 16,
 }
 
 const row0Hero = {
   gridColumn: '1 / -1',
   minWidth: 0,
-  scrollMarginTop: 16,
 }
 
 const row2WrapBase = {
   gridColumn: '1 / -1',
   minWidth: 0,
-  scrollMarginTop: 16,
-  padding: '10px 12px',
-  borderRadius: 12,
+  padding: '14px 16px',
+  borderRadius: 14,
   border: '1px solid rgba(148,163,184,0.14)',
   background: 'linear-gradient(165deg, rgba(17,24,39,0.95) 0%, rgba(15,23,42,0.98) 100%)',
-  boxShadow: '0 0 0 1px rgba(0,212,170,0.05), 0 8px 28px rgba(0,0,0,0.35)',
+  boxShadow: '0 4px 24px rgba(0,0,0,0.28)',
 }
 
 const row2WrapDemoted = {
   ...row2WrapBase,
-  padding: '8px 10px',
+  padding: '12px 14px',
   opacity: 0.94,
-  boxShadow: '0 0 0 1px rgba(148,163,184,0.1), 0 5px 18px rgba(0,0,0,0.26)',
+  boxShadow: '0 2px 16px rgba(0,0,0,0.22)',
 }
 
-const col = { minWidth: 0, scrollMarginTop: 16 }
+const col = { minWidth: 0 }
 
 const row5 = {
   gridColumn: '1 / -1',
-  scrollMarginTop: 16,
-  paddingTop: 10,
+  paddingTop: 24,
   borderTop: '1px solid rgba(148,163,184,0.1)',
   display: 'flex',
   flexDirection: 'column',
-  gap: 8,
+  gap: 12,
   opacity: 0.9,
 }
 
@@ -91,34 +87,34 @@ export default function CommandCenterDashboardGrid({
   return (
     <div className="cmd-dashboard-grid" style={gridShell}>
       {primaryHero ? (
-        <div id="cmd-row-0" className="cmd-full cmd-primary-hero" style={row0Hero}>
+        <div id="cmd-row-0" className="cmd-full cmd-primary-hero cmd-scroll-anchor" style={row0Hero}>
           {primaryHero}
         </div>
       ) : null}
-      <div id="cmd-row-1" className="cmd-r1" style={row1Style}>
+      <div id="cmd-row-1" className="cmd-r1 cmd-scroll-anchor" style={row1Style}>
         <div style={{ minWidth: 0 }}>{row1Narrative}</div>
         <div style={{ minWidth: 0 }}>{row1Health}</div>
       </div>
 
-      <div id="cmd-row-2" className="cmd-full cmd-level-2" style={row2Wrap}>
+      <div id="cmd-row-2" className="cmd-full cmd-level-2 cmd-scroll-anchor cmd-kpi-strip" style={row2Wrap}>
         {row2Kpis}
       </div>
 
-      <div id="cmd-row-3" className="cmd-level-2" style={colStyle}>
+      <div id="cmd-row-3" className="cmd-level-2 cmd-scroll-anchor" style={colStyle}>
         {row3Signals}
       </div>
-      <div className="cmd-level-2" style={colStyle}>
+      <div className="cmd-level-2 cmd-scroll-anchor" style={colStyle}>
         {row3Branch}
       </div>
 
-      <div id="cmd-row-4" className="cmd-level-2" style={colStyle}>
+      <div id="cmd-row-4" className="cmd-level-2 cmd-scroll-anchor" style={colStyle}>
         {row4Expense}
       </div>
-      <div className="cmd-level-2" style={colStyle}>
+      <div className="cmd-level-2 cmd-scroll-anchor" style={colStyle}>
         {row4Decisions}
       </div>
 
-      <div id="cmd-row-5" className="cmd-full cmd-level-3" style={row5}>
+      <div id="cmd-row-5" className="cmd-full cmd-level-3 cmd-scroll-anchor" style={row5}>
         {secondaryTitle}
         {secondarySubtitle}
         {secondaryBlock}

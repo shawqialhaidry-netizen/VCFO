@@ -23,6 +23,7 @@ import { usePeriodScope } from '../context/PeriodScopeContext.jsx'  // FIX-1.2
 import { kpiContextLabel, kpiLabel } from '../utils/kpiContext.js'
 import { formatCompact, formatFull, formatDual, formatPct, formatMultiple, formatDays } from '../utils/numberFormat.js'
 import { buildAnalysisQuery } from '../utils/buildAnalysisQuery.js'
+import { ANALYSIS_PATH_BY_TAB } from '../utils/analysisRoutes.js'
 
 const API = '/api/v1'
 function auth() {
@@ -532,7 +533,7 @@ function DataQualityBanner({ validation, lang, tr }) {
 // ──────────────────────────────────────────────────────────────────────────────
 //  Main Component
 // ──────────────────────────────────────────────────────────────────────────────
-export default function Analysis() {
+export default function Analysis({ routeDefaultTab = null } = {}) {
   const { tr: trCtx, lang } = useLang()
   const tr = useCallback((key, params) => {
     if (params != null && typeof params === 'object') return strictTParams(trCtx, lang, key, params)
@@ -547,11 +548,28 @@ export default function Analysis() {
   const [loading, setLoading] = useState(false)
   const [err,     setErr]     = useState(null)
   const [fcData,  setFcData]  = useState(null)
-  const [tab,     setTab]     = useState('overview')
+  const [tab,     setTab]     = useState(() => location.state?.focus || routeDefaultTab || 'overview')
   const [selDec,  setSelDec]  = useState(null)
   const [consolidate, setConsolidate] = useState(false)
 
-  useEffect(() => { if (location.state?.focus) setTab(location.state.focus) }, [location.state])
+  useEffect(() => {
+    if (location.state?.focus) {
+      setTab(location.state.focus)
+      return
+    }
+    if (routeDefaultTab) setTab(routeDefaultTab)
+  }, [location.state, routeDefaultTab])
+
+  const goTab = useCallback(
+    (k) => {
+      setTab(k)
+      const path = ANALYSIS_PATH_BY_TAB[k]
+      if (path && location.pathname !== path) {
+        navigate(path, { replace: true, state: { focus: k } })
+      }
+    },
+    [navigate, location.pathname],
+  )
 
   const load = useCallback(async () => {
     if (!selectedId) return
@@ -809,7 +827,7 @@ export default function Analysis() {
         {/* Tabs */}
         <div style={{display:'flex',gap:4,background:'var(--bg-elevated)',borderRadius:10,padding:3,width:'fit-content',flexWrap:'wrap'}}>
           {TABS.map(t=>(
-            <button key={t.k} onClick={()=>setTab(t.k)}
+            <button key={t.k} onClick={()=>goTab(t.k)}
               style={{padding:'6px 14px',borderRadius:8,border:'none',fontSize:11,fontWeight:700,
                 cursor:'pointer',transition:'all .15s',position:'relative',
                 background:tab===t.k?'var(--bg-panel)':'transparent',

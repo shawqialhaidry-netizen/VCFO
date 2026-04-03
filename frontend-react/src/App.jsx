@@ -104,8 +104,15 @@ export default function App() {
             <Route path="/cfo-ai"     element={<CfoAI />} />
             <Route path="/ai-advisor" element={<CfoAI />} />
             <Route path="/statements" element={<Statements />} />
-            <Route path="/analysis"   element={<Analysis />} />
-            <Route path="/branches"    element={<Branches />} />
+            <Route path="/revenue" element={<Analysis routeDefaultTab="profitability" />} />
+            <Route path="/expenses" element={<Analysis routeDefaultTab="profitability" />} />
+            <Route path="/profitability" element={<Analysis routeDefaultTab="profitability" />} />
+            <Route path="/cash" element={<Analysis routeDefaultTab="liquidity" />} />
+            <Route path="/decisions" element={<Analysis routeDefaultTab="decisions" />} />
+            <Route path="/alerts" element={<Analysis routeDefaultTab="alerts" />} />
+            <Route path="/forecast" element={<Analysis routeDefaultTab="overview" />} />
+            <Route path="/analysis" element={<Analysis />} />
+            <Route path="/branches" element={<Branches />} />
             <Route path="/board-report" element={<BoardReport />} />
             <Route path="/members"    element={<Members />} />
             <Route path="/settings"   element={<Settings />} />
