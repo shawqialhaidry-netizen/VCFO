@@ -1,13 +1,58 @@
 /**
- * Strict i18n: missing/invalid keys → console.error + locale-neutral placeholder (U+2026).
+ * Strict i18n: missing/invalid keys → console.error + locale-safe placeholder (bundled `i18n_missing_label`).
  * LangContext `tr` uses the same rules (no raw keys, no EN→AR/TR leakage via fallbackLabel).
  */
+import { fallbackLabel } from '../i18n/criticalFallbacks.js'
+
 export const STRICT_I18N_PLACEHOLDER = '\u2026'
+
+/** Visible fallback when a key is missing — Arabic/Turkish get non-English copy from locale JSON. */
+export function localizedMissingPlaceholder(lang) {
+  const code = String(lang || 'en').toLowerCase()
+  const loc = code === 'ar' ? 'ar' : code === 'tr' ? 'tr' : 'en'
+  const v = fallbackLabel(loc, 'i18n_missing_label')
+  if (v) return v
+  return loc === 'ar' ? '[؟]' : loc === 'tr' ? '[?]' : '[?]'
+}
 
 export function looksLikeRawI18nKey(v) {
   if (typeof v !== 'string') return false
   const t = v.trim()
   return /^(exec_|cmd_|nav_|dq_|kpi_label_|kpi_explain_|tab_|ratio_|domain_signal_)[a-z0-9_]+$/i.test(t)
+}
+
+function invalidTranslation(key, val) {
+  return (
+    val == null ||
+    val === '' ||
+    val === key ||
+    (typeof val === 'string' && looksLikeRawI18nKey(val))
+  )
+}
+
+/**
+ * Resolve a key from the live map + bundled fallback — same rules as strictT (no raw keys, locale-safe miss).
+ * Used by LangContext `tr` so every consumer gets strict i18n without per-call strictT().
+ */
+export function readTranslation(translations, lang, key) {
+  if (!key) return localizedMissingPlaceholder(lang)
+  let s = translations && typeof translations === 'object' ? translations[key] : undefined
+  if (invalidTranslation(key, s)) s = fallbackLabel(lang, key)
+  if (invalidTranslation(key, s)) {
+    console.error('[i18n] unresolved or invalid translation', { lang, key })
+    return localizedMissingPlaceholder(lang)
+  }
+  return s
+}
+
+export function applyTranslationParams(s, lang, params) {
+  if (!params || typeof params !== 'object') return s
+  const miss = localizedMissingPlaceholder(lang)
+  let out = s
+  for (const [k, v] of Object.entries(params)) {
+    out = out.replaceAll(`{${k}}`, v != null ? String(v) : miss)
+  }
+  return out
 }
 
 /**
@@ -21,11 +66,11 @@ export function strictT(tr, lang, key) {
     v = tr(key)
   } catch (e) {
     console.error('[i18n] tr() threw', { lang, key, error: e })
-    return STRICT_I18N_PLACEHOLDER
+    return localizedMissingPlaceholder(lang)
   }
   if (v == null || v === '' || v === key || looksLikeRawI18nKey(v)) {
     console.error('[i18n] missing or invalid translation', { lang, key, resolved: v })
-    return STRICT_I18N_PLACEHOLDER
+    return localizedMissingPlaceholder(lang)
   }
   return v
 }
@@ -34,11 +79,12 @@ export function strictT(tr, lang, key) {
  * Template with {name} placeholders — each segment strict; missing sub-key → placeholder for that segment only.
  */
 export function strictTParams(tr, lang, key, params) {
+  const missing = localizedMissingPlaceholder(lang)
   const base = strictT(tr, lang, key)
-  if (base === STRICT_I18N_PLACEHOLDER) return base
+  if (base === missing) return base
   let s = base
   for (const [k, val] of Object.entries(params || {})) {
-    s = s.replaceAll(`{${k}}`, val != null ? String(val) : STRICT_I18N_PLACEHOLDER)
+    s = s.replaceAll(`{${k}}`, val != null ? String(val) : missing)
   }
   return s
 }

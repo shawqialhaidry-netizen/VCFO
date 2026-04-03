@@ -13,6 +13,8 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useLang }        from '../context/LangContext.jsx'
+import { strictT } from '../utils/strictI18n.js'
+import CmdServerText from '../components/CmdServerText.jsx'
 import { useCompany }     from '../context/CompanyContext.jsx'
 import { usePeriodScope } from '../context/PeriodScopeContext.jsx'
 import { buildAnalysisQuery } from '../utils/buildAnalysisQuery.js'
@@ -39,71 +41,95 @@ const clrVi = (v,inv) => inv?clrV(-v):clrV(v)  // inverted for costs
 const urgC  = {high:'var(--red)',medium:'var(--amber)',low:'var(--blue)',info:'var(--green)'}
 const domC  = {liquidity:'var(--blue)',profitability:'var(--green)',efficiency:'var(--violet)',leverage:'var(--amber)',growth:'var(--accent)'}
 
+function statementsSeverityLabel(tr, sev) {
+  const s = String(sev || 'info').toLowerCase()
+  return tr(`severity_${s}`)
+}
+
+function statementsDomainLabel(tr, dom) {
+  if (!dom) return ''
+  const map = {
+    liquidity: 'domain_liquidity_simple',
+    profitability: 'domain_profitability_simple',
+    efficiency: 'domain_efficiency_simple',
+    leverage: 'domain_leverage_simple',
+    growth: 'domain_growth_simple',
+  }
+  const k = map[dom]
+  return k ? tr(k) : dom
+}
+
 // Phase 6.1: read insight text for a statement line — no calculation
-function stmtInsight(key, d, lang) {
-  const ar = lang === 'ar'
+function stmtInsight(key, d, tr) {
   const trends  = d?.intelligence?.trends  || {}
   const ratios  = d?.intelligence?.ratios  || {}
   const ins     = d?.statements?.insights  || []
   const findIns = k => ins.find(i => i.key === k)
-  const statusLabel = (st) => {
-    if (st === 'good')    return ar ? '✓ مستوى جيد'   : '✓ Healthy level'
-    if (st === 'warning') return ar ? '⚠ يحتاج متابعة' : '⚠ Needs attention'
-    if (st === 'risk')    return ar ? '✗ مستوى خطر'   : '✗ At risk'
+  const ratioStatusKey = (st) => {
+    if (st === 'good') return 'stmt_kpi_ratio_status_good'
+    if (st === 'warning') return 'stmt_kpi_ratio_status_warning'
+    if (st === 'risk') return 'stmt_kpi_ratio_status_risk'
     return null
   }
   switch (key) {
     case 'revenue': {
       const dir = trends?.revenue?.direction
-      if (dir === 'up')     return ar ? '↑ إيرادات في اتجاه صاعد' : '↑ Revenue trending up'
-      if (dir === 'down')   return ar ? '↓ إيرادات في اتجاه هابط' : '↓ Revenue trending down'
-      if (dir === 'stable') return ar ? '→ إيرادات مستقرة'         : '→ Revenue stable'
-      return null
+      if (dir !== 'up' && dir !== 'down' && dir !== 'stable') return null
+      return tr(`stmt_kpi_revenue_trend_${dir}`)
     }
     case 'net_profit': {
       const st = ratios?.profitability?.net_margin_pct?.status
-      return statusLabel(st)
+      const k = ratioStatusKey(st)
+      return k ? tr(k) : null
     }
     case 'cashflow': {
       const ins2 = findIns('cashflow_positive')
-      return ins2 ? ins2.message.split('. ')[0] : null
+      if (!ins2?.message) return null
+      const parts = ins2.message.split('. ')
+      return parts[0] || ins2.message
     }
     case 'working_capital': {
       const st = ratios?.liquidity?.working_capital?.status
-      return statusLabel(st)
+      const k = ratioStatusKey(st)
+      return k ? tr(k) : null
     }
     default: return null
   }
 }
 
 // Phase 6.2: cause text for statement lines — reads decisions/root_causes only
-function stmtCause(key, d, lang) {
-  const ar      = lang === 'ar'
+function stmtCause(key, d, tr) {
   const decs    = d?.decisions   || []
   const causes  = d?.root_causes || []
   const cf      = d?.cashflow    || {}
   const ratios  = d?.intelligence?.ratios || {}
-  const decR    = domain => { const x=decs.find(v=>v.domain===domain); return x?.reason?x.reason.split('. ')[0]:null }
+  const decR    = domain => { const x=decs.find(v=>v.domain===domain); return x?.reason?(x.reason.split('. ')[0]||x.reason):null }
   const rcT     = domain => { const c=causes.find(v=>v.domain===domain||v.domain==='cross_domain'); return c?.title||null }
-  const clip    = s => s && s.length > 60 ? s.slice(0,57)+'…' : s
+  const clip    = s => (s && s.length > 60 ? s.slice(0, 57) : s)
   switch(key) {
     case 'revenue':        return clip(rcT('growth')      || decR('growth'))
-    case 'net_profit':     { const nm=ratios?.profitability?.net_margin_pct; return nm?.value!=null?`${ar?'الهامش':'Margin'} ${nm.value.toFixed(1)}% — ${nm.status==='good'?(ar?'جيد':'healthy'):nm.status==='warning'?(ar?'تحت المستهدف':'below target'):(ar?'خطر':'at risk')}`:null }
-    case 'cashflow':       { const flags=cf?.flags; return hasFlag(flags,'single_period')?(ar?'فترة واحدة — تقدير':'Single period — estimate'):null }
+    case 'net_profit': {
+      const nm = ratios?.profitability?.net_margin_pct
+      if (nm?.value == null) return null
+      const sk = nm.status === 'good' ? 'stmt_kpi_net_margin_cause_good'
+        : nm.status === 'warning' ? 'stmt_kpi_net_margin_cause_warning'
+          : 'stmt_kpi_net_margin_cause_risk'
+      return tr(sk, { value: nm.value.toFixed(1) })
+    }
+    case 'cashflow':       return hasFlag(cf?.flags,'single_period') ? tr('stmt_kpi_cf_single_period') : null
     case 'working_capital':return clip(rcT('liquidity')   || decR('liquidity'))
     default: return null
   }
 }
 
 // Phase 6.4: forecast text helper — reads fcData.scenarios.base.[key][0]
-function stmtForecast(key, fcData, lang, fmtFn) {
+function stmtForecast(key, fcData, tr, fmtFn) {
   if (!fcData?.available) return null
   const next = (fcData?.scenarios?.base?.[key] || [])[0]
   if (!next?.point) return null
-  const ar  = lang === 'ar'
   const val = fmtFn ? fmtFn(next.point) : next.point.toFixed(0)
   const dir = next.mom_applied > 0 ? '↑' : next.mom_applied < 0 ? '↓' : '→'
-  const conf= next.confidence != null ? ` (${ar?'ثقة':'conf.'} ${next.confidence}%)` : ''
+  const conf = next.confidence != null ? tr('stmt_kpi_forecast_conf', { confidence: next.confidence }) : ''
   return `${dir} ${val}${conf}`
 }
 
@@ -150,7 +176,7 @@ function CmpRow({label,cur,prior,bold,color,invertColor,pct,onClick,indent}) {
         cursor:onClick?'pointer':'default',alignItems:'center',
         paddingLeft:indent?16:0}}>
       <span style={{fontSize:bold?13:12,fontWeight:bold?700:400,
-        color:bold?'#fff':'var(--text-secondary)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+        color:bold?'#fff':'var(--text-secondary)',overflow:'hidden',textOverflow:'clip',whiteSpace:'nowrap'}}>
         {label}
       </span>
       {/* Current */}
@@ -197,7 +223,7 @@ function CmpHeader({lang,priorLabel,tr}) {
 }
 
 // ── Summary KPI card ──────────────────────────────────────────────────────────
-function KpiCard({label,value,fullValue,mom,yoy,color,sub,badge,onClick,insight,cause,forecast}) {
+function KpiCard({label,value,fullValue,mom,yoy,color,sub,badge,onClick,insight,cause,forecast,momWord,yoyWord,lang,tr}) {
   const [hov,setHov] = useState(false)
   return (
     <div onClick={onClick}
@@ -236,25 +262,40 @@ function KpiCard({label,value,fullValue,mom,yoy,color,sub,badge,onClick,insight,
           padding:'1px 5px',borderRadius:8,
           background:`${clrV(mom)}14`,
         }}>
-          {arr(mom)} {Math.abs(mom).toFixed(1)}% MoM
+          {arr(mom)} {Math.abs(mom).toFixed(1)}% {momWord}
         </span>}
         {yoy!=null&&<span style={{fontFamily:'var(--font-mono)',fontSize:9,color:clrV(yoy),opacity:.8}}>
-          {arr(yoy)} {Math.abs(yoy).toFixed(1)}% YoY
+          {arr(yoy)} {Math.abs(yoy).toFixed(1)}% {yoyWord}
         </span>}
         {sub&&<span style={{fontSize:10,color:'var(--text-muted)'}}>{sub}</span>}
       </div>
       {/* Phase 6.1: insight line */}
       {insight&&<div style={{fontSize:10,color:'var(--text-muted)',marginTop:6,
-        lineHeight:1.4,opacity:.8,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}
-        title={insight}>💡 {insight}</div>}
+        lineHeight:1.4,opacity:.8,overflow:'hidden',textOverflow:'clip',whiteSpace:'nowrap'}}
+        title={insight}>
+        💡{' '}
+        {lang && tr ? (
+          <CmdServerText lang={lang} tr={tr} style={{ display: 'inline' }}>{insight}</CmdServerText>
+        ) : insight}
+      </div>}
       {/* Phase 6.2: cause line */}
       {cause&&<div style={{fontSize:9,color:'var(--text-dim)',marginTop:2,
-        lineHeight:1.3,opacity:.65,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}
-        title={cause}>↳ {cause}</div>}
+        lineHeight:1.3,opacity:.65,overflow:'hidden',textOverflow:'clip',whiteSpace:'nowrap'}}
+        title={cause}>
+        ↳{' '}
+        {lang && tr ? (
+          <CmdServerText lang={lang} tr={tr} style={{ display: 'inline' }}>{cause}</CmdServerText>
+        ) : cause}
+      </div>}
       {/* Phase 6.4: forecast line */}
       {forecast&&<div style={{fontSize:9,color:'var(--accent)',marginTop:3,
-        lineHeight:1.3,opacity:.7,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',
-        fontFamily:'var(--font-mono)'}} title={forecast}>📈 {forecast}</div>}
+        lineHeight:1.3,opacity:.7,overflow:'hidden',textOverflow:'clip',whiteSpace:'nowrap',
+        fontFamily:'var(--font-mono)'}} title={forecast}>
+        📈{' '}
+        {lang && tr ? (
+          <CmdServerText lang={lang} tr={tr} style={{ display: 'inline', fontFamily: 'var(--font-mono)' }}>{forecast}</CmdServerText>
+        ) : forecast}
+      </div>}
     </div>
   )
 }
@@ -282,9 +323,8 @@ function Spark({data=[],color='var(--accent)',h=36}) {
 }
 
 // ── Insight card ──────────────────────────────────────────────────────────────
-function InsightCard({ins,onClick,lang}) {
+function InsightCard({ins,onClick,lang,tr}) {
   const uc = urgC[ins.severity]||'var(--text-secondary)'
-  const l = lang||'en'
   return (
     <div onClick={onClick}
       style={{background:'var(--bg-elevated)',border:`1px solid ${uc}20`,
@@ -293,11 +333,13 @@ function InsightCard({ins,onClick,lang}) {
       onMouseEnter={e=>{e.currentTarget.style.background='var(--bg-panel)';e.currentTarget.style.transform='translateX(2px)'}}
       onMouseLeave={e=>{e.currentTarget.style.background='var(--bg-elevated)';e.currentTarget.style.transform='none'}}>
       <div style={{display:'flex',alignItems:'center',gap:7,marginBottom:5}}>
-        <Badge label={ins.severity} color={uc}/>
-        <Badge label={ins.domain||''} color={domC[ins.domain]||'var(--accent)'}/>
+        <Badge label={statementsSeverityLabel(tr, ins.severity)} color={uc}/>
+        {ins.domain ? <Badge label={statementsDomainLabel(tr, ins.domain)} color={domC[ins.domain]||'var(--accent)'}/> : null}
         <span style={{marginLeft:'auto',fontSize:9,color:'var(--accent)'}}>→</span>
       </div>
-      <p style={{fontSize:11,color:'var(--text-secondary)',lineHeight:1.6,margin:0}}>{ins.message}</p>
+      <p style={{fontSize:11,color:'var(--text-secondary)',lineHeight:1.6,margin:0}}>
+        <CmdServerText lang={lang} tr={tr}>{ins.message}</CmdServerText>
+      </p>
     </div>
   )
 }
@@ -319,7 +361,6 @@ function RatioRow({label,value,status,unit}) {
 // ── Context side panel ────────────────────────────────────────────────────────
 function ContextPanel({item,decs,tr,lang,onClose}) {
   if(!item) return null
-  const l = lang||'en'
   const uc = urgC[item.severity]||'var(--text-secondary)'
   const linked = (decs||[]).filter(d=>d.domain===item.domain).slice(0,2)
   return (
@@ -333,20 +374,23 @@ function ContextPanel({item,decs,tr,lang,onClose}) {
         onClick={e=>e.stopPropagation()}>
         <div style={{display:'flex',justifyContent:'space-between',marginBottom:16}}>
           <div style={{display:'flex',gap:8}}>
-            <Badge label={item.severity||'info'} color={uc}/>
-            {item.domain&&<Badge label={item.domain} color={domC[item.domain]||'var(--accent)'}/>}
+            <Badge label={statementsSeverityLabel(tr, item.severity)} color={uc}/>
+            {item.domain&&<Badge label={statementsDomainLabel(tr, item.domain)} color={domC[item.domain]||'var(--accent)'}/>}
           </div>
           <button onClick={onClose} style={{background:'transparent',border:'none',
             color:'var(--text-secondary)',fontSize:18,cursor:'pointer'}}>✕</button>
         </div>
-        <p style={{fontSize:13,color:'var(--text-secondary)',lineHeight:1.7,marginBottom:16}}>{item.message}</p>
+        <p style={{fontSize:13,color:'var(--text-secondary)',lineHeight:1.7,marginBottom:16}}>
+          <CmdServerText lang={lang} tr={tr}>{item.message}</CmdServerText>
+        </p>
         {item.why&&<div style={{fontSize:12,color:'var(--text-secondary)',lineHeight:1.6,marginBottom:12}}>
-          <strong style={{color:'#fff'}}>{tr('why_label')}</strong>{item.why}
+          <strong style={{color:'#fff'}}>{tr('why_label')}</strong>
+          <CmdServerText lang={lang} tr={tr}>{item.why}</CmdServerText>
         </div>}
         {item.recommendation&&<div style={{padding:'10px 12px',background:'rgba(99,102,241,.08)',
           border:'1px solid rgba(99,102,241,.2)',borderRadius:8,fontSize:12,
           color:'var(--accent)',lineHeight:1.6,marginBottom:16}}>
-          💡 {item.recommendation}
+          💡 <CmdServerText lang={lang} tr={tr}>{item.recommendation}</CmdServerText>
         </div>}
         {linked.length>0&&<>
           <div style={{fontSize:10,fontWeight:700,color:'var(--text-secondary)',
@@ -357,7 +401,7 @@ function ContextPanel({item,decs,tr,lang,onClose}) {
             <div key={i} style={{padding:'10px 12px',background:'var(--bg-elevated)',
               borderRadius:9,fontSize:12,color:'var(--text-secondary)',lineHeight:1.6,
               marginBottom:6,border:'1px solid var(--border)'}}>
-              {d.title||d.action}
+              <CmdServerText lang={lang} tr={tr}>{d.title||d.action}</CmdServerText>
             </div>
           ))}
         </>}
@@ -511,7 +555,7 @@ export default function Statements() {
   return (
     <div className="" style={{padding:'16px 24px',display:'flex',flexDirection:'column',
       gap:12,minHeight:'calc(100vh - 62px)',background:'var(--bg-void)'}}>
-      <style>{`@keyframes slideIn{from{transform:translateX(100%);opacity:0}to{transform:translateX(0);opacity:1}}`}</style>
+      <style>{`@keyframes slideIn{from{transform:translateX(100%);opacity:0}to{transform:translateX(0);opacity:1}}@keyframes spin{to{transform:rotate(360deg)}}`}</style>
 
       {/* ── Header ──────────────────────────────────────────────────────── */}
       <div style={{display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
@@ -546,7 +590,11 @@ export default function Statements() {
         <button onClick={load} disabled={loading}
           style={{padding:'6px 11px',borderRadius:8,border:'1px solid var(--border)',
             background:'var(--bg-elevated)',color:'#aab4c3',fontSize:12,cursor:'pointer'}}>
-          {loading?'…':'↻'}
+          {loading ? (
+            <span style={{ display: 'inline-block', width: 12, height: 12, border: '2px solid var(--border)', borderTopColor: 'var(--accent)', borderRadius: '50%', animation: 'spin .7s linear infinite', verticalAlign: 'middle' }} />
+          ) : (
+            '↻'
+          )}
         </button>
           {/* ── Data Source Toggle ── */}
           <div style={{display:'flex',alignItems:'center',gap:0,background:'var(--bg-elevated)',
@@ -632,40 +680,56 @@ export default function Statements() {
           <KpiCard label={tr('fc_revenue')}
             value={formatCompact(smry.revenue)}
             fullValue={formatFull(smry.revenue)}
+            lang={lang}
+            tr={tr}
+            momWord={strictT(tr, lang, 'mom_label')}
+            yoyWord={strictT(tr, lang, 'yoy_label')}
             mom={cmpMode==='mom'?momRev:null}
             yoy={cmpMode==='yoy'?yoyRev:null}
             color='var(--accent)'
-            insight={stmtInsight('revenue',data?.data,l)}
-            cause={stmtCause('revenue',data?.data,l)}
-            forecast={stmtForecast('revenue',fcData,l,formatCompact)}
+            insight={stmtInsight('revenue',data?.data,tr)}
+            cause={stmtCause('revenue',data?.data,tr)}
+            forecast={stmtForecast('revenue',fcData,tr,formatCompact)}
             onClick={()=>setTab('income')}/>
           <KpiCard label={tr('fc_net_profit')}
             value={formatCompact(smry.net_profit)}
             fullValue={formatFull(smry.net_profit)}
+            lang={lang}
+            tr={tr}
+            momWord={strictT(tr, lang, 'mom_label')}
+            yoyWord={strictT(tr, lang, 'yoy_label')}
             mom={cmpMode==='mom'?momNp:null}
             yoy={cmpMode==='yoy'?yoyNp:null}
             color={smry.net_profit>=0?'var(--green)':'var(--red)'}
             sub={smry.net_margin_pct!=null?fmtP(smry.net_margin_pct):null}
-            insight={stmtInsight('net_profit',data?.data,l)}
-            cause={stmtCause('net_profit',data?.data,l)}
-            forecast={stmtForecast('net_profit',fcData,l,formatCompact)}
+            insight={stmtInsight('net_profit',data?.data,tr)}
+            cause={stmtCause('net_profit',data?.data,tr)}
+            forecast={stmtForecast('net_profit',fcData,tr,formatCompact)}
             onClick={()=>setTab('income')}/>
           <KpiCard label={tr('cashflow_operating')}
             value={formatCompact(smry.operating_cashflow)}
             fullValue={formatFull(smry.operating_cashflow)}
+            lang={lang}
+            tr={tr}
+            momWord={strictT(tr, lang, 'mom_label')}
+            yoyWord={strictT(tr, lang, 'yoy_label')}
             mom={cmpMode==='mom'?cf_.operating_cashflow_mom:null}
             color={cfFlagClr}
             badge={cfEstimated?tr('label_estimated_short'):null}
-            insight={stmtInsight('cashflow',data?.data,l)}
-            cause={stmtCause('cashflow',data?.data,l)}
+            insight={stmtInsight('cashflow',data?.data,tr)}
+            cause={stmtCause('cashflow',data?.data,tr)}
             onClick={()=>setTab('cashflow')}/>
           <KpiCard label={tr('working_capital')}
             value={formatCompact(smry.working_capital)}
             fullValue={formatFull(smry.working_capital)}
+            lang={lang}
+            tr={tr}
+            momWord={strictT(tr, lang, 'mom_label')}
+            yoyWord={strictT(tr, lang, 'yoy_label')}
             color={smry.working_capital>=0?'var(--green)':'var(--red)'}
             sub={smry.working_capital<0?tr('wc_negative'):null}
-            insight={stmtInsight('working_capital',data?.data,l)}
-            cause={stmtCause('working_capital',data?.data,l)}
+            insight={stmtInsight('working_capital',data?.data,tr)}
+            cause={stmtCause('working_capital',data?.data,tr)}
             onClick={()=>setPanel(insights.find(x=>x.key==='negative_working_capital')||null)}/>
           {/* Health card */}
           <div style={{background:'var(--bg-panel)',border:'1px solid var(--border)',
@@ -698,8 +762,12 @@ export default function Statements() {
               <button key={i} onClick={()=>setPanel(ins)}
                 style={{fontSize:10,color:'var(--red)',background:'rgba(248,113,113,.1)',
                   padding:'3px 10px',borderRadius:20,border:'1px solid rgba(248,113,113,.22)',
-                  cursor:'pointer'}}>
-                {ins.message.slice(0,55)}{ins.message.length>55?'…':''} →
+                  cursor:'pointer',maxWidth:220,overflow:'hidden',textAlign:'start'}}>
+                <CmdServerText lang={lang} tr={tr} title={ins.message}
+                  style={{display:'inline-block',maxWidth:'100%',overflow:'hidden',textOverflow:'clip',whiteSpace:'nowrap',verticalAlign:'bottom'}}>
+                  {ins.message}
+                </CmdServerText>
+                {' →'}
               </button>
             ))}
           </div>
@@ -789,7 +857,7 @@ export default function Statements() {
 
               {/* Linked insights — profitability */}
               {insights.filter(x=>x.domain==='profitability'||x.domain==='growth').slice(0,2).map((ins,i)=>(
-                <InsightCard key={i} ins={ins} onClick={()=>setPanel(ins)} lang={l}/>
+                <InsightCard key={i} ins={ins} onClick={()=>setPanel(ins)} lang={l} tr={tr}/>
               ))}
             </div>
           </div>
@@ -902,7 +970,7 @@ export default function Statements() {
               </Card>
 
               {insights.filter(x=>x.domain==='liquidity'||x.domain==='leverage').slice(0,2).map((ins,i)=>(
-                <InsightCard key={i} ins={ins} onClick={()=>setPanel(ins)} lang={l}/>
+                <InsightCard key={i} ins={ins} onClick={()=>setPanel(ins)} lang={l} tr={tr}/>
               ))}
             </div>
           </div>
@@ -1031,7 +1099,7 @@ export default function Statements() {
               </Card>
 
               {insights.filter(x=>x.domain==='cashflow'||x.key==='cashflow_below_profit').slice(0,2).map((ins,i)=>(
-                <InsightCard key={i} ins={ins} onClick={()=>setPanel(ins)} lang={l}/>
+                <InsightCard key={i} ins={ins} onClick={()=>setPanel(ins)} lang={l} tr={tr}/>
               ))}
             </div>
           </div>
@@ -1049,7 +1117,7 @@ export default function Statements() {
               </div>
             )}
             {insights.map((ins,i)=>(
-              <InsightCard key={i} ins={ins} onClick={()=>setPanel(ins)} lang={l}/>
+              <InsightCard key={i} ins={ins} onClick={()=>setPanel(ins)} lang={l} tr={tr}/>
             ))}
           </div>
         )}

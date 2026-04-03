@@ -3,6 +3,8 @@
  */
 import { formatCompact } from '../utils/numberFormat.js'
 import { strictT as st } from '../utils/strictI18n.js'
+import { CLAMP_FADE_MASK_SHORT } from '../utils/serverTextUi.js'
+import CmdServerText from './CmdServerText.jsx'
 
 const P = {
   surface: 'linear-gradient(165deg, rgba(17,24,39,0.98) 0%, rgba(15,23,42,0.99) 100%)',
@@ -14,7 +16,7 @@ const P = {
   text3: '#64748b',
 }
 
-function row(label, value) {
+function row(label, value, lang, tr) {
   return (
     <div style={{ padding: '6px 0', borderBottom: `1px solid ${P.border}` }}>
       <div
@@ -28,7 +30,20 @@ function row(label, value) {
       >
         {label}
       </div>
-      <div style={{ fontSize: 12, fontWeight: 650, color: P.text1, marginTop: 3, lineHeight: 1.35 }}>{value}</div>
+      <div
+        style={{
+          fontSize: 12,
+          fontWeight: 650,
+          color: P.text1,
+          marginTop: 3,
+          lineHeight: 1.35,
+          ...CLAMP_FADE_MASK_SHORT,
+        }}
+      >
+        <CmdServerText lang={lang} tr={tr} as="span" style={{ color: 'inherit' }}>
+          {value}
+        </CmdServerText>
+      </div>
     </div>
   )
 }
@@ -76,7 +91,7 @@ export default function ExpenseInsightsSection({
 
   const growLine =
     grow?.name != null
-      ? `${String(grow.name)} · ${grow.pct_change != null ? `${grow.pct_change >= 0 ? '+' : ''}${Number(grow.pct_change).toFixed(1)}% MoM` : formatCompact(grow.absolute_change || 0)}`
+      ? `${String(grow.name)} · ${grow.pct_change != null ? `${grow.pct_change >= 0 ? '+' : ''}${Number(grow.pct_change).toFixed(1)}% ${st(tr, lang, 'mom_label')}` : formatCompact(grow.absolute_change || 0)}`
       : null
 
   const ofRev = st(tr, lang, 'cmd_branch_of_rev')
@@ -150,20 +165,22 @@ export default function ExpenseInsightsSection({
               {st(tr, lang, 'cmd_expense_period')}: {period}
             </div>
           ) : null}
-          {totalLine ? row(st(tr, lang, 'cmd_expense_totals_row'), totalLine) : null}
+          {totalLine ? row(st(tr, lang, 'cmd_expense_totals_row'), totalLine, lang, tr) : null}
           {topLine
-            ? row(st(tr, lang, 'cmd_expense_top_driver'), topLine)
-            : row(st(tr, lang, 'cmd_expense_top_driver'), st(tr, lang, 'cmd_expense_no_category_split'))}
+            ? row(st(tr, lang, 'cmd_expense_top_driver'), topLine, lang, tr)
+            : row(st(tr, lang, 'cmd_expense_top_driver'), st(tr, lang, 'cmd_expense_no_category_split'), lang, tr)}
           {momTeStr != null
             ? row(
                 st(tr, lang, 'cmd_expense_mom_te'),
-                `${momTeStr}${ratioPrior != null && ratio != null ? ` · ${st(tr, lang, 'cmd_expense_ratio_label')} ${Number(ratio).toFixed(1)}%` : ''}`
+                `${momTeStr}${ratioPrior != null && ratio != null ? ` · ${st(tr, lang, 'cmd_expense_ratio_label')} ${Number(ratio).toFixed(1)}%` : ''}`,
+                lang,
+                tr
               )
-            : row(st(tr, lang, 'cmd_expense_mom_te'), st(tr, lang, 'cmd_expense_mom_na'))}
-          {ratioLine ? row(st(tr, lang, 'cmd_expense_ratio_row'), ratioLine) : null}
+            : row(st(tr, lang, 'cmd_expense_mom_te'), st(tr, lang, 'cmd_expense_mom_na'), lang, tr)}
+          {ratioLine ? row(st(tr, lang, 'cmd_expense_ratio_row'), ratioLine, lang, tr) : null}
           {growLine
-            ? row(st(tr, lang, 'cmd_expense_fastest_growing'), growLine)
-            : row(st(tr, lang, 'cmd_expense_fastest_growing'), st(tr, lang, 'cmd_expense_no_mover'))}
+            ? row(st(tr, lang, 'cmd_expense_fastest_growing'), growLine, lang, tr)
+            : row(st(tr, lang, 'cmd_expense_fastest_growing'), st(tr, lang, 'cmd_expense_no_mover'), lang, tr)}
         </div>
       )}
     </div>

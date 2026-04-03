@@ -1,7 +1,7 @@
 /**
  * CommandCenter.jsx — Command Center orchestrator (state, fetch, drill, chrome).
- * Main body: CSS grid via CommandCenterDashboardGrid — row1 narrative|health, row2 KPIs×4,
- * row3 signals|branch, row4 expense|decisions, row5 secondary.
+ * Main body: CSS grid via CommandCenterDashboardGrid — optional row0 primary decision, row1 narrative|health,
+ * row2 KPIs×4, row3 signals|branch, row4 expense|decisions, row5 secondary.
  */
 import { useState, useCallback, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
@@ -13,7 +13,9 @@ import { formatCompact, formatFull } from '../utils/numberFormat.js'
 import { buildAnalysisQuery } from '../utils/buildAnalysisQuery.js'
 import { buildExecutiveNarrative } from '../utils/buildExecutiveNarrative.js'
 import { analysisTabFromDrill } from '../utils/commandCenterDrill.js'
-import { strictT, looksLikeRawI18nKey } from '../utils/strictI18n.js'
+import { strictT, localizedMissingPlaceholder } from '../utils/strictI18n.js'
+import { CLAMP_FADE_MASK_SHORT } from '../utils/serverTextUi.js'
+import CmdServerText from '../components/CmdServerText.jsx'
 import PeriodSelector from '../components/PeriodSelector.jsx'
 import UniversalScopeSelector from '../components/UniversalScopeSelector.jsx'
 import ExecutiveNarrativeStrip from '../components/ExecutiveNarrativeStrip.jsx'
@@ -45,6 +47,36 @@ const dIco = {liquidity:'💧', profitability:'📈', efficiency:'⚡', leverage
 const uClr = {high:T.red, medium:T.amber, low:T.blue}
 const fmtP = v => (v == null || !Number.isFinite(Number(v)) ? '' : `${Number(v).toFixed(1)}%`)
 
+const URGENCY_RANK = { high: 0, medium: 1, low: 2 }
+
+/** Single CFO decision to feature: urgency first, then quantitative impact when present. */
+function pickPrimaryDecision(decs, impacts) {
+  if (!Array.isArray(decs) || decs.length === 0) return null
+  const impactScore = (d) => {
+    const k = d.key || d.domain
+    const row = impacts?.[k]
+    const imp = row?.impact
+    if (!imp || imp.type === 'qualitative' || imp.value == null) return -Infinity
+    const v = Number(imp.value)
+    return Number.isFinite(v) ? v : -Infinity
+  }
+  const ur = (u) => URGENCY_RANK[String(u || 'low').toLowerCase()] ?? 2
+  const sorted = [...decs].sort((a, b) => {
+    const diff = ur(a.urgency) - ur(b.urgency)
+    if (diff !== 0) return diff
+    return impactScore(b) - impactScore(a)
+  })
+  return sorted[0] || null
+}
+
+function firstRecommendedLine(action) {
+  if (!action || typeof action !== 'string') return ''
+  const t = action.trim()
+  if (!t) return ''
+  const nl = t.indexOf('\n')
+  return (nl >= 0 ? t.slice(0, nl) : t).trim()
+}
+
 const Pill = ({label, color}) => (
   <span style={{fontSize:9,fontWeight:800,padding:'2px 9px',borderRadius:20,
     background:`${color}18`,color,border:`1px solid ${color}30`,
@@ -56,6 +88,186 @@ const lift = color => ({
   onMouseEnter: e => { e.currentTarget.style.transform='translateY(-2px)'; e.currentTarget.style.boxShadow=`0 10px 32px rgba(0,0,0,.55),0 0 0 1px ${color}30` },
   onMouseLeave: e => { e.currentTarget.style.transform=''; e.currentTarget.style.boxShadow='' },
 })
+
+function PrimaryDecisionHero({ decision, impacts, tr, lang, causes, allDecisions, onOpen }) {
+  if (!decision) return null
+  const dc = dClr[decision.domain] || T.accent
+  const impKey = decision.key || decision.domain
+  const imp = impacts[impKey]?.impact
+  const fmtV = (v) =>
+    v == null
+      ? '—'
+      : v >= 1e6
+        ? `+${(v / 1e6).toFixed(1)}M`
+        : v >= 1e3
+          ? `+${(v / 1e3).toFixed(0)}K`
+          : `+${v.toFixed(0)}`
+  const hasQuant =
+    imp && imp.type !== 'qualitative' && imp.value != null && Number.isFinite(Number(imp.value))
+  const recLine = firstRecommendedLine(decision.action)
+
+  return (
+    <button
+      type="button"
+      onClick={() => onOpen('decision', decision, { causes, decisions: allDecisions })}
+      className="cmd-level-1"
+      style={{
+        width: '100%',
+        textAlign: 'start',
+        cursor: 'pointer',
+        border: `1px solid ${dc}55`,
+        borderRadius: 16,
+        padding: '18px 20px 16px',
+        background: `linear-gradient(165deg, rgba(17,24,39,0.99) 0%, rgba(15,23,42,1) 100%)`,
+        boxShadow: `0 0 0 1px ${dc}33, 0 20px 56px rgba(0,0,0,0.5), 0 0 120px -28px ${dc}44`,
+        color: T.text1,
+        display: 'block',
+        transition: 'transform 0.18s ease, box-shadow 0.18s ease',
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.transform = 'translateY(-2px)'
+        e.currentTarget.style.boxShadow = `0 0 0 1px ${dc}44, 0 24px 64px rgba(0,0,0,0.55), 0 0 140px -24px ${dc}55`
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.transform = ''
+        e.currentTarget.style.boxShadow = `0 0 0 1px ${dc}33, 0 20px 56px rgba(0,0,0,0.5), 0 0 120px -28px ${dc}44`
+      }}
+    >
+      <div
+        style={{
+          fontSize: 10,
+          fontWeight: 800,
+          color: dc,
+          letterSpacing: '.1em',
+          textTransform: 'uppercase',
+          marginBottom: 8,
+        }}
+      >
+        {strictT(tr, lang, 'cmd_primary_decision_label')}
+      </div>
+      <div
+        style={{
+          fontSize: 20,
+          fontWeight: 800,
+          color: T.text1,
+          lineHeight: 1.25,
+          marginBottom: 12,
+          ...CLAMP_FADE_MASK_SHORT,
+        }}
+      >
+        <CmdServerText lang={lang} tr={tr} as="span">
+          {decision.title}
+        </CmdServerText>
+      </div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
+        <Pill label={strictT(tr, lang, `urgency_${decision.urgency}`)} color={uClr[decision.urgency] || T.text3} />
+        {decision.impact_level ? (
+          <Pill
+            label={strictT(tr, lang, `impact_${decision.impact_level}`)}
+            color={uClr[decision.impact_level] || T.text3}
+          />
+        ) : null}
+      </div>
+      <div style={{ marginBottom: 10 }}>
+        <div
+          style={{
+            fontSize: 9,
+            fontWeight: 800,
+            color: T.text3,
+            textTransform: 'uppercase',
+            letterSpacing: '.08em',
+            marginBottom: 4,
+          }}
+        >
+          {strictT(tr, lang, 'exec_why')}
+        </div>
+        <p style={{ margin: 0, fontSize: 13, color: T.text2, lineHeight: 1.55, ...CLAMP_FADE_MASK_SHORT }}>
+          <CmdServerText lang={lang} tr={tr} as="span">
+            {decision.reason}
+          </CmdServerText>
+        </p>
+      </div>
+      {hasQuant ? (
+        <div
+          style={{
+            marginBottom: 10,
+            padding: '10px 12px',
+            borderRadius: 10,
+            background: `${T.green}10`,
+            border: `1px solid ${T.green}30`,
+          }}
+        >
+          <div
+            style={{
+              fontSize: 9,
+              fontWeight: 800,
+              color: T.green,
+              textTransform: 'uppercase',
+              letterSpacing: '.08em',
+              marginBottom: 4,
+            }}
+          >
+            {strictT(tr, lang, 'impact_expected_label')}
+          </div>
+          <div style={{ fontFamily: 'monospace', fontSize: 22, fontWeight: 800, color: T.green, direction: 'ltr' }}>
+            {fmtV(Number(imp.value))}
+          </div>
+          {imp.description ? (
+            <p style={{ margin: '6px 0 0', fontSize: 11, color: T.text2, lineHeight: 1.5, ...CLAMP_FADE_MASK_SHORT }}>
+              <CmdServerText lang={lang} tr={tr} as="span">
+                {imp.description}
+              </CmdServerText>
+            </p>
+          ) : null}
+        </div>
+      ) : decision.expected_effect ? (
+        <div style={{ marginBottom: 10 }}>
+          <div
+            style={{
+              fontSize: 9,
+              fontWeight: 800,
+              color: T.green,
+              textTransform: 'uppercase',
+              letterSpacing: '.08em',
+              marginBottom: 4,
+            }}
+          >
+            {strictT(tr, lang, 'exec_effect')}
+          </div>
+          <p style={{ margin: 0, fontSize: 12, color: T.text2, lineHeight: 1.5, ...CLAMP_FADE_MASK_SHORT }}>
+            <CmdServerText lang={lang} tr={tr} as="span">
+              {decision.expected_effect}
+            </CmdServerText>
+          </p>
+        </div>
+      ) : null}
+      {recLine ? (
+        <div style={{ marginBottom: 8 }}>
+          <div
+            style={{
+              fontSize: 9,
+              fontWeight: 800,
+              color: dc,
+              textTransform: 'uppercase',
+              letterSpacing: '.08em',
+              marginBottom: 4,
+            }}
+          >
+            {strictT(tr, lang, 'exec_actions')}
+          </div>
+          <p style={{ margin: 0, fontSize: 13, fontWeight: 600, color: T.text1, lineHeight: 1.45, ...CLAMP_FADE_MASK_SHORT }}>
+            <CmdServerText lang={lang} tr={tr} as="span">
+              {recLine}
+            </CmdServerText>
+          </p>
+        </div>
+      ) : null}
+      <div style={{ fontSize: 10, fontWeight: 700, color: T.accent, marginTop: 4 }}>
+        {strictT(tr, lang, 'cmd_primary_decision_open')} →
+      </div>
+    </button>
+  )
+}
 
 function DataQualityBanner({ validation, lang, tr }) {
   if (!validation) return null
@@ -102,14 +314,7 @@ function HealthScorePanel({
   const dash = h != null ? (Math.max(0, Math.min(100, h)) / 100) * circ : 0
   const healthLabel = strictT(tr, lang, 'cmd_health_score')
   const snapSub = strictT(tr, lang, 'cmd_health_kpi_sub')
-  const stSimple = tr(`status_${status}_simple`)
-  const stFull = tr(`status_${status}`)
-  const statusUi =
-    stSimple && stSimple !== `status_${status}_simple` && !looksLikeRawI18nKey(stSimple)
-      ? stSimple
-      : stFull && stFull !== `status_${status}` && !looksLikeRawI18nKey(stFull)
-        ? stFull
-        : strictT(tr, lang, `status_${status}_simple`)
+  const statusUi = strictT(tr, lang, `status_${status}_simple`)
   const actionLbl = actionPrefix || strictT(tr, lang, 'cmd_narr_action_label')
 
   return (
@@ -224,7 +429,9 @@ function HealthScorePanel({
         </svg>
         <div style={{ minWidth: 0, flex: 1 }}>
           <div style={{ fontSize: 18, fontWeight: 800, color: T.text1, lineHeight: 1.2, marginBottom: 6 }}>
-            {companyName || ''}
+            <CmdServerText lang={lang} tr={tr} as="span">
+              {companyName || ''}
+            </CmdServerText>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             <span
@@ -247,7 +454,14 @@ function HealthScorePanel({
                 · {periodCount}p
               </span>
             ) : null}
-            {scopeLabel ? <span style={{ fontSize: 10, color: T.text3 }}>· {scopeLabel}</span> : null}
+            {scopeLabel ? (
+              <span style={{ fontSize: 10, color: T.text3 }}>
+                ·{' '}
+                <CmdServerText lang={lang} tr={tr} as="span">
+                  {scopeLabel}
+                </CmdServerText>
+              </span>
+            ) : null}
           </div>
         </div>
       </div>
@@ -261,7 +475,11 @@ function HealthScorePanel({
           }}
         >
           {healthHeadline ? (
-            <div style={{ fontSize: 13, fontWeight: 650, color: T.text1, lineHeight: 1.45 }}>{healthHeadline}</div>
+            <div style={{ fontSize: 13, fontWeight: 650, color: T.text1, lineHeight: 1.45, ...CLAMP_FADE_MASK_SHORT }}>
+              <CmdServerText lang={lang} tr={tr} as="span">
+                {healthHeadline}
+              </CmdServerText>
+            </div>
           ) : null}
           {actionLine ? (
             <div style={{ marginTop: healthHeadline ? 8 : 0 }}>
@@ -276,7 +494,11 @@ function HealthScorePanel({
               >
                 {actionLbl}
               </div>
-              <div style={{ fontSize: 13, fontWeight: 700, color: T.text1, marginTop: 4, lineHeight: 1.45 }}>{actionLine}</div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: T.text1, marginTop: 4, lineHeight: 1.45, ...CLAMP_FADE_MASK_SHORT }}>
+                <CmdServerText lang={lang} tr={tr} as="span">
+                  {actionLine}
+                </CmdServerText>
+              </div>
             </div>
           ) : null}
         </div>
@@ -306,7 +528,15 @@ function ContextPanel({ type, payload, extra, tr, lang, onClose, onNavigate, imp
   const Steps = ({ text }) => {
     if (!text) return null
     const parts = text.split(/[0-9]+[).\s]+/).filter(s => s.trim().length > 5)
-    if (parts.length <= 1) return <p style={{fontSize:12,color:T.text2,lineHeight:1.75,margin:0}}>{text}</p>
+    if (parts.length <= 1) {
+      return (
+        <p style={{ fontSize: 12, color: T.text2, lineHeight: 1.75, margin: 0, ...CLAMP_FADE_MASK_SHORT }}>
+          <CmdServerText lang={lang} tr={tr} as="span">
+            {text}
+          </CmdServerText>
+        </p>
+      )
+    }
     return (
       <div style={{display:'flex',flexDirection:'column',gap:7}}>
         {parts.map((s,i) => (
@@ -315,7 +545,11 @@ function ContextPanel({ type, payload, extra, tr, lang, onClose, onNavigate, imp
             <div style={{width:20,height:20,borderRadius:'50%',background:`${dc}22`,
               display:'flex',alignItems:'center',justifyContent:'center',
               flexShrink:0,fontSize:11,fontWeight:800,color:dc}}>{i+1}</div>
-            <span style={{fontSize:11,color:T.text2,lineHeight:1.6}}>{s.trim()}</span>
+            <span style={{fontSize:11,color:T.text2,lineHeight:1.6, ...CLAMP_FADE_MASK_SHORT}}>
+              <CmdServerText lang={lang} tr={tr} as="span">
+                {s.trim()}
+              </CmdServerText>
+            </span>
           </div>
         ))}
       </div>
@@ -324,7 +558,11 @@ function ContextPanel({ type, payload, extra, tr, lang, onClose, onNavigate, imp
 
   const Decision = () => (
     <>
-      <div style={{fontSize:17,fontWeight:800,color:T.text1,lineHeight:1.3,marginBottom:8}}>{payload.title}</div>
+      <div style={{fontSize:17,fontWeight:800,color:T.text1,lineHeight:1.3,marginBottom:8, ...CLAMP_FADE_MASK_SHORT}}>
+        <CmdServerText lang={lang} tr={tr} as="span">
+          {payload.title}
+        </CmdServerText>
+      </div>
       <div style={{display:'flex',gap:6,flexWrap:'wrap',marginBottom:22}}>
         <Pill label={strictT(tr, lang, `urgency_${payload.urgency}`)} color={uClr[payload.urgency]||T.text3}/>
         {payload.impact_level && <Pill label={strictT(tr, lang, `impact_${payload.impact_level}`)} color={uClr[payload.impact_level]||T.text3}/>}
@@ -332,16 +570,23 @@ function ContextPanel({ type, payload, extra, tr, lang, onClose, onNavigate, imp
       </div>
 
       <Sec label={strictT(tr, lang, 'exec_why')} color={T.red}>
-        <p style={{fontSize:12,color:T.text2,lineHeight:1.75,margin:0,marginBottom:extra?.causes?.length?10:0}}>
-          {payload.reason}
+        <p style={{fontSize:12,color:T.text2,lineHeight:1.75,margin:0,marginBottom:extra?.causes?.length?10:0, ...CLAMP_FADE_MASK_SHORT}}>
+          <CmdServerText lang={lang} tr={tr} as="span">
+            {payload.reason}
+          </CmdServerText>
         </p>
         {extra?.causes?.slice(0,2).map((c,i) => (
           <div key={i} style={{marginTop:7,padding:'8px 11px',borderRadius:8,
             background:`${T.red}08`,border:`1px solid ${T.red}18`}}>
-            <div style={{fontSize:10,fontWeight:700,color:T.text1,marginBottom:2}}>{c.title}</div>
-            <div style={{fontSize:10,color:T.text2,lineHeight:1.5,
-              display:'-webkit-box',WebkitLineClamp:2,WebkitBoxOrient:'vertical',overflow:'hidden'}}>
-              {c.description}
+            <div style={{fontSize:10,fontWeight:700,color:T.text1,marginBottom:2}}>
+              <CmdServerText lang={lang} tr={tr} as="span">
+                {c.title}
+              </CmdServerText>
+            </div>
+            <div style={{fontSize:10,color:T.text2,lineHeight:1.5, ...CLAMP_FADE_MASK_SHORT}}>
+              <CmdServerText lang={lang} tr={tr} as="span">
+                {c.description}
+              </CmdServerText>
             </div>
           </div>
         ))}
@@ -354,8 +599,10 @@ function ContextPanel({ type, payload, extra, tr, lang, onClose, onNavigate, imp
       {payload.expected_effect && (
         <Sec label={strictT(tr, lang, 'exec_effect')} color={T.green}>
           <div style={{background:`${T.green}08`,borderRadius:9,padding:'12px 14px',
-            border:`1px solid ${T.green}1a`,fontSize:12,color:T.text2,lineHeight:1.75}}>
-            {payload.expected_effect}
+            border:`1px solid ${T.green}1a`,fontSize:12,color:T.text2,lineHeight:1.75, ...CLAMP_FADE_MASK_SHORT}}>
+            <CmdServerText lang={lang} tr={tr} as="span">
+              {payload.expected_effect}
+            </CmdServerText>
           </div>
         </Sec>
       )}
@@ -381,12 +628,23 @@ function ContextPanel({ type, payload, extra, tr, lang, onClose, onNavigate, imp
                 {fmtV(imp.range.low)} – {fmtV(imp.range.high)} {strictT(tr, lang, 'impact_range_label')}
               </div>
             )}
-            <p style={{fontSize:11,color:T.text2,lineHeight:1.6,margin:'0 0 10px'}}>{imp.description}</p>
+            <p style={{fontSize:11,color:T.text2,lineHeight:1.6,margin:'0 0 10px', ...CLAMP_FADE_MASK_SHORT}}>
+              <CmdServerText lang={lang} tr={tr} as="span">
+                {imp.description}
+              </CmdServerText>
+            </p>
             <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
               <span style={{fontSize:9,color:T.green,background:`${T.green}15`,padding:'2px 8px',borderRadius:20,fontWeight:700,border:`1px solid ${T.green}30`}}>
                 {strictT(tr, lang, 'fc_confidence')}: {imp.confidence}%
               </span>
-              {imp.assumption&&<span style={{fontSize:10,color:T.text2,fontStyle:'italic'}}>{strictT(tr, lang, 'impact_based_on')}: {imp.assumption}</span>}
+              {imp.assumption ? (
+                <span style={{ fontSize: 10, color: T.text2, fontStyle: 'italic' }}>
+                  {strictT(tr, lang, 'impact_based_on')}:{' '}
+                  <CmdServerText lang={lang} tr={tr} as="span">
+                    {imp.assumption}
+                  </CmdServerText>
+                </span>
+              ) : null}
             </div>
           </div>
         )
@@ -400,7 +658,9 @@ function ContextPanel({ type, payload, extra, tr, lang, onClose, onNavigate, imp
             {strictT(tr, lang, 'exec_timeframe')}
           </div>
           <div style={{fontSize:16,fontWeight:800,color:uClr[payload.urgency]||T.accent,fontFamily:'monospace'}}>
-            {payload.timeframe}
+            <CmdServerText lang={lang} tr={tr} as="span">
+              {payload.timeframe}
+            </CmdServerText>
           </div>
         </div>
       </div>
@@ -417,7 +677,7 @@ function ContextPanel({ type, payload, extra, tr, lang, onClose, onNavigate, imp
       </div>
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:14}}>
         {[
-          {lbl:strictT(tr, lang, 'exec_trend'), val:payload.mom!=null?`${payload.mom>0?'+':''}${payload.mom?.toFixed(1)}% MoM`:'—', clr:payload.mom>0?T.green:payload.mom<0?T.red:T.text2},
+          {lbl:strictT(tr, lang, 'exec_trend'), val:payload.mom!=null?`${payload.mom>0?'+':''}${payload.mom?.toFixed(1)}% ${strictT(tr, lang, 'mom_label')}`:'—', clr:payload.mom>0?T.green:payload.mom<0?T.red:T.text2},
           {lbl:strictT(tr, lang, 'yoy_label'), val:payload.yoy!=null?`${payload.yoy>0?'+':''}${payload.yoy?.toFixed(1)}%`:'—',     clr:payload.yoy>0?T.green:payload.yoy<0?T.red:T.text2},
         ].map(({lbl,val,clr}) => (
           <div key={lbl} style={{background:T.card,borderRadius:8,padding:'12px 14px',border:`1px solid ${T.border}`}}>
@@ -431,8 +691,16 @@ function ContextPanel({ type, payload, extra, tr, lang, onClose, onNavigate, imp
           {extra.alerts.slice(0,3).map((a,i) => (
             <div key={i} style={{padding:'9px 11px',marginBottom:6,borderRadius:8,
               background:`${uClr[a.severity]||T.text3}0d`,border:`1px solid ${uClr[a.severity]||T.text3}25`}}>
-              <div style={{fontSize:11,fontWeight:700,color:uClr[a.severity]||T.text2,marginBottom:2}}>{a.title}</div>
-              <div style={{fontSize:10,color:T.text2,lineHeight:1.5}}>{a.message}</div>
+              <div style={{fontSize:11,fontWeight:700,color:uClr[a.severity]||T.text2,marginBottom:2}}>
+                <CmdServerText lang={lang} tr={tr} as="span">
+                  {a.title}
+                </CmdServerText>
+              </div>
+              <div style={{fontSize:10,color:T.text2,lineHeight:1.5, ...CLAMP_FADE_MASK_SHORT}}>
+                <CmdServerText lang={lang} tr={tr} as="span">
+                  {a.message}
+                </CmdServerText>
+              </div>
             </div>
           ))}
         </Sec>
@@ -449,17 +717,10 @@ function ContextPanel({ type, payload, extra, tr, lang, onClose, onNavigate, imp
           <span style={{fontSize:26}}>{dIco[payload.domain]||'◉'}</span>
           <div style={{flex:1}}>
             <div style={{fontSize:17,fontWeight:800,color:T.text1}}>
-              {(() => {
-                const a = tr(`domain_${payload.domain}_simple`)
-                if (a && a !== `domain_${payload.domain}_simple` && !looksLikeRawI18nKey(a)) return a
-                return strictT(tr, lang, `domain_${payload.domain}`)
-              })()}
+              {strictT(tr, lang, `domain_${payload.domain}_simple`)}
             </div>
-            <div style={{fontSize:11,color:T.text2,marginTop:2}}>
-              {(() => {
-                const e = tr(`domain_${payload.domain}_exp`)
-                return e && e !== `domain_${payload.domain}_exp` && !looksLikeRawI18nKey(e) ? e : ''
-              })()}
+            <div style={{fontSize:11,color:T.text2,marginTop:2, ...CLAMP_FADE_MASK_SHORT}}>
+              {strictT(tr, lang, `domain_${payload.domain}_exp`)}
             </div>
           </div>
           <div style={{textAlign:'right'}}>
@@ -475,10 +736,15 @@ function ContextPanel({ type, payload, extra, tr, lang, onClose, onNavigate, imp
                 background:`${uClr[c.impact]||T.text3}0d`,borderWidth:'1px',borderStyle:'solid',
                 borderColor:`${uClr[c.impact]||T.text3}25`,
                 borderLeftWidth:'3px',borderLeftColor:uClr[c.impact]||T.text3}}>
-                <div style={{fontSize:11,fontWeight:700,color:T.text1,marginBottom:3}}>{c.title}</div>
-                <div style={{fontSize:10,color:T.text2,lineHeight:1.5,
-                  display:'-webkit-box',WebkitLineClamp:2,WebkitBoxOrient:'vertical',overflow:'hidden'}}>
-                  {c.description}
+                <div style={{fontSize:11,fontWeight:700,color:T.text1,marginBottom:3}}>
+                  <CmdServerText lang={lang} tr={tr} as="span">
+                    {c.title}
+                  </CmdServerText>
+                </div>
+                <div style={{fontSize:10,color:T.text2,lineHeight:1.5, ...CLAMP_FADE_MASK_SHORT}}>
+                  <CmdServerText lang={lang} tr={tr} as="span">
+                    {c.description}
+                  </CmdServerText>
                 </div>
               </div>
             ))}
@@ -490,8 +756,16 @@ function ContextPanel({ type, payload, extra, tr, lang, onClose, onNavigate, imp
             {dDecs.slice(0,2).map((d,i) => (
               <div key={i} style={{padding:'9px 11px',marginBottom:6,borderRadius:8,
                 background:`${dc}08`,border:`1px solid ${dc}20`}}>
-                <div style={{fontSize:11,fontWeight:700,color:T.text1,marginBottom:2}}>{d.title}</div>
-                <div style={{fontSize:10,color:T.text2,fontFamily:'monospace'}}>{d.timeframe}</div>
+                <div style={{fontSize:11,fontWeight:700,color:T.text1,marginBottom:2}}>
+                  <CmdServerText lang={lang} tr={tr} as="span">
+                    {d.title}
+                  </CmdServerText>
+                </div>
+                <div style={{fontSize:10,color:T.text2,fontFamily:'monospace'}}>
+                  <CmdServerText lang={lang} tr={tr} as="span">
+                    {d.timeframe}
+                  </CmdServerText>
+                </div>
               </div>
             ))}
           </Sec>
@@ -524,13 +798,25 @@ function ContextPanel({ type, payload, extra, tr, lang, onClose, onNavigate, imp
 
   const Alert = () => (
     <>
-      <div style={{fontSize:17,fontWeight:800,color:T.text1,lineHeight:1.3,marginBottom:10}}>{payload.title}</div>
+      <div style={{fontSize:17,fontWeight:800,color:T.text1,lineHeight:1.3,marginBottom:10, ...CLAMP_FADE_MASK_SHORT}}>
+        <CmdServerText lang={lang} tr={tr} as="span">
+          {payload.title}
+        </CmdServerText>
+      </div>
       <div style={{marginBottom:20}}><Pill label={strictT(tr, lang, `urgency_${payload.severity}`)} color={uClr[payload.severity]||T.text3}/></div>
       <Sec label={strictT(tr, lang, 'exec_why')} color={uClr[payload.severity]||T.amber}>
-        <p style={{fontSize:12,color:T.text2,lineHeight:1.75,margin:0}}>{payload.message}</p>
+        <p style={{fontSize:12,color:T.text2,lineHeight:1.75,margin:0, ...CLAMP_FADE_MASK_SHORT}}>
+          <CmdServerText lang={lang} tr={tr} as="span">
+            {payload.message}
+          </CmdServerText>
+        </p>
       </Sec>
       <Sec label={strictT(tr, lang, 'exec_actions')} color={T.accent}>
-        <p style={{fontSize:12,color:T.text2,lineHeight:1.75,margin:0}}>{payload.action}</p>
+        <p style={{fontSize:12,color:T.text2,lineHeight:1.75,margin:0, ...CLAMP_FADE_MASK_SHORT}}>
+          <CmdServerText lang={lang} tr={tr} as="span">
+            {payload.action}
+          </CmdServerText>
+        </p>
       </Sec>
     </>
   )
@@ -545,26 +831,42 @@ function ContextPanel({ type, payload, extra, tr, lang, onClose, onNavigate, imp
     const sav = efi.estimated_monthly_savings
     return (
       <>
-        <div style={{ fontSize: 17, fontWeight: 800, color: T.text1, marginBottom: 10 }}>{d.title}</div>
+        <div style={{ fontSize: 17, fontWeight: 800, color: T.text1, marginBottom: 10, ...CLAMP_FADE_MASK_SHORT }}>
+          <CmdServerText lang={lang} tr={tr} as="span">
+            {d.title}
+          </CmdServerText>
+        </div>
         <div style={{ marginBottom: 16 }}>
           <Pill label={strictT(tr, lang, `urgency_${pri}`)} color={pc} />
         </div>
         {d.rationale ? (
           <Sec label={strictT(tr, lang, 'exec_why')} color={T.red}>
-            <p style={{ margin: 0, fontSize: 12, color: T.text2, lineHeight: 1.75 }}>{d.rationale}</p>
+            <p style={{ margin: 0, fontSize: 12, color: T.text2, lineHeight: 1.75, ...CLAMP_FADE_MASK_SHORT }}>
+              <CmdServerText lang={lang} tr={tr} as="span">
+                {d.rationale}
+              </CmdServerText>
+            </p>
           </Sec>
         ) : null}
         {steps?.length ? (
           <Sec label={strictT(tr, lang, 'exec_actions')} color={T.accent}>
             <ol style={{ margin: 0, paddingLeft: 18, color: T.text2, fontSize: 12, lineHeight: 1.7 }}>
               {steps.map((s, i) => (
-                <li key={i} style={{ marginBottom: 8 }}>{String(s)}</li>
+                <li key={i} style={{ marginBottom: 8 }}>
+                  <CmdServerText lang={lang} tr={tr} as="span">
+                    {String(s)}
+                  </CmdServerText>
+                </li>
               ))}
             </ol>
           </Sec>
         ) : typeof act === 'string' && act.trim() ? (
           <Sec label={strictT(tr, lang, 'exec_actions')} color={T.accent}>
-            <p style={{ margin: 0, fontSize: 12, color: T.text2, lineHeight: 1.75 }}>{act}</p>
+            <p style={{ margin: 0, fontSize: 12, color: T.text2, lineHeight: 1.75, ...CLAMP_FADE_MASK_SHORT }}>
+              <CmdServerText lang={lang} tr={tr} as="span">
+                {act}
+              </CmdServerText>
+            </p>
           </Sec>
         ) : null}
         {sav != null && Number.isFinite(Number(sav)) && Number(sav) > 0 ? (
@@ -636,6 +938,7 @@ function ExecutiveKpiRow({
   ctxLabel,
   hideTitle = false,
   layout = 'dashboard',
+  supportingOnly = false,
 }) {
   const na = strictT(tr, lang, 'cmd_na_short')
   const dispN = (v) => (v == null || v === '' || isNaN(Number(v)) ? na : formatCompact(v))
@@ -661,16 +964,15 @@ function ExecutiveKpiRow({
   const hero = ordered[0]
   const secondary = ordered.slice(1)
 
-  const renderCard = (c, { isHero }) => {
+  const renderCard = (c, { isHero, compact = false }) => {
     const mc = c.mom==null?T.text3:c.mom>0?T.green:c.mom<0?T.red:T.text2
     const explain = strictT(tr, lang, `kpi_explain_${c.key}`)
     const base = strictT(tr, lang, `kpi_label_${c.key}`)
     const ctx = ctxLabel()
-    const tplRaw = tr('kpi_with_context')
+    const tplRaw = strictT(tr, lang, 'kpi_with_context')
+    const miss = localizedMissingPlaceholder(lang)
     const labelWithCtx =
-      ctx && tplRaw && tplRaw !== 'kpi_with_context' && !looksLikeRawI18nKey(tplRaw)
-        ? tplRaw.replace(/\{label\}/g, base).replace(/\{context\}/g, ctx)
-        : base
+      ctx && tplRaw !== miss ? tplRaw.replace(/\{label\}/g, base).replace(/\{context\}/g, ctx) : base
     return (
       <div key={c.key}
         onClick={()=>onSelect('kpi',{type:c.key,mom:c.mom,yoy:c.yoy},
@@ -679,15 +981,15 @@ function ExecutiveKpiRow({
         style={{
           background: isHero ? `linear-gradient(135deg,${T.card},${c.color}14)` : T.card,
           borderWidth:'1px',borderStyle:'solid',borderColor:isHero?`${c.color}35`:T.border,
-          borderTopWidth:isHero?3:2,borderTopColor:c.color,borderRadius:12,
-          padding:isHero?'14px 14px':'10px 12px',
+          borderTopWidth:isHero?3:2,borderTopColor:c.color,borderRadius:compact?10:12,
+          padding:isHero?'14px 14px':compact?'7px 9px':'10px 12px',
           cursor:'pointer',
           transition:'transform 0.2s cubic-bezier(0.4,0,0.2,1), box-shadow 0.2s ease, border-color 0.2s ease',
         }}
         {...lift(c.color)}>
-        <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:isHero?6:5}}>
-          <span style={{fontSize:isHero?16:11}}>{c.icon}</span>
-          <span style={{fontSize:isHero?10:9,color:T.text2,fontWeight:800,textTransform:'uppercase',
+        <div style={{display:'flex',alignItems:'center',gap:compact?4:6,marginBottom:isHero?6:compact?4:5}}>
+          <span style={{fontSize:isHero?16:compact?10:11}}>{c.icon}</span>
+          <span style={{fontSize:isHero?10:compact?8:9,color:T.text2,fontWeight:800,textTransform:'uppercase',
             letterSpacing:'.06em'}}>
             {labelWithCtx}
           </span>
@@ -697,12 +999,12 @@ function ExecutiveKpiRow({
             </span>
           )}
         </div>
-        <div style={{fontFamily:'var(--font-display)',fontSize:isHero?26:18,fontWeight:900,color:'#ffffff',
+        <div style={{fontFamily:'var(--font-display)',fontSize:isHero?26:compact?15:18,fontWeight:900,color:'#ffffff',
           marginBottom:2,direction:'ltr',letterSpacing:'-0.025em',lineHeight:1}}>
           {c.value}
         </div>
         {c.full && (
-          <div style={{fontFamily:'var(--font-mono)',fontSize:8,color:T.text3,marginBottom:2,letterSpacing:'.02em',direction:'ltr'}}>
+          <div style={{fontFamily:'var(--font-mono)',fontSize:compact?7:8,color:T.text3,marginBottom:2,letterSpacing:'.02em',direction:'ltr'}}>
             {c.full}
           </div>
         )}
@@ -710,13 +1012,13 @@ function ExecutiveKpiRow({
           {c.mom!=null && (
             <span style={{fontFamily:'var(--font-mono)',fontSize:10,fontWeight:700,color:mc,
               padding:'1px 6px',borderRadius:8,background:`${mc}14`}}>
-              {c.mom>0?'+':''}{c.mom?.toFixed(1)}% MoM
+              {c.mom>0?'+':''}{c.mom?.toFixed(1)}% {strictT(tr, lang, 'mom_label')}
             </span>
           )}
           {c.yoy!=null && (
             <span style={{fontFamily:'monospace',fontSize:10,
               color:c.yoy>0?T.green:c.yoy<0?T.red:T.text2}}>
-              {c.yoy>0?'+':''}{c.yoy?.toFixed(1)}% YoY
+              {c.yoy>0?'+':''}{c.yoy?.toFixed(1)}% {strictT(tr, lang, 'yoy_label')}
             </span>
           )}
         </div>
@@ -724,7 +1026,7 @@ function ExecutiveKpiRow({
           <div style={{marginTop:6,fontSize:9,color:'#f59e0b',
             padding:'2px 7px',borderRadius:5,background:'rgba(245,158,11,0.1)',
             border:'1px solid rgba(245,158,11,0.25)',display:'inline-block'}}>
-            ⚠ {tr('estimated')}
+            ⚠ {strictT(tr, lang, 'estimated')}
           </div>
         )}
         {c.sub && <div style={{marginTop:4,fontSize:10,color:T.text3}}>{c.sub}</div>}
@@ -741,10 +1043,11 @@ function ExecutiveKpiRow({
         style={{
           display: 'grid',
           gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
-          gap: 8,
+          gap: supportingOnly ? 6 : 8,
+          opacity: supportingOnly ? 0.93 : 1,
         }}
       >
-        {cmdCards.map((c) => renderCard(c, { isHero: false }))}
+        {cmdCards.map((c) => renderCard(c, { isHero: false, compact: supportingOnly }))}
       </div>
     )
   }
@@ -787,13 +1090,7 @@ function DomainGrid({ intelligence, tr, lang, onSelect, rootCauses, decisions, a
     const penalty = Math.min(30, hi*12 + med*5)
     return Math.max(0, Math.min(100, Math.round(lev - penalty)))
   }
-  const pickLbl = (a, b) => {
-    const x = tr(a)
-    if (x && x !== a && !looksLikeRawI18nKey(x)) return x
-    const y = tr(b)
-    if (y && y !== b && !looksLikeRawI18nKey(y)) return y
-    return strictT(tr, lang, a)
-  }
+  const pickLbl = (_a, b) => strictT(tr, lang, b)
   const blocks = [
     { id:'profitability', label: pickLbl('profitability', 'domain_profitability_simple'), color: dClr.profitability, icon:'📈', score: score('profitability'), ratiosKey:'profitability', navigateDomain:'profitability' },
     { id:'liquidity',     label: pickLbl('liquidity', 'domain_liquidity_simple'),     color: dClr.liquidity,     icon:'💧', score: score('liquidity'),     ratiosKey:'liquidity',     navigateDomain:'liquidity' },
@@ -819,10 +1116,11 @@ function DomainGrid({ intelligence, tr, lang, onSelect, rootCauses, decisions, a
           return (
             <div key={b.id}
               onClick={()=>onSelect('domain',{domain:b.navigateDomain,score:s,status:st,ratios:ratioMap(b.ratiosKey)},{causes:rootCauses,decisions})}
-              title={b.id==='risk' ? strictT(tr, lang, 'alerts_title') : (() => {
-                const e = tr(`domain_${b.navigateDomain}_exp`)
-                return e && e !== `domain_${b.navigateDomain}_exp` && !looksLikeRawI18nKey(e) ? e : ''
-              })()}
+              title={
+                b.id === 'risk'
+                  ? strictT(tr, lang, 'alerts_title')
+                  : strictT(tr, lang, `domain_${b.navigateDomain}_exp`)
+              }
               style={{
                 gridColumn: idx===0 ? 'span 4' : 'span 4',
                 background: `linear-gradient(135deg,${T.card},${dc}0a)`,
@@ -835,10 +1133,10 @@ function DomainGrid({ intelligence, tr, lang, onSelect, rootCauses, decisions, a
                 <div style={{display:'flex',alignItems:'center',gap:6,minWidth:0}}>
                   <span style={{fontSize:secondary?15:18}}>{b.icon}</span>
                   <div style={{minWidth:0}}>
-                    <div style={{fontSize:secondary?10:11,fontWeight:900,color:dc,textTransform:'uppercase',letterSpacing:'.08em',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>
+                    <div style={{fontSize:secondary?10:11,fontWeight:900,color:dc,textTransform:'uppercase',letterSpacing:'.08em',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'clip'}}>
                       {b.label}
                     </div>
-                    <div style={{fontSize:secondary?9:10,color:T.text2,marginTop:1,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>
+                    <div style={{fontSize:secondary?9:10,color:T.text2,marginTop:1,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'clip'}}>
                       {sig || strictT(tr, lang, `status_${st}_simple`)}
                     </div>
                   </div>
@@ -908,10 +1206,13 @@ function AlertsBar({ alerts, tr, lang, onSelect, secondary = false }) {
             style={{padding:'3px 10px',borderRadius:20,cursor:'pointer',fontSize:10,fontWeight:600,
               border:`1px solid ${uClr[a.severity]||T.text3}35`,
               background:`${uClr[a.severity]||T.text3}12`,
-              color:uClr[a.severity]||T.text3,transition:'all .15s ease'}}
+              color:uClr[a.severity]||T.text3,transition:'all .15s ease',
+              maxWidth: 'min(220px, 100%)', overflow: 'hidden', textOverflow: 'clip'}}
             onMouseEnter={e=>e.currentTarget.style.background=`${uClr[a.severity]||T.text3}25`}
             onMouseLeave={e=>e.currentTarget.style.background=`${uClr[a.severity]||T.text3}12`}>
-            {a.title}
+            <CmdServerText lang={lang} tr={tr} as="span" style={{ display: 'block', overflow: 'hidden', textOverflow: 'clip', whiteSpace: 'nowrap' }}>
+              {a.title}
+            </CmdServerText>
           </button>
         ))}
       </div>
@@ -926,14 +1227,15 @@ function ForecastNow({ fcData, tr, lang, secondary = false }) {
   const risk = fcData?.summary?.risk_level
   if (!bRev?.point && !bNp?.point) return null
   const riskClr = risk==='high'?T.red:risk==='medium'?T.amber:risk?T.green:T.text3
+  const rk = risk != null ? String(risk).toLowerCase() : ''
   const riskWord =
-    risk === 'high'
+    rk === 'high'
       ? strictT(tr, lang, 'urgency_high')
-      : risk === 'medium'
+      : rk === 'medium'
         ? strictT(tr, lang, 'urgency_medium')
-        : risk === 'low'
+        : rk === 'low'
           ? strictT(tr, lang, 'urgency_low')
-          : risk
+          : null
   return (
     <div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:10,padding:secondary?'8px 10px':'10px 12px',
       opacity:secondary?0.88:1}}>
@@ -941,7 +1243,35 @@ function ForecastNow({ fcData, tr, lang, secondary = false }) {
         <div style={{fontSize:9,fontWeight:800,color:T.text3,textTransform:'uppercase',letterSpacing:'.08em'}}>
           {strictT(tr, lang, 'forecast_next_period')}
         </div>
-        {risk && <Pill label={`${strictT(tr, lang, 'forecast_risk')}: ${riskWord}`} color={riskClr}/>}
+        {risk ? (
+          riskWord ? (
+            <Pill label={`${strictT(tr, lang, 'forecast_risk')}: ${riskWord}`} color={riskClr} />
+          ) : (
+            <span
+              style={{
+                fontSize: 9,
+                fontWeight: 800,
+                padding: '2px 9px',
+                borderRadius: 20,
+                background: `${riskClr}18`,
+                color: riskClr,
+                border: `1px solid ${riskClr}30`,
+                textTransform: 'uppercase',
+                letterSpacing: '.05em',
+                flexShrink: 0,
+                whiteSpace: 'nowrap',
+                maxWidth: '46%',
+                overflow: 'hidden',
+                textOverflow: 'clip',
+              }}
+            >
+              {strictT(tr, lang, 'forecast_risk')}:{' '}
+              <CmdServerText lang={lang} tr={tr} as="span" style={{ fontWeight: 800 }}>
+                {String(risk)}
+              </CmdServerText>
+            </span>
+          )
+        ) : null}
       </div>
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:secondary?8:10}}>
         <div style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:8,padding:secondary?'6px 8px':'8px 10px'}}>
@@ -994,8 +1324,9 @@ function scrollToCmdSection(id) {
   if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 
-function CommandCenterRail({ tr, lang }) {
+function CommandCenterRail({ tr, lang, showPrimaryRow = false }) {
   const sections = [
+    ...(showPrimaryRow ? [{ id: 'cmd-row-0', n: 0, tipKey: 'cmd_rail_tip_0' }] : []),
     { id: 'cmd-row-1', n: 1, tipKey: 'cmd_rail_tip_1' },
     { id: 'cmd-row-2', n: 2, tipKey: 'cmd_rail_tip_2' },
     { id: 'cmd-row-3', n: 3, tipKey: 'cmd_rail_tip_3' },
@@ -1157,7 +1488,14 @@ export default function CommandCenter() {
     getActiveLabel: psActiveLabel, isIncompleteCustom: psIncomplete, window: win, setWindow: setWin } = usePeriodScope()
   const navigate = useNavigate()
 
-  const ctxLabel = () => kpiContextLabel({ window: win, ps, latestPeriod: main?.intelligence?.latest_period || '', lang, tr })
+  const ctxLabel = () =>
+    kpiContextLabel({
+      window: win,
+      ps,
+      latestPeriod: main?.intelligence?.latest_period || '',
+      lang,
+      tr: (k) => strictT(tr, lang, k),
+    })
 
   const [intel,    setIntel]    = useState(null)
   const [decs,     setDecs]     = useState(null)
@@ -1197,12 +1535,12 @@ export default function CommandCenter() {
         if (r.status === 422) {
           setMain(null)
           setNarrative(null)
-          setNoDataMsg(tr('err_no_financial_data'))
+          setNoDataMsg(strictT(tr, lang, 'err_no_financial_data'))
         }
         return
       }
       const j = await r.json(); const d = j.data||{}
-      setNarrative(buildExecutiveNarrative(d, { lang }))
+      setNarrative(buildExecutiveNarrative(d, { lang, t: (k) => strictT(tr, lang, k) }))
       psSetResolved(j.meta?.scope || null)
       setIntel(d.intelligence||null)
       setDecs(d.decisions||[])
@@ -1268,6 +1606,7 @@ export default function CommandCenter() {
   const period = main?.intelligence?.latest_period || main?.periods?.slice(-1)[0]
   const dupIneffBranch = keySignalsShowsInefficientBranch(main?.comparative_intelligence, narrative, tr, lang)
   const expenseIntel = main?.expense_intelligence
+  const primaryDecision = pickPrimaryDecision(decs, impacts)
 
   return (
     <div style={{ padding: '22px 24px', minHeight: 'calc(100vh - 62px)', background: T.bg }}>
@@ -1298,7 +1637,7 @@ export default function CommandCenter() {
             alignSelf: 'flex-start',
           }}
         >
-          <CommandCenterRail tr={tr} lang={lang} />
+          <CommandCenterRail tr={tr} lang={lang} showPrimaryRow={!!primaryDecision} />
         </aside>
 
         <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -1345,8 +1684,8 @@ export default function CommandCenter() {
                 }}
               >
                 {[
-                  { v: false, l: tr('company_uploads') },
-                  { v: true, l: tr('branch_consolidation') },
+                  { v: false, l: strictT(tr, lang, 'company_uploads') },
+                  { v: true, l: strictT(tr, lang, 'branch_consolidation') },
                 ].map((opt) => (
                   <button
                     key={String(opt.v)}
@@ -1370,6 +1709,7 @@ export default function CommandCenter() {
               </div>
               <UniversalScopeSelector
                 tr={tr}
+                lang={lang}
                 ps={ps}
                 psUpdate={psUpdate}
                 onApply={load}
@@ -1394,6 +1734,20 @@ export default function CommandCenter() {
           <DataQualityBanner validation={main?.pipeline_validation} lang={lang} tr={tr} />
 
           <CommandCenterDashboardGrid
+            supportingDemoted={!!primaryDecision}
+            primaryHero={
+              primaryDecision ? (
+                <PrimaryDecisionHero
+                  decision={primaryDecision}
+                  impacts={impacts}
+                  tr={tr}
+                  lang={lang}
+                  causes={causes}
+                  allDecisions={decs}
+                  onOpen={open}
+                />
+              ) : null
+            }
             row1Narrative={
               <ExecutiveNarrativeStrip
                 narrative={narrative}
@@ -1434,6 +1788,7 @@ export default function CommandCenter() {
                   ctxLabel={ctxLabel}
                   hideTitle
                   layout="command"
+                  supportingOnly={!!primaryDecision}
                 />
               ) : null
             }
@@ -1449,7 +1804,7 @@ export default function CommandCenter() {
                 intel={intel}
                 expenseIntel={expenseIntel}
                 onOpenAnalysis={(tab) => drillAnalysis(tab)}
-                visualTier={2}
+                visualTier={primaryDecision ? 3 : 2}
               />
             }
             row3Branch={
@@ -1468,7 +1823,7 @@ export default function CommandCenter() {
                     },
                   })
                 }
-                visualTier={2}
+                visualTier={primaryDecision ? 3 : 2}
               />
             }
             row4Expense={
@@ -1479,7 +1834,7 @@ export default function CommandCenter() {
                 period={expenseIntel?.period || period}
                 embedded
                 onDrillExpense={() => drillAnalysis('profitability')}
-                visualTier={2}
+                visualTier={primaryDecision ? 3 : 2}
               />
             }
             row4Decisions={
@@ -1489,7 +1844,7 @@ export default function CommandCenter() {
                 tr={tr}
                 lang={lang}
                 onOpenDecision={(d) => open('expense_v2', d, {})}
-                visualTier={2}
+                visualTier={primaryDecision ? 3 : 2}
               />
             }
             secondaryTitle={

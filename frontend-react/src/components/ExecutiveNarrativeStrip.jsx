@@ -3,6 +3,8 @@
  */
 import { buildExecutiveNarrative } from '../utils/buildExecutiveNarrative.js'
 import { strictT as st } from '../utils/strictI18n.js'
+import { CLAMP_FADE_MASK_SHORT } from '../utils/serverTextUi.js'
+import CmdServerText from './CmdServerText.jsx'
 
 const P = {
   surface: 'linear-gradient(165deg, rgba(17,24,39,1) 0%, rgba(15,23,42,1) 100%)',
@@ -60,7 +62,20 @@ export default function ExecutiveNarrativeStrip({
   )
 
   const Line = ({ children, color = P.text2 }) => (
-    <p style={{ margin: 0, fontSize: lineFs, color, lineHeight: 1.45, fontWeight: 480 }}>{children}</p>
+    <p
+      style={{
+        margin: 0,
+        fontSize: lineFs,
+        color,
+        lineHeight: 1.45,
+        fontWeight: 480,
+        ...CLAMP_FADE_MASK_SHORT,
+      }}
+    >
+      <CmdServerText lang={lang} tr={tr} as="span" style={{ color: 'inherit' }}>
+        {children}
+      </CmdServerText>
+    </p>
   )
 
   const whatLines = whatChanged?.lines?.filter(Boolean) || []

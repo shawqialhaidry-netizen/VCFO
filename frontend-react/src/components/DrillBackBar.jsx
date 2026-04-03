@@ -3,11 +3,12 @@
  */
 import { useNavigate } from 'react-router-dom'
 import { useLang } from '../context/LangContext.jsx'
+import { strictT } from '../utils/strictI18n.js'
 
 export default function DrillBackBar({ detailLabel }) {
   const navigate = useNavigate()
-  const { tr } = useLang()
-  const back = tr('nav_back_command_center') || '← Command Center'
+  const { tr, lang } = useLang()
+  const back = strictT(tr, lang, 'nav_back_command_center')
   return (
     <div
       style={{

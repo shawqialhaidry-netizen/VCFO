@@ -4,6 +4,8 @@
 import { formatCompact, formatMultiple } from '../utils/numberFormat.js'
 import { factOverlapsWhy } from '../utils/buildExecutiveNarrative.js'
 import { strictT as st } from '../utils/strictI18n.js'
+import { CLAMP_FADE_MASK_SHORT } from '../utils/serverTextUi.js'
+import CmdServerText from './CmdServerText.jsx'
 
 const P = {
   surface: 'linear-gradient(165deg, rgba(17,24,39,0.98) 0%, rgba(15,23,42,0.99) 100%)',
@@ -93,7 +95,7 @@ function pickSyntheticSignalCard(main, intel, tr, lang) {
     let v = formatCompact(cf.operating_cashflow)
     if (cf.operating_cashflow_mom != null && Number.isFinite(Number(cf.operating_cashflow_mom))) {
       const m = Number(cf.operating_cashflow_mom)
-      v += ` (${m >= 0 ? '+' : ''}${m.toFixed(1)}% MoM)`
+      v += ` (${m >= 0 ? '+' : ''}${m.toFixed(1)}% ${st(tr, lang, 'mom_label')})`
     }
     return {
       key: 'syn_ocf',
@@ -195,7 +197,7 @@ function expenseIntelSignalCards(expenseIntel, comparativeIntel, tr, lang) {
     const pc = g.pct_change
     const val =
       pc != null && Number.isFinite(Number(pc))
-        ? `${g.name} · ${Number(pc) >= 0 ? '+' : ''}${Number(pc).toFixed(1)}% MoM`
+        ? `${g.name} · ${Number(pc) >= 0 ? '+' : ''}${Number(pc).toFixed(1)}% ${st(tr, lang, 'mom_label')}`
         : g.absolute_change != null
           ? `${g.name} · ${formatCompact(g.absolute_change)}`
           : String(g.name)
@@ -367,7 +369,11 @@ export function KeySignalsSection({
           >
             {c.label}
           </div>
-          <div style={{ fontSize: 12, fontWeight: 650, color: P.text1, lineHeight: 1.35 }}>{c.value}</div>
+          <div style={{ fontSize: 12, fontWeight: 650, color: P.text1, lineHeight: 1.35, ...CLAMP_FADE_MASK_SHORT }}>
+            <CmdServerText lang={lang} tr={tr} as="span" style={{ color: 'inherit' }}>
+              {c.value}
+            </CmdServerText>
+          </div>
         </div>
       ))}
     </div>,
@@ -522,7 +528,7 @@ export function BranchIntelligenceSection({
                   whiteSpace: 'nowrap',
                   maxWidth: '38%',
                   overflow: 'hidden',
-                  textOverflow: 'ellipsis',
+                  textOverflow: 'clip',
                 }}
               >
                 {badge}
@@ -572,7 +578,11 @@ export function BranchIntelligenceSection({
               >
                 {r.label}
               </div>
-              <div style={{ fontSize: 12, color: P.text1, marginTop: 3, lineHeight: 1.35 }}>{r.text}</div>
+              <div style={{ fontSize: 12, color: P.text1, marginTop: 3, lineHeight: 1.35, ...CLAMP_FADE_MASK_SHORT }}>
+              <CmdServerText lang={lang} tr={tr} as="span" style={{ color: 'inherit' }}>
+                {r.text}
+              </CmdServerText>
+            </div>
             </div>
           ))
         ) : !rankingBlock ? (
@@ -727,9 +737,12 @@ export function DecisionsSection({ expenseDecisionsV2, expenseIntel, tr, lang, o
                 color: P.text1,
                 lineHeight: 1.3,
                 marginTop: first ? 6 : 5,
+                ...CLAMP_FADE_MASK_SHORT,
               }}
             >
-              {d.title}
+              <CmdServerText lang={lang} tr={tr} as="span" style={{ color: 'inherit' }}>
+                {d.title}
+              </CmdServerText>
             </div>
             <div
               style={{
@@ -752,10 +765,7 @@ export function DecisionsSection({ expenseDecisionsV2, expenseIntel, tr, lang, o
                     color: P.text2,
                     marginTop: 2,
                     lineHeight: 1.3,
-                    display: '-webkit-box',
-                    WebkitLineClamp: 2,
-                    WebkitBoxOrient: 'vertical',
-                    overflow: 'hidden',
+                    ...CLAMP_FADE_MASK_SHORT,
                   }}
                 >
                   {impactOneLine || '—'}
@@ -781,13 +791,15 @@ export function DecisionsSection({ expenseDecisionsV2, expenseIntel, tr, lang, o
                   color: P.text2,
                   marginTop: first ? 8 : 6,
                   lineHeight: 1.4,
-                  display: '-webkit-box',
-                  WebkitLineClamp: first ? 4 : 3,
-                  WebkitBoxOrient: 'vertical',
+                  maxHeight: first ? '5.6em' : '4.2em',
                   overflow: 'hidden',
+                  WebkitMaskImage: 'linear-gradient(to bottom, #000 75%, transparent 100%)',
+                  maskImage: 'linear-gradient(to bottom, #000 75%, transparent 100%)',
                 }}
               >
-                {d.rationale}
+                <CmdServerText lang={lang} tr={tr} as="span" style={{ color: 'inherit' }}>
+                  {d.rationale}
+                </CmdServerText>
               </div>
             ) : null}
           </div>

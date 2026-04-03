@@ -38,12 +38,12 @@ export function kpiContextLabel({ window = 'ALL', ps = {}, latestPeriod = '', la
 
     if (bt === 'ytd') {
       const year = ps.year || (latestPeriod ? latestPeriod.slice(0, 4) : '')
-      return fillTpl(t('context_ytd'), { year })
+      return t('context_ytd', { year })
     }
 
     if (bt === 'year') {
       const year = ps.year || (latestPeriod ? latestPeriod.slice(0, 4) : '')
-      return fillTpl(t('context_fy'), { year })
+      return t('context_fy', { year })
     }
 
     if (bt === 'custom') {
@@ -60,7 +60,7 @@ export function kpiContextLabel({ window = 'ALL', ps = {}, latestPeriod = '', la
 
     if (w === 'YTD') {
       const year = latestPeriod ? latestPeriod.slice(0, 4) : ''
-      return fillTpl(t('context_ytd'), { year })
+      return t('context_ytd', { year })
     }
 
     if (w === 'ALL') {
@@ -74,7 +74,6 @@ export function kpiContextLabel({ window = 'ALL', ps = {}, latestPeriod = '', la
 
 export function kpiLabel(label, ctx, tr) {
   if (!ctx) return label
-  const t   = tr || ((k, v) => v ? fillTpl(k === 'kpi_with_context' ? '{label} ({context})' : k, v) : k)
-  const tpl = t('kpi_with_context') || '{label} ({context})'
-  return fillTpl(tpl, { label, context: ctx })
+  if (!tr) return `${label} (${ctx})`
+  return tr('kpi_with_context', { label, context: ctx })
 }

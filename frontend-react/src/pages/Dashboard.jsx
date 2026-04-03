@@ -12,6 +12,8 @@
  */
 import { useEffect, useState, useRef, useCallback } from 'react'
 import { useLang } from '../context/LangContext.jsx'
+import { strictT, strictTParams } from '../utils/strictI18n.js'
+import CmdServerText from '../components/CmdServerText.jsx'
 import { kpiContextLabel, kpiLabel } from '../utils/kpiContext.js'
 import { useCompany } from '../context/CompanyContext.jsx'
 import PeriodSelector from '../components/PeriodSelector.jsx'
@@ -133,9 +135,7 @@ function trDynamic(tr, text, maxLen) {
   const key = normalizeDecisionKey(text)
   const resolved = key ? tr(key) : null
   const result = (resolved && resolved !== key) ? resolved : text
-  return maxLen && result.length > maxLen
-    ? result.slice(0, maxLen - 1) + '…'
-    : result
+  return maxLen && result.length > maxLen ? result.slice(0, maxLen) : result
 }
 // ══════════════════════════════════════════════════════════════════════════════
 const EN = 'en-US'
@@ -605,43 +605,43 @@ function Legend({color,label}) {
 
 // ── Phase 6.2: KPI cause derivation ─────────────────────────────────────────
 // Reads ONLY: d.decisions[].reason, d.cashflow.flags, d.root_causes[]
-function kpiCause(type, data, lang) {
+function kpiCause(type, data, tr) {
   const d = data?.data || {}
-  const ar = lang === 'ar'
   const decs   = d.decisions   || []
   const causes = d.root_causes || []
   const cf     = d.cashflow    || {}
   const ratios = d.intelligence?.ratios || {}
-  const decReason = domain => { const d=decs.find(x=>x.domain===domain); return d?.reason?d.reason.split('. ')[0]:null }
+  const decReason = domain => { const x=decs.find(v=>v.domain===domain); return x?.reason?(x.reason.split('. ')[0]||x.reason):null }
   const rcTitle   = domain => { const c=causes.find(x=>x.domain===domain||x.domain==='cross_domain'); return c?.title||null }
+  const clip = s => (s && s.length > 60 ? s.slice(0, 57) : s)
   switch(type) {
     case 'revenue': {
-      const rc=rcTitle('growth'); if(rc) return rc
-      const r=decReason('growth'); return r?(r.length>60?r.slice(0,57)+'…':r):null
+      const rc = rcTitle('growth'); if (rc) return rc
+      return clip(decReason('growth'))
     }
     case 'expenses': {
-      const rc=rcTitle('efficiency'); if(rc) return rc
-      const r=decReason('efficiency'); return r?(r.length>60?r.slice(0,57)+'…':r):null
+      const rc = rcTitle('efficiency'); if (rc) return rc
+      return clip(decReason('efficiency'))
     }
     case 'net_profit': {
-      const rc=rcTitle('profitability'); if(rc) return rc
-      const nm=ratios?.profitability?.net_margin_pct
-      if(nm?.value!=null){
-        const s=nm.status==='good'?(ar?'هامش مرتفع':'Above benchmark'):nm.status==='warning'?(ar?'أقل من المستهدف':'Below target'):nm.status==='risk'?(ar?'منطقة خطر':'At risk level'):null
-        return s?`${ar?'الهامش':'Margin'} ${nm.value.toFixed(1)}% — ${s}`:null
-      }
-      return null
+      const rc = rcTitle('profitability'); if (rc) return rc
+      const nm = ratios?.profitability?.net_margin_pct
+      if (nm?.value == null) return null
+      const sk = nm.status === 'good' ? 'stmt_kpi_net_margin_cause_good'
+        : nm.status === 'warning' ? 'stmt_kpi_net_margin_cause_warning'
+          : 'stmt_kpi_net_margin_cause_risk'
+      return tr(sk, { value: nm.value.toFixed(1) })
     }
     case 'cashflow': {
-      const rc=rcTitle('cashflow'); if(rc) return rc
-      const flags=cf?.flags
-      if(hasFlag(flags,'single_period')) return ar?'فترة واحدة — تقدير غير مباشر':'Single period — indirect estimate'
-      const rel=cf?.reliability_reason; return rel?(rel.length>60?rel.slice(0,57)+'…':rel):null
+      const rc = rcTitle('cashflow'); if (rc) return rc
+      const flags = cf?.flags
+      if (hasFlag(flags, 'single_period')) return tr('dash_cf_single_period_indirect')
+      return clip(cf?.reliability_reason)
     }
     case 'net_margin': {
-      const rc=rcTitle('profitability'); if(rc) return rc
-      const gm=ratios?.profitability?.gross_margin_pct
-      return gm?.value!=null?`${ar?'هامش إجمالي':'Gross margin'} ${gm.value.toFixed(1)}%`:null
+      const rc = rcTitle('profitability'); if (rc) return rc
+      const gm = ratios?.profitability?.gross_margin_pct
+      return gm?.value != null ? tr('dash_gross_margin_line', { value: gm.value.toFixed(1) }) : null
     }
     default: return null
   }
@@ -650,21 +650,18 @@ function kpiCause(type, data, lang) {
 // ── Phase 6.4: forecast line helper ─────────────────────────────────────────
 // Reads ONLY: fcData.scenarios.base.[metric][0].point / confidence
 // Returns display string or null — zero frontend calculations
-function kpiForecast(type, fcData, lang, fmtFn) {
+function kpiForecast(type, fcData, tr, fmtFn) {
   if (!fcData?.available) return null
-  const ar   = lang === 'ar'
   const base = fcData?.scenarios?.base || {}
   const series = base[type] || []
   const next = series[0]
   if (!next?.point) return null
   const val  = fmtFn ? fmtFn(next.point) : next.point.toFixed(0)
-  const conf = next.confidence != null ? `${next.confidence}%` : null
   const dir  = next.mom_applied != null
-    ? next.mom_applied > 0 ? (ar ? '↑' : '↑') : next.mom_applied < 0 ? (ar ? '↓' : '↓') : '→'
+    ? next.mom_applied > 0 ? '↑' : next.mom_applied < 0 ? '↓' : '→'
     : ''
-  return conf
-    ? `${dir} ${val} (${ar?'ثقة':'conf.'} ${conf})`
-    : `${dir} ${val}`
+  const conf = next.confidence != null ? tr('stmt_kpi_forecast_conf', { confidence: next.confidence }) : ''
+  return `${dir} ${val}${conf}`
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -711,23 +708,11 @@ function HealthGauge({score,label}) {
 function HealthBlock({ score, data, tr, lang }) {
   if (score == null) return null
   const d     = data?.data || {}
-  const ar    = lang === 'ar'
   const color = score >= 80 ? C.green : score >= 60 ? C.accent : score >= 40 ? C.amber : C.red
   const status = score >= 80 ? 'excellent' : score >= 60 ? 'good' : score >= 40 ? 'warning' : 'risk'
-  const statusLabel = {
-    excellent: ar ? 'ممتاز'  : 'EXCELLENT',
-    good:      ar ? 'جيد'    : 'GOOD',
-    warning:   ar ? 'تحذير'  : 'FAIR',
-    risk:      ar ? 'خطر'    : 'AT RISK',
-  }[status]
+  const statusLabel = tr(`health_tier_${status}`)
 
-  // Executive sentence — short, authoritative (reads from existing data, no calc)
-  const headline = {
-    excellent: ar ? 'الشركة تؤدي بمستوى ممتاز — استمر في المسار الحالي.' : 'Company is performing at an excellent level. Maintain the current trajectory.',
-    good:      ar ? 'الأداء جيد مع فرص واضحة للتحسين.' : 'Solid performance with clear room to improve.',
-    warning:   ar ? 'هناك مؤشرات تستدعي التدخل الفوري.' : 'Key indicators require immediate attention.',
-    risk:      ar ? 'الوضع المالي في منطقة خطر — تدخل تنفيذي مطلوب الآن.' : 'Financial position is at risk. Executive intervention required now.',
-  }[status]
+  const headline = tr(`dash_health_narrative_${status}`)
 
   // Supporting detail — first sentence of top decision reason
   const topDec = (d.decisions || [])[0]
@@ -769,7 +754,7 @@ function HealthBlock({ score, data, tr, lang }) {
             textTransform:'uppercase', letterSpacing:'.07em',
           }}>{statusLabel}</span>
           <span style={{fontSize:11, color:C.text3, fontFamily:'var(--font-mono)'}}>
-            {ar ? 'الصحة المالية' : 'Financial Health'}
+            {tr('financial_health')}
           </span>
         </div>
         <div style={{fontSize:20, fontWeight:800, color:C.text1,
@@ -778,8 +763,9 @@ function HealthBlock({ score, data, tr, lang }) {
         </div>
         {summary && (
           <div style={{fontSize:12, color:C.text2, lineHeight:1.6,
-            borderLeft:`2px solid ${color}40`, paddingLeft:10}}>
-            {summary}
+            borderLeft:`2px solid ${color}40`, paddingLeft:10,
+            overflow:'hidden', textOverflow:'clip', whiteSpace:'nowrap'}} title={summary}>
+            <CmdServerText lang={lang} tr={tr}>{summary}</CmdServerText>
           </div>
         )}
       </div>
@@ -793,7 +779,6 @@ function HealthBlock({ score, data, tr, lang }) {
 //  Reads: statements.insights, decisions — no calculation
 // ══════════════════════════════════════════════════════════════════════════════
 function AIInsightBlock({ data, lang, tr }) {  const d  = data?.data || {}
-  const ar = lang === 'ar'
   // Pick best insight: prefer statements insights, fallback to decision reason
   const stmtIns = d.statements?.insights || []
   const topIns  = stmtIns[0]
@@ -831,11 +816,12 @@ const actionText = topDec?.action
       <div style={{flex:1, minWidth:0}}>
         <div style={{fontSize:9, fontWeight:700, color:C.text3,
           textTransform:'uppercase', letterSpacing:'.08em', marginBottom:5}}>
-          {ar ? 'رؤية الذكاء الاصطناعي' : 'AI Insight'}
+          {tr('dash_ai_insight_title')}
         </div>
         {insightText && (
-          <div style={{fontSize:13, fontWeight:600, color:C.text1, lineHeight:1.6, marginBottom:6}}>
-            {insightText}
+          <div style={{fontSize:13, fontWeight:600, color:C.text1, lineHeight:1.6, marginBottom:6,
+            overflow:'hidden', textOverflow:'clip', whiteSpace:'nowrap'}} title={insightText}>
+            <CmdServerText lang={lang} tr={tr}>{insightText}</CmdServerText>
           </div>
         )}
         {actionText && (
@@ -844,9 +830,13 @@ const actionText = topDec?.action
             fontSize:11, color:dc, fontWeight:600,
             background:`${dc}10`, borderWidth:'1px', borderStyle:'solid',
             borderColor:`${dc}25`, borderRadius:8, padding:'4px 10px',
+            maxWidth:'100%', overflow:'hidden',
           }}>
             <span>⚡</span>
-            <span>{ar ? 'الإجراء: ' : 'Action: '}{actionText}</span>
+            <span style={{overflow:'hidden', textOverflow:'clip', whiteSpace:'nowrap'}} title={actionText}>
+              {tr('dash_action_prefix')}{' '}
+              <CmdServerText lang={lang} tr={tr}>{actionText}</CmdServerText>
+            </span>
           </div>
         )}
       </div>
@@ -861,28 +851,23 @@ const actionText = topDec?.action
 // ══════════════════════════════════════════════════════════════════════════════
 function ActionStrip({ data, tr, lang }) {
   const d    = data?.data || {}
-  const ar   = lang === 'ar'
   const decs = (d.decisions || []).slice(0, 3)
   if (!decs.length) return null
 
   const urgClr  = { high: C.red, medium: C.amber, low: C.blue }
-  const urgLabel = {
-    high:   ar ? 'عالي'   : 'HIGH',
-    medium: ar ? 'متوسط'  : 'MEDIUM',
-    low:    ar ? 'منخفض'  : 'LOW',
-  }
+  const urgLabel = (u) => tr(`urgency_${u || 'low'}`)
   const domIco = { liquidity:'💧', profitability:'📈', efficiency:'⚡', leverage:'🏋', growth:'🚀' }
 
   return (
     <div style={{display:'flex', flexDirection:'column', gap:8}}>
       <div style={{fontSize:9, fontWeight:700, color:C.text3,
         textTransform:'uppercase', letterSpacing:'.09em', marginBottom:0}}>
-        {ar ? '⚡ أولويات العمل الفورية' : '⚡ Immediate Action Priorities'}
+        {tr('dash_immediate_priorities')}
       </div>
       <div style={{display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:10}}>
         {decs.map((dec, i) => {
           const uc    = urgClr[dec.urgency]  || C.text2
-          const ulbl  = urgLabel[dec.urgency] || (dec.urgency || '').toUpperCase()
+          const ulbl  = urgLabel(dec.urgency)
           const ico   = domIco[dec.domain]   || '🎯'
           // First action step (read from existing field, no calculation)
          // First action step (read from existing field, no calculation)
@@ -921,22 +906,25 @@ const impact = dec.expected_effect
                 </span>
               </div>
               {/* Title */}
-              <div style={{fontSize:13, fontWeight:700, color:C.text1, lineHeight:1.35}}>
-                {trDynamic(tr, dec.title)}
+              <div style={{fontSize:13, fontWeight:700, color:C.text1, lineHeight:1.35,
+                overflow:'hidden', textOverflow:'clip', whiteSpace:'nowrap'}} title={trDynamic(tr, dec.title)}>
+                <CmdServerText lang={lang} tr={tr}>{trDynamic(tr, dec.title)}</CmdServerText>
               </div>
               {/* Action line */}
               {actionLine && (
                 <div style={{
                   fontSize:10, color:C.text2, lineHeight:1.5,
                   paddingLeft:8, borderLeft:`2px solid ${uc}40`,
-                }}>
-                  {actionLine}
+                  overflow:'hidden', textOverflow:'clip', whiteSpace:'nowrap',
+                }} title={actionLine}>
+                  <CmdServerText lang={lang} tr={tr}>{actionLine}</CmdServerText>
                 </div>
               )}
               {/* Impact line */}
               {impact && (
-                <div style={{fontSize:9, color:C.text3, lineHeight:1.4, marginTop:-2}}>
-                  ✦ {impact}
+                <div style={{fontSize:9, color:C.text3, lineHeight:1.4, marginTop:-2,
+                  overflow:'hidden', textOverflow:'clip', whiteSpace:'nowrap'}} title={impact}>
+                  ✦ <CmdServerText lang={lang} tr={tr}>{impact}</CmdServerText>
                 </div>
               )}
             </div>
@@ -950,7 +938,7 @@ const impact = dec.expected_effect
 // ══════════════════════════════════════════════════════════════════════════════
 //  KPI Card — with hover intelligence + drill-down
 // ══════════════════════════════════════════════════════════════════════════════
-function KpiCard({labelKey,value,fullValue,mom,yoy,color,icon,spark,tr,kpiType,onClick,ytdValue,ytdTrend,sub,insight,cause,forecast}) {
+function KpiCard({labelKey,value,fullValue,mom,yoy,color,icon,spark,tr,lang,kpiType,onClick,ytdValue,ytdTrend,sub,insight,cause,forecast,momWord,yoyWord}) {
   const [hov,setHov]=useState(false)
   return (
     <div
@@ -989,7 +977,7 @@ function KpiCard({labelKey,value,fullValue,mom,yoy,color,icon,spark,tr,kpiType,o
             fontFamily:'var(--font-mono)',padding:'1px 6px',
             borderRadius:10,background:`${clr(mom)}14`,lineHeight:1.4,
           }}>
-            {arr(mom)} {Math.abs(mom).toFixed(1)}%
+            {arr(mom)} {Math.abs(mom).toFixed(1)}% {momWord}
           </span>
         )}
       </div>
@@ -1009,20 +997,20 @@ function KpiCard({labelKey,value,fullValue,mom,yoy,color,icon,spark,tr,kpiType,o
       }}>{fullValue}</div>}
       {/* ③ YoY secondary */}
       {yoy!=null&&<div style={{fontSize:9,color:clr(yoy),fontFamily:'var(--font-mono)',
-        marginBottom:3}}>{arr(yoy)} {Math.abs(yoy).toFixed(1)}% YoY</div>}
+        marginBottom:3}}>{arr(yoy)} {Math.abs(yoy).toFixed(1)}% {yoyWord}</div>}
       {sub&&<div style={{fontSize:9,color:C.text3,marginBottom:3}}>{sub}</div>}
       {/* ④ Cause — 1 concise line */}
       {cause&&<div style={{fontSize:9,color:C.text3,marginTop:4,lineHeight:1.4,
-        overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',
+        overflow:'hidden',textOverflow:'clip',whiteSpace:'nowrap',
         paddingLeft:6,borderLeft:`2px solid ${color}30`}} title={cause}>
-        {cause}
+        {lang ? <CmdServerText lang={lang} tr={tr}>{cause}</CmdServerText> : cause}
       </div>}
       {/* ⑤ Forecast — accent mono */}
       {forecast&&<div style={{fontSize:9,color:'var(--accent)',marginTop:2,lineHeight:1.3,
         fontFamily:'var(--font-mono)',opacity:.8,
-        overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}
+        overflow:'hidden',textOverflow:'clip',whiteSpace:'nowrap'}}
         title={forecast}>
-        📈 {forecast}
+        📈 {lang ? <CmdServerText lang={lang} tr={tr} style={{fontFamily:'var(--font-mono)'}}>{forecast}</CmdServerText> : forecast}
       </div>}
       {ytdValue&&<div style={{display:'flex',alignItems:'center',gap:5,marginTop:5,paddingTop:5,borderTop:`1px solid ${BG.border}`}}>
         <span style={{fontSize:9,color:C.text3,textTransform:'uppercase',letterSpacing:'.05em'}}>{tr('al_ytd_label')}</span>
@@ -1142,7 +1130,7 @@ function ExpenseBreakdown({items,total}) {
             <div key={i} style={{display:'flex',alignItems:'center',gap:6}}>
               <div style={{width:8,height:8,borderRadius:'50%',background:colors[i%colors.length],flexShrink:0}}/>
               <div style={{flex:1,minWidth:0}}>
-                <div style={{fontSize:11,color:C.text2,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{it.account_name}</div>
+                <div style={{fontSize:11,color:C.text2,overflow:'hidden',textOverflow:'clip',whiteSpace:'nowrap'}}>{it.account_name}</div>
               </div>
               <span style={{fontSize:11,fontWeight:700,color:C.text1,fontFamily:'monospace',direction:'ltr'}}>{formatCompact(Math.abs(it.amount))}</span>
               <span style={{fontSize:10,color:C.text2}}>{pct.toFixed(0)}%</span>
@@ -1181,7 +1169,7 @@ function BranchPanel({companyId,tr}) {
         border:`1px solid ${i===0?C.accent:BG.border}`,display:'flex',alignItems:'center',
         justifyContent:'center',fontSize:9,fontWeight:800,color:i===0?C.accent:C.text2,flexShrink:0}}>{i+1}</span>
       <div style={{flex:1,minWidth:0}}>
-        <div style={{fontSize:12,fontWeight:600,color:C.text1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{b.branch_name}</div>
+        <div style={{fontSize:12,fontWeight:600,color:C.text1,overflow:'hidden',textOverflow:'clip',whiteSpace:'nowrap'}}>{b.branch_name}</div>
         {b.city&&<div style={{fontSize:10,color:C.text2}}>{b.city}</div>}
       </div>
       <div style={{textAlign:'right',flexShrink:0}}>
@@ -1220,7 +1208,7 @@ function DataQualityBanner({ validation, lang, tr }) {
 // ══════════════════════════════════════════════════════════════════════════════
 //  TAB 1: Overview
 // ══════════════════════════════════════════════════════════════════════════════
-function OverviewTab({data,tr,onKpiClick}) {
+function OverviewTab({data,tr,lang,onKpiClick}) {
   const d = data?.data || {}
   const meta = data?.meta || {}
   const s=d.kpi_block?.series||{}, p=d.kpi_block?.periods||[], k=d.kpi_block?.kpis||{}
@@ -1238,12 +1226,19 @@ function OverviewTab({data,tr,onKpiClick}) {
         </Panel>
       </div>
       {cf?.operating_cashflow!=null&&(
-        <Panel title={tr('cashflow_operating')} titleRight={<Chip label={cf.quality?.cash_conversion_quality||''} color={cf.quality?.cash_conversion_quality==='strong'?C.green:cf.quality?.cash_conversion_quality==='moderate'?C.amber:C.red}/>}>
+        <Panel title={tr('cashflow_operating')} titleRight={(() => {
+          const q = cf.quality?.cash_conversion_quality
+          if (q == null || q === '') return null
+          const qc = q === 'strong' ? C.green : q === 'moderate' ? C.amber : C.red
+          const known = q === 'strong' || q === 'moderate' || q === 'weak'
+          const inner = known ? tr(`cashflow_quality_${q}`) : <CmdServerText lang={lang} tr={tr}>{q}</CmdServerText>
+          return <Chip label={inner} color={qc}/>
+        })()}>
           <div style={{display:'grid',gridTemplateColumns:'1fr 280px',gap:14}}>
             <AreaChart d1={cf.series?.operating_cashflow} d2={cf.series?.net_profit} labels={cf.series?.periods} c1={C.accent} c2={C.violet} h={140} n1={tr('cashflow_ocf_label')} n2={tr('kpi_net_profit')}/>
             <div style={{display:'flex',flexDirection:'column',gap:8}}>
               {[
-                {lbl:tr('cashflow_operating'),val:formatCompact(cf.operating_cashflow),c:(cf.operating_cashflow||0)>=0?C.accent:C.red,sub:cf.operating_cashflow_mom!=null?`${arr(cf.operating_cashflow_mom)} ${Math.abs(cf.operating_cashflow_mom).toFixed(1)}% MoM`:null},
+                {lbl:tr('cashflow_operating'),val:formatCompact(cf.operating_cashflow),c:(cf.operating_cashflow||0)>=0?C.accent:C.red,sub:cf.operating_cashflow_mom!=null?`${arr(cf.operating_cashflow_mom)} ${Math.abs(cf.operating_cashflow_mom).toFixed(1)}% ${tr('mom_label')}`:null},
                 {lbl:tr('cashflow_free'),val:cf.free_cashflow!=null?formatCompact(cf.free_cashflow):'—',c:(cf.free_cashflow||0)>=0?C.green:C.red,sub:hasFlag(cf.flags,'capex_missing')?tr('cashflow_capex_unknown'):null},
                 {lbl:tr('cashflow_balance'),val:formatCompact(cf.cash_balance),c:C.blue,sub:tr('cashflow_available')},
                 {lbl:tr('cashflow_quality_title'),val:cf.quality?.cash_conversion_ratio!=null?`${fmtN(cf.quality.cash_conversion_ratio)}x`:'—',c:C.violet},
@@ -1258,7 +1253,7 @@ function OverviewTab({data,tr,onKpiClick}) {
               border:'1px solid rgba(251,191,36,0.22)'}}>
               <span style={{fontSize:13}}>⚠</span>
               <span style={{fontSize:10,color:C.amber,lineHeight:1.4}}>
-                Estimated — single period only. Upload prior period for accurate OCF.
+                {tr('dash_ocf_estimate_banner')}
               </span>
             </div>
           )}
@@ -1375,7 +1370,7 @@ function ExpenseTab({data,tr}) {
               <div key={i} style={{display:'grid',gridTemplateColumns:'160px 1fr 80px 70px 80px',gap:8,alignItems:'center',
                 padding:'7px 0',borderBottom:`1px solid ${BG.border2}`,
                 background:isSpike?`${C.red}06`:'transparent',direction:'ltr'}}>
-                <span style={{fontSize:11,color:isSpike?C.red:C.text2,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',fontWeight:isSpike?600:400}}>
+                <span style={{fontSize:11,color:isSpike?C.red:C.text2,overflow:'hidden',textOverflow:'clip',whiteSpace:'nowrap',fontWeight:isSpike?600:400}}>
                   {it.account_name}{isSpike?' 🚨':''}
                 </span>
                 <div style={{background:BG.card,borderRadius:3,height:12,overflow:'hidden',position:'relative'}}>
@@ -1686,9 +1681,9 @@ function WhatIfPanel({data,tr,selectedId}) {
       const body = { basis, revenue_pct:Number(revPct), cogs_pct:Number(cogsPct), opex_pct:Number(opexPct) }
       if (basis==='full_year'&&year) body.year = year
       const scopeBody = wiScopeBody()
-      if (scopeBody === null) { setErr('Custom scope: select From and To period first'); return }
+      if (scopeBody === null) { setErr(tr('fc_custom_scope_hint')); return }
       const qs = buildAnalysisQuery(wiToQS, { lang, window: win, consolidate: false })
-      if (qs === null) { setErr('Custom scope: select From and To period first'); return }
+      if (qs === null) { setErr(tr('fc_custom_scope_hint')); return }
       const r = await fetch(`/api/v1/analysis/${selectedId}/what-if?${qs}`, {
         method:'POST',
         headers:{...getAuthHeaders(),'Content-Type':'application/json'},
@@ -1878,9 +1873,9 @@ function DecisionIntelPanel({tr, selectedId, data, lang}) {
     setLoading(true); setErr(null)
     try {
       const decScope = decScopeBody()
-      if (decScope === null) { setErr('Custom scope: select From and To period first'); return }
+      if (decScope === null) { setErr(tr('fc_custom_scope_hint')); return }
       const qs = buildAnalysisQuery(decScopeQS, { lang, window: win, consolidate: false })
-      if (qs === null) { setErr('Custom scope: select From and To period first'); return }
+      if (qs === null) { setErr(tr('fc_custom_scope_hint')); return }
       const r = await fetch(`/api/v1/analysis/${selectedId}/decisions?${qs}`, {
         method:'POST',
         headers:{...getAuthHeaders(),'Content-Type':'application/json'},
@@ -2042,7 +2037,7 @@ function DecisionIntelPanel({tr, selectedId, data, lang}) {
                   minWidth:16,direction:'ltr'}}>{sc.rank}</span>
                 <div style={{flex:1,minWidth:0}}>
                   <div style={{fontSize:11,fontWeight:600,color:i===0?C.violet:C.text2,
-                    whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>
+                    whiteSpace:'nowrap',overflow:'hidden',textOverflow:'clip'}}>
                     {scLabels[sc.id]||sc.id}
                   </div>
                   <div style={{fontSize:10,color:C.text2,marginTop:1}}>
@@ -2150,7 +2145,7 @@ function NarrativePanel({tr, selectedId, lang}) {
     setExporting('xlsx')
     try {
       const base = buildAnalysisQuery(narScopeQS, { lang: narLang, window: win, consolidate: false })
-      if (base === null) { setErr('Custom scope incomplete'); return }
+      if (base === null) { setErr(tr('err_scope_custom_incomplete')); return }
       const r = await fetch(
         `/api/v1/analysis/${selectedId}/export.xlsx?${base}&basis=${encodeURIComponent(basis)}`,
         { headers: getAuthHeaders() }
@@ -2172,7 +2167,7 @@ function NarrativePanel({tr, selectedId, lang}) {
     setExporting('json')
     try {
       const base = buildAnalysisQuery(narScopeQS, { lang: narLang, window: win, consolidate: false })
-      if (base === null) { setErr('Custom scope incomplete'); return }
+      if (base === null) { setErr(tr('err_scope_custom_incomplete')); return }
       const r = await fetch(
         `/api/v1/analysis/${selectedId}/report-bundle?${base}&basis=${encodeURIComponent(basis)}`,
         { headers: getAuthHeaders() }
@@ -2205,7 +2200,7 @@ function NarrativePanel({tr, selectedId, lang}) {
     setLoading(true); setErr(null)
     try {
       const base = buildAnalysisQuery(narScopeQS, { lang: narLang, window: win, consolidate: false })
-      if (base === null) { setErr('Custom scope incomplete'); setLoading(false); return }
+      if (base === null) { setErr(tr('err_scope_custom_incomplete')); setLoading(false); return }
       const r = await fetch(
         `/api/v1/analysis/${selectedId}/narrative?${base}&basis=${encodeURIComponent(basis)}`,
         { headers: getAuthHeaders() }
@@ -2440,7 +2435,7 @@ function ManagementReportPanel({tr, selectedId, lang}) {
     setLoading(true); setErr(null)
     try {
       const base = buildAnalysisQuery(mgmtScopeQS, { lang: repLang, window: win, consolidate: false })
-      if (base === null) { setErr('Custom scope incomplete'); setLoading(false); return }
+      if (base === null) { setErr(tr('err_scope_custom_incomplete')); setLoading(false); return }
       const r = await fetch(
         `/api/v1/analysis/${selectedId}/management-report?${base}&basis=${encodeURIComponent(basis)}`,
         { headers: getAuthHeaders() }
@@ -2965,7 +2960,7 @@ function DecisionsPanelV2({tr, selectedId, lang}) {
   async function run() {
     if (!selectedId) return
     const qs = buildAnalysisQuery(decQS, { lang, window: win, consolidate: false })
-    if (qs === null) { setErr('Custom scope: select From and To period first'); return }
+    if (qs === null) { setErr(tr('fc_custom_scope_hint')); return }
     setLoading(true); setErr(null)
     try {
       const r = await fetch(`/api/v1/analysis/${selectedId}/decisions?${qs}`,
@@ -3185,7 +3180,7 @@ function RootCausesPanel({tr, selectedId, lang}) {
   async function run() {
     if (!selectedId) return
     const qs = buildAnalysisQuery(rcQS, { lang, window: win, consolidate: false })
-    if (qs === null) { setErr('Custom scope: select From and To period first'); return }
+    if (qs === null) { setErr(tr('fc_custom_scope_hint')); return }
     setLoading(true); setErr(null)
     try {
       const r = await fetch(`/api/v1/analysis/${selectedId}/root-causes?${qs}`,
@@ -3368,7 +3363,7 @@ function ForecastPanel({tr, selectedId, lang}) {
   async function run() {
     if (!selectedId) return
     const qs = buildAnalysisQuery(fcQS, { lang, window: win, consolidate: false })
-    if (qs === null) { setErr('Custom scope: select From and To period first'); return }
+    if (qs === null) { setErr(tr('fc_custom_scope_hint')); return }
     setLoading(true); setErr(null)
     try {
       const r = await fetch(`/api/v1/analysis/${selectedId}/forecast?${qs}`,
@@ -3422,7 +3417,7 @@ function ForecastPanel({tr, selectedId, lang}) {
             <span style={{fontSize:10,color:C.text2,textTransform:'uppercase'}}>{tr('fc_risk_level')}:</span>
             <span style={{fontWeight:700,fontSize:11,
               color:rlClr[sum.risk_level]||C.text3}}>
-              {tr(`risk_level_${sum.risk_level}`)||sum.risk_level}
+              {tr(`risk_level_${sum.risk_level}`)}
             </span>
             <span style={{fontSize:10,color:C.text2}}>
               {tr('fc_confidence')}: <b style={{color:C.text2}}>{sum.base_confidence}%</b>
@@ -3584,11 +3579,13 @@ function ForecastPanel({tr, selectedId, lang}) {
             <div>
               <div style={{fontSize:9,fontWeight:800,color:C.accent,textTransform:'uppercase',
                 letterSpacing:'.07em',marginBottom:5}}>{tr('fc_insight')}</div>
-              <div style={{fontSize:12,color:C.text2,lineHeight:1.7}}>{sum.insight}</div>
+              <div style={{fontSize:12,color:C.text2,lineHeight:1.7}}>
+                <CmdServerText lang={lang} tr={tr}>{sum.insight}</CmdServerText>
+              </div>
               <div style={{marginTop:8,display:'flex',gap:12,flexWrap:'wrap'}}>
                 {sum.trend_mom_revenue!=null&&(
                   <span style={{fontSize:10,color:C.text2}}>
-                    {tr('fc_revenue')} MoM:{' '}
+                    {tr('fc_revenue')} {tr('mom_label')}:{' '}
                     <b style={{color:sum.trend_mom_revenue>=0?C.green:C.red,
                       fontFamily:'var(--font-mono)'}}>
                       {sum.trend_mom_revenue>=0?'+':''}{sum.trend_mom_revenue?.toFixed(1)}%
@@ -3597,7 +3594,7 @@ function ForecastPanel({tr, selectedId, lang}) {
                 )}
                 {sum.trend_mom_net_profit!=null&&(
                   <span style={{fontSize:10,color:C.text2}}>
-                    {tr('fc_net_profit')} MoM:{' '}
+                    {tr('fc_net_profit')} {tr('mom_label')}:{' '}
                     <b style={{color:sum.trend_mom_net_profit>=0?C.green:C.red,
                       fontFamily:'var(--font-mono)'}}>
                       {sum.trend_mom_net_profit>=0?'+':''}{sum.trend_mom_net_profit?.toFixed(1)}%
@@ -3631,7 +3628,7 @@ function PortfolioPanel({tr, lang, companyId}) {
     setLoading(true); setErr(null)
     try {
       const qs = buildAnalysisQuery(toQueryString, { lang, window: win, consolidate: false })
-      if (qs === null) { setErr('Custom scope incomplete'); setLoading(false); return }
+      if (qs === null) { setErr(tr('err_scope_custom_incomplete')); setLoading(false); return }
       const r = await fetch(
         `/api/v1/companies/${companyId}/portfolio-intelligence?${qs}`,
         { headers: getAuthHeaders() }
@@ -3847,7 +3844,11 @@ function _r2String(v) {
 //  MAIN DASHBOARD
 // ══════════════════════════════════════════════════════════════════════════════
 export default function Dashboard() {
-  const { tr, lang } = useLang()
+  const { tr: trCtx, lang } = useLang()
+  const tr = useCallback((key, params) => {
+    if (params != null && typeof params === 'object') return strictTParams(trCtx, lang, key, params)
+    return strictT(trCtx, lang, key)
+  }, [trCtx, lang])
   const { selectedId, selectedCompany, createCompany, reloadCompanies } = useCompany()
 
   const tSig = useTSignal()
@@ -3908,7 +3909,7 @@ export default function Dashboard() {
     <div style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',height:'70vh',gap:12,background:BG.page}}>
       <span style={{fontSize:52,opacity:.2}}>🏢</span>
       {loadingCompanies
-        ? <div style={{fontSize:14,color:C.text2}}>...</div>
+        ? <div style={{width:18,height:18,border:`2px solid ${BG.border}`,borderTopColor:C.accent,borderRadius:'50%',animation:'spin .8s linear infinite'}} />
         : companies.length === 0
           ? <>
               <div style={{fontSize:16,color:C.text2,fontWeight:600}}>{tr('gen_no_companies')}</div>
@@ -3995,7 +3996,7 @@ export default function Dashboard() {
 
       {/* Scope + Period controls */}
       <div style={{display:'flex',flexDirection:'column',gap:8}}>
-        <UniversalScopeSelector tr={tr} ps={ps} psUpdate={psUpdate} onApply={load} activeLabel={psActiveLabel()} allPeriods={meta.all_periods||[]}/>
+        <UniversalScopeSelector tr={tr} lang={lang} ps={ps} psUpdate={psUpdate} onApply={load} activeLabel={psActiveLabel()} allPeriods={meta.all_periods||[]}/>
         <div style={{display:'flex',alignItems:'center',gap:12,flexWrap:'wrap'}}>
           <PeriodSelector window={win} setWindow={setWin} disabled={loading}/>
 
@@ -4076,11 +4077,11 @@ export default function Dashboard() {
       {/* 3. KPI ROW — 5 key metrics */}
       {data&&(
         <div style={{display:'grid',gridTemplateColumns:'repeat(5,1fr)',gap:10}}>
-          <KpiCard tr={tr} labelKey="kpi_total_revenue"  kpiType="revenue"    value={formatCompact(kpis.revenue?.value)} fullValue={formatFull(kpis.revenue?.value)}    mom={kpis.revenue?.mom_pct}    yoy={kpis.revenue?.yoy_pct}    color={C.accent} icon="📈" spark={series.revenue?.slice(-8)}    onClick={()=>setModal('revenue')}   insight={kpiInsight('revenue',data,lang,tr)}    cause={kpiCause('revenue',data,lang)}    forecast={kpiForecast('revenue',fcData,lang,formatCompact)}/>
-          <KpiCard tr={tr} labelKey="kpi_total_expenses" kpiType="expenses"   value={formatCompact(kpis.expenses?.value)} fullValue={formatFull(kpis.expenses?.value)}   mom={kpis.expenses?.mom_pct}   yoy={kpis.expenses?.yoy_pct}   color={C.red}    icon="📉" spark={series.expenses?.slice(-8)}   onClick={()=>setModal('expenses')}  insight={kpiInsight('expenses',data,lang,tr)}   cause={kpiCause('expenses',data,lang)}/>
-          <KpiCard tr={tr} labelKey="kpi_net_profit"     kpiType="net_profit" value={formatCompact(kpis.net_profit?.value)} fullValue={formatFull(kpis.net_profit?.value)} mom={kpis.net_profit?.mom_pct} yoy={kpis.net_profit?.yoy_pct} color={C.green}  icon="💰" spark={series.net_profit?.slice(-8)} onClick={()=>setModal('net_profit')} insight={kpiInsight('net_profit',data,lang,tr)} cause={kpiCause('net_profit',data,lang)} forecast={kpiForecast('net_profit',fcData,lang,formatCompact)}/>
-          <KpiCard tr={tr} labelKey="kpi_net_margin"     kpiType="net_margin" value={fmtP(kpis.net_margin?.value)} mom={kpis.net_margin?.mom_pct}                                 color={C.violet} icon="%"  onClick={()=>setModal('net_margin')} insight={kpiInsight('net_margin',data,lang,tr)} cause={kpiCause('net_margin',data,lang)}/>
-          <KpiCard tr={tr} labelKey="cashflow_operating" kpiType="cashflow"   value={formatCompact(d.cashflow?.operating_cashflow)} fullValue={formatFull(d.cashflow?.operating_cashflow)} mom={d.cashflow?.operating_cashflow_mom} color={C.amber} icon="💧" onClick={()=>setModal('cashflow')} insight={kpiInsight('cashflow',data,lang,tr)} cause={kpiCause('cashflow',data,lang)} sub={d.cashflow?.reliability==='estimated'?tr('label_estimated_short'):null}/>
+          <KpiCard tr={tr} lang={lang} momWord={tr('mom_label')} yoyWord={tr('yoy_label')} labelKey="kpi_total_revenue"  kpiType="revenue"    value={formatCompact(kpis.revenue?.value)} fullValue={formatFull(kpis.revenue?.value)}    mom={kpis.revenue?.mom_pct}    yoy={kpis.revenue?.yoy_pct}    color={C.accent} icon="📈" spark={series.revenue?.slice(-8)}    onClick={()=>setModal('revenue')}   insight={kpiInsight('revenue',data,lang,tr)}    cause={kpiCause('revenue',data,tr)}    forecast={kpiForecast('revenue',fcData,tr,formatCompact)}/>
+          <KpiCard tr={tr} lang={lang} momWord={tr('mom_label')} yoyWord={tr('yoy_label')} labelKey="kpi_total_expenses" kpiType="expenses"   value={formatCompact(kpis.expenses?.value)} fullValue={formatFull(kpis.expenses?.value)}   mom={kpis.expenses?.mom_pct}   yoy={kpis.expenses?.yoy_pct}   color={C.red}    icon="📉" spark={series.expenses?.slice(-8)}   onClick={()=>setModal('expenses')}  insight={kpiInsight('expenses',data,lang,tr)}   cause={kpiCause('expenses',data,tr)}/>
+          <KpiCard tr={tr} lang={lang} momWord={tr('mom_label')} yoyWord={tr('yoy_label')} labelKey="kpi_net_profit"     kpiType="net_profit" value={formatCompact(kpis.net_profit?.value)} fullValue={formatFull(kpis.net_profit?.value)} mom={kpis.net_profit?.mom_pct} yoy={kpis.net_profit?.yoy_pct} color={C.green}  icon="💰" spark={series.net_profit?.slice(-8)} onClick={()=>setModal('net_profit')} insight={kpiInsight('net_profit',data,lang,tr)} cause={kpiCause('net_profit',data,tr)} forecast={kpiForecast('net_profit',fcData,tr,formatCompact)}/>
+          <KpiCard tr={tr} lang={lang} momWord={tr('mom_label')} yoyWord={tr('yoy_label')} labelKey="kpi_net_margin"     kpiType="net_margin" value={fmtP(kpis.net_margin?.value)} mom={kpis.net_margin?.mom_pct}                                 color={C.violet} icon="%"  onClick={()=>setModal('net_margin')} insight={kpiInsight('net_margin',data,lang,tr)} cause={kpiCause('net_margin',data,tr)}/>
+          <KpiCard tr={tr} lang={lang} momWord={tr('mom_label')} yoyWord={tr('yoy_label')} labelKey="cashflow_operating" kpiType="cashflow"   value={formatCompact(d.cashflow?.operating_cashflow)} fullValue={formatFull(d.cashflow?.operating_cashflow)} mom={d.cashflow?.operating_cashflow_mom} color={C.amber} icon="💧" onClick={()=>setModal('cashflow')} insight={kpiInsight('cashflow',data,lang,tr)} cause={kpiCause('cashflow',data,tr)} sub={d.cashflow?.reliability==='estimated'?tr('label_estimated_short'):null}/>
         </div>
       )}
 
@@ -4181,7 +4182,7 @@ export default function Dashboard() {
       {data&&(
         <>
           <TabNav tabs={tabs} active={tab} onChange={setTab}/>
-          {tab==='overview'      && <OverviewTab      data={data} tr={tr} onKpiClick={kpiType=>setModal(kpiType)}/>}
+          {tab==='overview'      && <OverviewTab      data={data} tr={tr} lang={lang} onKpiClick={kpiType=>setModal(kpiType)}/>}
           {tab==='expenses'      && <ExpenseTab       data={data} tr={tr}/>}
           {tab==='variance'      && <VarianceTab      data={data} tr={tr}/>}
           {tab==='profitability' && <ProfitabilityTab data={data} tr={tr} ctxLabel={ctxLabel}/>}

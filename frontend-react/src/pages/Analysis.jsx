@@ -13,6 +13,8 @@
  * Data: single /executive fetch — no duplicate calculations.
  */
 import { useState, useEffect, useCallback } from 'react'
+import { strictT, strictTParams } from '../utils/strictI18n.js'
+import CmdServerText from '../components/CmdServerText.jsx'
 import { useNavigate, useLocation } from 'react-router-dom'
 import DrillBackBar from '../components/DrillBackBar.jsx'
 import { useLang }    from '../context/LangContext.jsx'
@@ -41,14 +43,13 @@ const urgC  = {high:'var(--red)',medium:'var(--amber)',low:'var(--blue)'}
 const domC  = {liquidity:'var(--blue)',profitability:'var(--green)',efficiency:'var(--violet)',leverage:'var(--amber)',growth:'var(--accent)',cross_domain:'#e879f9'}
 
 // ── Phase 6.4: forecast text helper (shared logic) ───────────────────────────
-function kpiForecast(type, fcData, lang, fmtFn) {
+function kpiForecast(type, fcData, tr, fmtFn) {
   if (!fcData?.available) return null
   const next = (fcData?.scenarios?.base?.[type] || [])[0]
   if (!next?.point) return null
-  const ar   = lang === 'ar'
   const val  = fmtFn ? fmtFn(next.point) : String(Math.round(next.point))
   const dir  = next.mom_applied > 0 ? '↑' : next.mom_applied < 0 ? '↓' : '→'
-  const conf = next.confidence != null ? ` (${ar?'ثقة':'conf.'} ${next.confidence}%)` : ''
+  const conf = next.confidence != null ? tr('stmt_kpi_forecast_conf', { confidence: next.confidence }) : ''
   return dir + ' ' + val + conf
 }
 
@@ -128,7 +129,7 @@ function Spark({data,color='var(--accent)',h=28,w=70}) {
   </svg>
 }
 
-function MetricCard({label,value,fullValue,mom,spark,color,explain,insight,cause,forecast}) {
+function MetricCard({label,value,fullValue,mom,spark,color,explain,insight,cause,forecast,lang,tr,momWord}) {
   const [hov,setHov] = useState(false)
   return(
     <div
@@ -160,7 +161,7 @@ function MetricCard({label,value,fullValue,mom,spark,color,explain,insight,cause
           color:clr(mom),
           padding:'1px 6px',borderRadius:9,background:`${clr(mom)}14`,
         }}>
-          {arr(mom)} {Math.abs(mom).toFixed(1)}% MoM
+          {arr(mom)} {Math.abs(mom).toFixed(1)}% {momWord}
         </span>
       )}
       {spark&&<div style={{marginTop:8,opacity:hov?1:.65,transition:'opacity .2s'}}>
@@ -168,16 +169,23 @@ function MetricCard({label,value,fullValue,mom,spark,color,explain,insight,cause
       </div>}
       {/* Phase 6.1: insight under metric */}
       {insight&&<div style={{fontSize:10,color:'var(--text-muted)',marginTop:6,
-        lineHeight:1.4,opacity:.8,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}
-        title={insight}>💡 {insight}</div>}
-      {/* Phase 6.2: cause line */}
+        lineHeight:1.4,opacity:.8,overflow:'hidden',textOverflow:'clip',whiteSpace:'nowrap'}}
+        title={insight}>
+        💡{' '}
+        {lang && tr ? <CmdServerText lang={lang} tr={tr}>{insight}</CmdServerText> : insight}
+      </div>}
       {cause&&<div style={{fontSize:9,color:'var(--text-dim)',marginTop:2,
-        lineHeight:1.3,opacity:.6,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}
-        title={cause}>↳ {cause}</div>}
-      {/* Phase 6.4: forecast line */}
+        lineHeight:1.3,opacity:.6,overflow:'hidden',textOverflow:'clip',whiteSpace:'nowrap'}}
+        title={cause}>
+        ↳{' '}
+        {lang && tr ? <CmdServerText lang={lang} tr={tr}>{cause}</CmdServerText> : cause}
+      </div>}
       {forecast&&<div style={{fontSize:9,color:'var(--accent)',marginTop:3,
-        lineHeight:1.3,opacity:.7,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',
-        fontFamily:'var(--font-mono)'}} title={forecast}>📈 {forecast}</div>}
+        lineHeight:1.3,opacity:.7,overflow:'hidden',textOverflow:'clip',whiteSpace:'nowrap',
+        fontFamily:'var(--font-mono)'}} title={forecast}>
+        📈{' '}
+        {lang && tr ? <CmdServerText lang={lang} tr={tr} style={{fontFamily:'var(--font-mono)'}}>{forecast}</CmdServerText> : forecast}
+      </div>}
     </div>
   )
 }
@@ -201,7 +209,7 @@ function RatioRow({label,value,status,explain}) {
   )
 }
 
-function IssueCard({issue,tr,onOpen}) {
+function IssueCard({issue,tr,lang,onOpen}) {
   const sc = urgC[issue.severity]||'var(--text-secondary)'
   return (
     <div onClick={()=>issue.decision&&onOpen(issue.decision)}
@@ -211,16 +219,20 @@ function IssueCard({issue,tr,onOpen}) {
       onMouseEnter={e=>{if(issue.decision)e.currentTarget.style.background='var(--bg-panel)'}}
       onMouseLeave={e=>{e.currentTarget.style.background='var(--bg-elevated)'}}>
       <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:5,flexWrap:'wrap'}}>
-        <Badge label={tr(`urgency_${issue.severity}`)||issue.severity} color={sc}/>
-        <span style={{fontSize:12,fontWeight:700,color:'#ffffff',flex:1}}>{issue.title}</span>
+        <Badge label={tr(`urgency_${issue.severity}`)} color={sc}/>
+        <span style={{fontSize:12,fontWeight:700,color:'#ffffff',flex:1}}>
+          <CmdServerText lang={lang} tr={tr}>{issue.title}</CmdServerText>
+        </span>
         {issue.decision&&<span style={{fontSize:9,color:'var(--accent)',opacity:.8}}>→ {tr('exec_actions')}</span>}
       </div>
-      <p style={{fontSize:11,color:'var(--text-secondary)',margin:0,lineHeight:1.6}}>{issue.reason}</p>
+      <p style={{fontSize:11,color:'var(--text-secondary)',margin:0,lineHeight:1.6}}>
+        <CmdServerText lang={lang} tr={tr}>{issue.reason}</CmdServerText>
+      </p>
     </div>
   )
 }
 
-function OpportunityCard({opp,tr,onOpen}) {
+function OpportunityCard({opp,tr,lang,onOpen}) {
   const dc = domC[opp.domain]||'var(--accent)'
   return (
     <div onClick={()=>opp.decision&&onOpen(opp.decision)}
@@ -230,10 +242,14 @@ function OpportunityCard({opp,tr,onOpen}) {
       onMouseEnter={e=>{if(opp.decision)e.currentTarget.style.background='var(--bg-panel)'}}
       onMouseLeave={e=>{e.currentTarget.style.background='var(--bg-elevated)'}}>
       <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:5,flexWrap:'wrap'}}>
-        <Badge label={tr(`domain_${opp.domain}_simple`)||opp.domain} color={dc}/>
-        <span style={{fontSize:12,fontWeight:700,color:'#ffffff',flex:1}}>{opp.title}</span>
+        <Badge label={tr(`domain_${opp.domain}_simple`)} color={dc}/>
+        <span style={{fontSize:12,fontWeight:700,color:'#ffffff',flex:1}}>
+          <CmdServerText lang={lang} tr={tr}>{opp.title}</CmdServerText>
+        </span>
       </div>
-      <p style={{fontSize:11,color:'var(--text-secondary)',margin:0,lineHeight:1.6}}>{opp.reason}</p>
+      <p style={{fontSize:11,color:'var(--text-secondary)',margin:0,lineHeight:1.6}}>
+        <CmdServerText lang={lang} tr={tr}>{opp.reason}</CmdServerText>
+      </p>
       {opp.impact_value&&(
         <div style={{marginTop:6,fontSize:11,fontWeight:800,color:'var(--green)',fontFamily:'var(--font-mono)'}}>{opp.impact_value} {tr('impact_expected')}</div>
       )}
@@ -241,7 +257,7 @@ function OpportunityCard({opp,tr,onOpen}) {
   )
 }
 
-function DecCard({dec,tr,impacts,onOpen}) {
+function DecCard({dec,tr,lang,impacts,onOpen}) {
   const uc = urgC[dec.urgency]||'var(--text-secondary)'
   const dc = domC[dec.domain]||'var(--accent)'
   const impKey = dec.key||dec.domain
@@ -254,16 +270,20 @@ function DecCard({dec,tr,impacts,onOpen}) {
       onMouseEnter={e=>{e.currentTarget.style.background='var(--bg-panel)'}}
       onMouseLeave={e=>{e.currentTarget.style.background='var(--bg-elevated)'}}>
       <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:5,flexWrap:'wrap'}}>
-        <Badge label={tr(`urgency_${dec.urgency}`)||dec.urgency} color={uc}/>
+        <Badge label={tr(`urgency_${dec.urgency}`)} color={uc}/>
         <span style={{fontSize:11,fontWeight:700,color:dc,textTransform:'uppercase',letterSpacing:'.05em'}}>
-          {tr(`domain_${dec.domain}_simple`)||dec.domain}
+          {tr(`domain_${dec.domain}_simple`)}
         </span>
-        <span style={{marginLeft:'auto',fontSize:9,color:'var(--text-secondary)',fontFamily:'monospace'}}>⏱ {dec.timeframe}</span>
+        <span style={{marginLeft:'auto',fontSize:9,color:'var(--text-secondary)',fontFamily:'monospace'}}>
+          ⏱ <CmdServerText lang={lang} tr={tr}>{dec.timeframe}</CmdServerText>
+        </span>
       </div>
-      <div style={{fontSize:13,fontWeight:700,color:'#ffffff',marginBottom:4}}>{dec.title}</div>
+      <div style={{fontSize:13,fontWeight:700,color:'#ffffff',marginBottom:4}}>
+        <CmdServerText lang={lang} tr={tr}>{dec.title}</CmdServerText>
+      </div>
       <div style={{fontSize:11,color:'var(--text-secondary)',lineHeight:1.5,marginBottom:imp?.value?6:0,
         display:'-webkit-box',WebkitLineClamp:2,WebkitBoxOrient:'vertical',overflow:'hidden'}}>
-        {dec.reason}
+        <CmdServerText lang={lang} tr={tr}>{dec.reason}</CmdServerText>
       </div>
       {imp?.value&&(
         <div style={{display:'inline-flex',alignItems:'center',gap:4,
@@ -278,41 +298,48 @@ function DecCard({dec,tr,impacts,onOpen}) {
   )
 }
 
-function AlertCard({alert,tr}) {
+function AlertCard({alert,tr,lang}) {
   const uc = urgC[alert.severity]||'var(--text-secondary)'
   return (
     <div style={{padding:'10px 14px',borderRadius:9,background:'var(--bg-elevated)',
       borderWidth:'1px 1px 1px 3px',borderStyle:'solid',borderColor:`${uc}25 ${uc}25 ${uc}25 ${uc}`,marginBottom:6}}>
       <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:4}}>
-        <Badge label={tr(`severity_${alert.severity}`)||alert.severity} color={uc}/>
-        <span style={{fontSize:12,fontWeight:700,color:'#ffffff',flex:1}}>{alert.title}</span>
+        <Badge label={tr(`severity_${alert.severity}`)} color={uc}/>
+        <span style={{fontSize:12,fontWeight:700,color:'#ffffff',flex:1}}>
+          <CmdServerText lang={lang} tr={tr}>{alert.title}</CmdServerText>
+        </span>
       </div>
-      <div style={{fontSize:11,color:'var(--text-secondary)',lineHeight:1.5}}>{alert.message}</div>
+      <div style={{fontSize:11,color:'var(--text-secondary)',lineHeight:1.5}}>
+        <CmdServerText lang={lang} tr={tr}>{alert.message}</CmdServerText>
+      </div>
     </div>
   )
 }
 
-function CauseCard({cause}) {
+function CauseCard({cause,lang,tr}) {
   const ic = {high:'var(--red)',medium:'var(--amber)',low:'var(--blue)'}[cause.impact]||'var(--text-secondary)'
   return (
     <div style={{padding:'10px 14px',borderRadius:9,background:'var(--bg-elevated)',
       borderWidth:'1px 1px 1px 3px',borderStyle:'solid',borderColor:`${ic}20 ${ic}20 ${ic}20 ${ic}`,marginBottom:6}}>
-      <div style={{fontSize:12,fontWeight:700,color:'#ffffff',marginBottom:3}}>{cause.title}</div>
+      <div style={{fontSize:12,fontWeight:700,color:'#ffffff',marginBottom:3}}>
+        <CmdServerText lang={lang} tr={tr}>{cause.title}</CmdServerText>
+      </div>
       <div style={{fontSize:11,color:'var(--text-secondary)',lineHeight:1.5,
         display:'-webkit-box',WebkitLineClamp:2,WebkitBoxOrient:'vertical',overflow:'hidden'}}>
-        {cause.description}
+        <CmdServerText lang={lang} tr={tr}>{cause.description}</CmdServerText>
       </div>
       {cause.mechanism&&(
         <div style={{marginTop:6,fontSize:10,color:'var(--text-secondary)',lineHeight:1.5,
-          borderTop:'1px solid var(--border)',paddingTop:5,fontStyle:'italic'}}>
-          {cause.mechanism.slice(0,130)}{cause.mechanism.length>130?'…':''}
+          borderTop:'1px solid var(--border)',paddingTop:5,fontStyle:'italic',
+          overflow:'hidden',textOverflow:'clip',whiteSpace:'nowrap'}} title={cause.mechanism}>
+          <CmdServerText lang={lang} tr={tr}>{cause.mechanism.length > 130 ? cause.mechanism.slice(0, 130) : cause.mechanism}</CmdServerText>
         </div>
       )}
     </div>
   )
 }
 
-function DecisionPanel({dec,impacts,tr,onClose}) {
+function DecisionPanel({dec,impacts,tr,lang,onClose}) {
   if (!dec) return null
   const dc = domC[dec.domain]||'var(--accent)'
   const uc = urgC[dec.urgency]||'var(--text-secondary)'
@@ -344,23 +371,31 @@ function DecisionPanel({dec,impacts,tr,onClose}) {
             color:'var(--text-secondary)',cursor:'pointer',fontSize:15}}>×</button>
         </div>
         <div style={{flex:1,overflowY:'auto',padding:'20px'}}>
-          <div style={{fontSize:17,fontWeight:800,color:'#ffffff',lineHeight:1.3,marginBottom:8}}>{dec.title}</div>
+          <div style={{fontSize:17,fontWeight:800,color:'#ffffff',lineHeight:1.3,marginBottom:8}}>
+            <CmdServerText lang={lang} tr={tr}>{dec.title}</CmdServerText>
+          </div>
           <div style={{display:'flex',gap:6,flexWrap:'wrap',marginBottom:20}}>
-            <Badge label={tr(`urgency_${dec.urgency}`)||dec.urgency} color={uc}/>
-            {dec.impact_level&&<Badge label={tr(`impact_${dec.impact_level}`)||dec.impact_level} color={uc}/>}
+            <Badge label={tr(`urgency_${dec.urgency}`)} color={uc}/>
+            {dec.impact_level&&<Badge label={tr(`impact_${dec.impact_level}`)} color={uc}/>}
             <Badge label={`${dec.confidence||'—'}%`} color='var(--text-secondary)'/>
           </div>
           <Sec label={tr('exec_why')} color='var(--red)'>
-            <p style={{fontSize:12,color:'var(--text-secondary)',lineHeight:1.75,margin:0}}>{dec.reason}</p>
+            <p style={{fontSize:12,color:'var(--text-secondary)',lineHeight:1.75,margin:0}}>
+              <CmdServerText lang={lang} tr={tr}>{dec.reason}</CmdServerText>
+            </p>
           </Sec>
           <Sec label={tr('exec_actions')} color={dc}>
             <div style={{display:'flex',flexDirection:'column',gap:7}}>
               {steps.length>1?steps.map((s,i)=>(
                 <div key={i} style={{display:'flex',gap:8,background:`${dc}08`,borderRadius:8,padding:'9px 12px',border:`1px solid ${dc}15`}}>
                   <div style={{width:20,height:20,borderRadius:'50%',background:`${dc}22`,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,fontSize:11,fontWeight:800,color:dc}}>{i+1}</div>
-                  <span style={{fontSize:11,color:'var(--text-secondary)',lineHeight:1.6}}>{s.trim()}</span>
+                  <span style={{fontSize:11,color:'var(--text-secondary)',lineHeight:1.6}}>
+                    <CmdServerText lang={lang} tr={tr}>{s.trim()}</CmdServerText>
+                  </span>
                 </div>
-              )):<p style={{fontSize:12,color:'var(--text-secondary)',lineHeight:1.75,margin:0}}>{dec.action}</p>}
+              )):<p style={{fontSize:12,color:'var(--text-secondary)',lineHeight:1.75,margin:0}}>
+                <CmdServerText lang={lang} tr={tr}>{dec.action}</CmdServerText>
+              </p>}
             </div>
           </Sec>
           {imp?.value&&(
@@ -372,21 +407,27 @@ function DecisionPanel({dec,impacts,tr,onClose}) {
                 {imp.range?.low&&<div style={{fontSize:10,color:'var(--text-secondary)',marginBottom:6,fontFamily:'var(--font-mono)'}}>
                   {imp.range.low>=1e3?`${(imp.range.low/1e3).toFixed(0)}K`:imp.range.low} – {imp.range.high>=1e3?`${(imp.range.high/1e3).toFixed(0)}K`:imp.range.high} {tr('impact_range_label')}
                 </div>}
-                <p style={{fontSize:11,color:'var(--text-secondary)',lineHeight:1.65,margin:'0 0 8px'}}>{imp.description}</p>
+                <p style={{fontSize:11,color:'var(--text-secondary)',lineHeight:1.65,margin:'0 0 8px'}}>
+                  <CmdServerText lang={lang} tr={tr}>{imp.description}</CmdServerText>
+                </p>
                 <Badge label={`${tr('fc_confidence')}: ${imp.confidence}%`} color='var(--green)'/>
               </div>
             </Sec>
           )}
           {dec.expected_effect&&(
             <Sec label={tr('exec_effect')} color='var(--green)'>
-              <p style={{fontSize:12,color:'var(--text-secondary)',lineHeight:1.75,margin:0}}>{dec.expected_effect}</p>
+              <p style={{fontSize:12,color:'var(--text-secondary)',lineHeight:1.75,margin:0}}>
+                <CmdServerText lang={lang} tr={tr}>{dec.expected_effect}</CmdServerText>
+              </p>
             </Sec>
           )}
           <div style={{display:'flex',alignItems:'center',gap:10,background:'var(--bg-elevated)',borderRadius:10,padding:'12px 16px',border:'1px solid var(--border)'}}>
             <span style={{fontSize:22,opacity:.4}}>⏱</span>
             <div>
               <div style={{fontSize:9,color:'var(--text-secondary)',textTransform:'uppercase',letterSpacing:'.06em',marginBottom:2}}>{tr('exec_timeframe')}</div>
-              <div style={{fontSize:15,fontWeight:800,color:uc,fontFamily:'monospace'}}>{dec.timeframe}</div>
+              <div style={{fontSize:15,fontWeight:800,color:uc,fontFamily:'monospace'}}>
+                <CmdServerText lang={lang} tr={tr}>{dec.timeframe}</CmdServerText>
+              </div>
             </div>
           </div>
         </div>
@@ -407,7 +448,7 @@ function deriveIssues(alerts, causes, decs, tr) {
   causes.filter(c=>c.impact==='high').slice(0,2).forEach(c => {
     if (seen.has(c.id)||issues.length>=3) return; seen.add(c.id)
     issues.push({ id:c.id, title:c.title,
-      reason:(c.description||'').slice(0,120)+((c.description||'').length>120?'…':''),
+      reason:(c.description||'').length>120?(c.description||'').slice(0,120):(c.description||''),
       severity:'high', decision: decs.find(d=>d.domain===c.domain)||null })
   })
   if (issues.length<3) {
@@ -441,7 +482,7 @@ function deriveOpportunities(decs, causes, impacts, trends, ratios, tr, lang) {
     const v = item.impact.value
     const fv = v>=1e6?`${(v/1e6).toFixed(1)}M`:v>=1e3?`${(v/1e3).toFixed(0)}K`:`${v.toFixed(0)}`
     opps.push({ domain:item.domain||dec.domain,
-      title: tr(`dec_short_${dec.domain}`)||dec.title,
+      title: tr(`dec_short_${dec.domain}`),
       reason: item.impact.description,
       impact_value: `+${fv}`, decision: dec })
   })
@@ -452,7 +493,7 @@ function deriveOpportunities(decs, causes, impacts, trends, ratios, tr, lang) {
       const [k,r] = good
       opps.push({ domain:'profitability',
         title: tr('opp_strong_ratio'),
-        reason: tr('opp_strong_ratio_reason', { metric: (tr(k) || k.replace(/_/g,' ')) }),
+        reason: tr('opp_strong_ratio_reason', { metric: tr(k) }),
         impact_value: null, decision: null })
     }
   }
@@ -492,7 +533,11 @@ function DataQualityBanner({ validation, lang, tr }) {
 //  Main Component
 // ──────────────────────────────────────────────────────────────────────────────
 export default function Analysis() {
-  const { tr, lang } = useLang()
+  const { tr: trCtx, lang } = useLang()
+  const tr = useCallback((key, params) => {
+    if (params != null && typeof params === 'object') return strictTParams(trCtx, lang, key, params)
+    return strictT(trCtx, lang, key)
+  }, [trCtx, lang])
   const ctxLabel = () => kpiContextLabel({ window: 'ALL', ps: ps||{}, latestPeriod: data?.meta?.periods?.slice(-1)[0] || '', lang, tr })
   const { selectedId, selectedCompany } = useCompany()
   const { params: ps, toQueryString: scopeQS, setResolved, isIncompleteCustom, window: win } = usePeriodScope()
@@ -603,7 +648,7 @@ export default function Analysis() {
   return (
     <div className="" style={{padding:'18px 26px',display:'flex',flexDirection:'column',
       gap:14,minHeight:'calc(100vh - 62px)',background:'var(--bg-void)'}}>
-      <style>{`@keyframes slideIn{from{transform:translateX(100%);opacity:0}to{transform:translateX(0);opacity:1}}`}</style>
+      <style>{`@keyframes slideIn{from{transform:translateX(100%);opacity:0}to{transform:translateX(0);opacity:1}}@keyframes spin{to{transform:rotate(360deg)}}`}</style>
 
       <DrillBackBar detailLabel={tr('nav_drill_analysis')} />
 
@@ -623,7 +668,11 @@ export default function Analysis() {
         <button onClick={load} disabled={loading}
           style={{padding:'7px 12px',borderRadius:8,border:'1px solid var(--border)',
             background:'var(--bg-elevated)',color:'#aab4c3',fontSize:12,cursor:'pointer'}}>
-          {loading?'…':'↻'}
+          {loading ? (
+            <span style={{ display: 'inline-block', width: 12, height: 12, border: '2px solid var(--border)', borderTopColor: 'var(--accent)', borderRadius: '50%', animation: 'spin .7s linear infinite', verticalAlign: 'middle' }} />
+          ) : (
+            '↻'
+          )}
         </button>
           {/* ── Data Source Toggle ── */}
           <div style={{display:'flex',alignItems:'center',gap:0,background:'var(--bg-elevated)',
@@ -706,9 +755,10 @@ export default function Analysis() {
           <Card style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',minWidth:110,borderTop:`2px solid ${hc}`}}>
             <div style={{fontFamily:'var(--font-mono)',fontSize:36,fontWeight:800,color:hc,lineHeight:1}}>{health??'—'}</div>
             <div style={{fontSize:9,color:'var(--text-secondary)',marginTop:4}}>/100</div>
-            <div style={{fontSize:10,fontWeight:700,color:hc,marginTop:6,textAlign:'center'}}>{tr(`status_${status}_simple`)||tr(`status_${status}`)||status}</div>
+            <div style={{fontSize:10,fontWeight:700,color:hc,marginTop:6,textAlign:'center'}}>{tr(`status_${status}_simple`)}</div>
           </Card>
           <MetricCard label={kpiLabel(tr('fc_revenue'), ctxLabel(), tr)} value={formatCompact(kpis.revenue?.value)} fullValue={formatFull(kpis.revenue?.value)}
+            lang={lang} tr={tr} momWord={tr('mom_label')}
             mom={kpis.revenue?.mom_pct} spark={series.revenue?.slice(-10)} color='var(--accent)' explain={kpiExplain.revenue}
             insight={(() => {
               const dir = trends?.revenue?.direction
@@ -718,8 +768,9 @@ export default function Analysis() {
                 : null
             })()}
             cause={(()=>{const dec=(d?.decisions||[]).find(x=>x.domain==='growth');return dec?.reason?dec.reason.split('. ')[0].slice(0,60):null})()}
-            forecast={kpiForecast('revenue',fcData,lang,formatCompact)}/>
+            forecast={kpiForecast('revenue',fcData,tr,formatCompact)}/>
           <MetricCard label={kpiLabel(tr('fc_net_profit'), ctxLabel(), tr)} value={formatCompact(kpis.net_profit?.value)} fullValue={formatFull(kpis.net_profit?.value)}
+            lang={lang} tr={tr} momWord={tr('mom_label')}
             mom={kpis.net_profit?.mom_pct} spark={series.net_profit?.slice(-10)} color='var(--green)' explain={kpiExplain.net_profit}
             insight={(() => {
               const st = ratios?.profitability?.net_margin_pct?.status
@@ -727,10 +778,11 @@ export default function Analysis() {
             })()}
             cause={(() => {
               const gm = ratios?.profitability?.gross_margin_pct
-              return gm?.value != null ? `${tr('gross_margin')} ${gm.value.toFixed(1)}%` : null
+              return gm?.value != null ? tr('dash_gross_margin_line', { value: gm.value.toFixed(1) }) : null
             })()}
-            forecast={kpiForecast('net_profit',fcData,lang,formatCompact)}/>
+            forecast={kpiForecast('net_profit',fcData,tr,formatCompact)}/>
           <MetricCard label={tr('net_margin')} value={fmtP(kpis.net_margin?.value)}
+            lang={lang} tr={tr} momWord={tr('mom_label')}
             mom={kpis.net_margin?.mom_pct} color='var(--violet)' explain={kpiExplain.margin}
             insight={(()=>{const ins=(d?.statements?.insights||[]).find(i=>i.key==='strong_gross_margin');return ins?ins.message.split('. ')[0]:null})()}
             cause={(()=>{const dec=(d?.decisions||[]).find(x=>x.domain==='profitability');return dec?.reason?dec.reason.split('. ')[0].slice(0,60):null})()}/>
@@ -743,14 +795,14 @@ export default function Analysis() {
               sub={tr('analysis_top_issues_sub')}/>
             {issues.length===0
               ?<p style={{fontSize:12,color:'var(--text-secondary)',fontStyle:'italic'}}>{tr('analysis_no_critical_issues')}</p>
-              :issues.map((iss,i)=><IssueCard key={i} issue={iss} tr={tr} onOpen={setSelDec}/>)}
+              :issues.map((iss,i)=><IssueCard key={i} issue={iss} tr={tr} lang={lang} onOpen={setSelDec}/>)}
           </Card>
           <Card style={{borderTop:'2px solid var(--green)'}}>
             <SectionHead label={tr('analysis_top_opps')} count={opps.length} color='var(--green)'
               sub={tr('analysis_top_opps_sub')}/>
             {opps.length===0
               ?<p style={{fontSize:12,color:'var(--text-secondary)',fontStyle:'italic'}}>{tr('analysis_more_data_required')}</p>
-              :opps.map((opp,i)=><OpportunityCard key={i} opp={opp} tr={tr} onOpen={setSelDec}/>)}
+              :opps.map((opp,i)=><OpportunityCard key={i} opp={opp} tr={tr} lang={lang} onOpen={setSelDec}/>)}
           </Card>
         </div>
 
@@ -775,13 +827,13 @@ export default function Analysis() {
               <SectionHead label={tr('exec_action_strip')} count={decs.length} color='var(--red)'
                 sub={tr('exec_action_strip_sub')}/>
               {decs.length===0?<p style={{fontSize:12,color:'var(--text-secondary)'}}>—</p>
-                :decs.slice(0,3).map((dec,i)=><DecCard key={i} dec={dec} tr={tr} impacts={impacts} onOpen={setSelDec}/>)}
+                :decs.slice(0,3).map((dec,i)=><DecCard key={i} dec={dec} tr={tr} lang={lang} impacts={impacts} onOpen={setSelDec}/>)}
             </Card>
             <Card>
               <SectionHead label={tr('exec_root_causes')} count={causes.filter(c=>c.impact==='high').length} color='var(--amber)'
                 sub={tr('exec_root_causes_sub')}/>
               {causes.length===0?<p style={{fontSize:12,color:'var(--text-secondary)'}}>—</p>
-                :causes.slice(0,4).map((c,i)=><CauseCard key={i} cause={c}/>)}
+                :causes.slice(0,4).map((c,i)=><CauseCard key={i} cause={c} lang={lang} tr={tr}/>)}
             </Card>
             <Card>
               <SectionHead label={tr('exec_breakdown')} color='var(--accent)'
@@ -835,7 +887,7 @@ export default function Analysis() {
               {alerts.filter(a=>a.impact==='profitability').length>0&&(
                 <Card>
                   <SectionHead label={tr('alerts_title')} color='var(--amber)'/>
-                  {alerts.filter(a=>a.impact==='profitability').map((a,i)=><AlertCard key={i} alert={a} tr={tr}/>)}
+                  {alerts.filter(a=>a.impact==='profitability').map((a,i)=><AlertCard key={i} alert={a} tr={tr} lang={lang}/>)}
                 </Card>
               )}
             </div>
@@ -844,14 +896,14 @@ export default function Analysis() {
                 <Card>
                   <SectionHead label={tr('exec_why')} color='var(--red)'
                     sub={tr('profitability_root_causes_sub')}/>
-                  {causes.filter(c=>c.domain==='profitability').map((c,i)=><CauseCard key={i} cause={c}/>)}
+                  {causes.filter(c=>c.domain==='profitability').map((c,i)=><CauseCard key={i} cause={c} lang={lang} tr={tr}/>)}
                 </Card>
               )}
               {decs.filter(d=>d.domain==='profitability').length>0&&(
                 <Card>
                   <SectionHead label={tr('exec_actions')} color='var(--accent)'/>
                   {decs.filter(d=>d.domain==='profitability').map((dec,i)=>(
-                    <DecCard key={i} dec={dec} tr={tr} impacts={impacts} onOpen={setSelDec}/>
+                    <DecCard key={i} dec={dec} tr={tr} lang={lang} impacts={impacts} onOpen={setSelDec}/>
                   ))}
                 </Card>
               )}
@@ -883,14 +935,14 @@ export default function Analysis() {
                 <Card>
                   <SectionHead label={tr('exec_why')} color='var(--red)'
                     sub={tr('liquidity_why_sub')}/>
-                  {causes.filter(c=>['liquidity','cross_domain'].includes(c.domain)).map((c,i)=><CauseCard key={i} cause={c}/>)}
+                  {causes.filter(c=>['liquidity','cross_domain'].includes(c.domain)).map((c,i)=><CauseCard key={i} cause={c} lang={lang} tr={tr}/>)}
                 </Card>
               )}
               {decs.filter(d=>d.domain==='liquidity').length>0&&(
                 <Card>
                   <SectionHead label={tr('exec_actions')} color='var(--accent)'/>
                   {decs.filter(d=>d.domain==='liquidity').map((dec,i)=>(
-                    <DecCard key={i} dec={dec} tr={tr} impacts={impacts} onOpen={setSelDec}/>
+                    <DecCard key={i} dec={dec} tr={tr} lang={lang} impacts={impacts} onOpen={setSelDec}/>
                   ))}
                 </Card>
               )}
@@ -922,14 +974,14 @@ export default function Analysis() {
                 <Card>
                   <SectionHead label={tr('exec_root_causes')} color='var(--amber)'
                     sub={tr('efficiency_leverage_root_causes_sub')}/>
-                  {causes.filter(c=>['efficiency','leverage'].includes(c.domain)).map((c,i)=><CauseCard key={i} cause={c}/>)}
+                  {causes.filter(c=>['efficiency','leverage'].includes(c.domain)).map((c,i)=><CauseCard key={i} cause={c} lang={lang} tr={tr}/>)}
                 </Card>
               )}
               {decs.filter(d=>['efficiency','leverage'].includes(d.domain)).length>0&&(
                 <Card>
                   <SectionHead label={tr('exec_actions')} color='var(--accent)'/>
                   {decs.filter(d=>['efficiency','leverage'].includes(d.domain)).map((dec,i)=>(
-                    <DecCard key={i} dec={dec} tr={tr} impacts={impacts} onOpen={setSelDec}/>
+                    <DecCard key={i} dec={dec} tr={tr} lang={lang} impacts={impacts} onOpen={setSelDec}/>
                   ))}
                 </Card>
               )}
@@ -944,7 +996,7 @@ export default function Analysis() {
               sub={tr('exec_action_strip_ranked_sub')}/>
             {decs.length===0
               ?<p style={{color:'var(--text-secondary)',fontSize:13}}>—</p>
-              :decs.map((dec,i)=><DecCard key={i} dec={dec} tr={tr} impacts={impacts} onOpen={setSelDec}/>)}
+              :decs.map((dec,i)=><DecCard key={i} dec={dec} tr={tr} lang={lang} impacts={impacts} onOpen={setSelDec}/>)}
           </div>
         )}
 
@@ -955,17 +1007,17 @@ export default function Analysis() {
               sub={tr('alerts_by_severity_sub')}/>
             {alerts.length===0
               ?<p style={{color:'var(--text-secondary)',fontSize:13}}>—</p>
-              :alerts.map((a,i)=><AlertCard key={i} alert={a} tr={tr}/>)}
+              :alerts.map((a,i)=><AlertCard key={i} alert={a} tr={tr} lang={lang}/>)}
             {causes.length>0&&<>
               <div style={{height:14}}/>
               <SectionHead label={tr('exec_root_causes')} count={causes.length} color='var(--amber)'/>
-              {causes.slice(0,5).map((c,i)=><CauseCard key={i} cause={c}/>)}
+              {causes.slice(0,5).map((c,i)=><CauseCard key={i} cause={c} lang={lang} tr={tr}/>)}
             </>}
           </div>
         )}
       </>)}
 
-      <DecisionPanel dec={selDec} impacts={impacts} tr={tr} onClose={()=>setSelDec(null)}/>
+      <DecisionPanel dec={selDec} impacts={impacts} tr={tr} lang={lang} onClose={()=>setSelDec(null)}/>
     </div>
   )
 }

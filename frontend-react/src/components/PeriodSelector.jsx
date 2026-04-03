@@ -4,6 +4,7 @@
  * Reads/sets window state from parent via props.
  */
 import { useLang } from '../context/LangContext.jsx'
+import { strictT } from '../utils/strictI18n.js'
 
 const WINDOWS = [
   { key: '3M',  labelKey: 'window_3m'  },
@@ -14,7 +15,7 @@ const WINDOWS = [
 ]
 
 export default function PeriodSelector({ window, setWindow, disabled = false, style = {} }) {
-  const { tr } = useLang()
+  const { tr, lang } = useLang()
 
   return (
     <div style={{ display: 'flex', gap: 4, alignItems: 'center', ...style }}>
@@ -41,7 +42,7 @@ export default function PeriodSelector({ window, setWindow, disabled = false, st
               boxShadow:      active ? '0 0 12px var(--accent-glow)' : 'none',
             }}
           >
-            {tr(w.labelKey)}
+            {strictT(tr, lang, w.labelKey)}
           </button>
         )
       })}

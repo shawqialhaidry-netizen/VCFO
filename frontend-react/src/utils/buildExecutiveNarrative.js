@@ -23,9 +23,16 @@ function arActionLine(title) {
   return t
 }
 
-/** @param {string} lang */
-function lex(lang) {
+/**
+ * @param {string} lang
+ * @param {string} momentumSuffix - MoM wording from i18n `mom_label` (or legacy fallback)
+ */
+function lex(lang, momentumSuffix) {
   const l = (lang || 'en').toLowerCase()
+  const mw =
+    momentumSuffix != null && String(momentumSuffix).trim() !== ''
+      ? String(momentumSuffix)
+      : momWord(lang)
   if (l === 'ar') {
     return {
       revenue: 'الإيرادات',
@@ -33,7 +40,7 @@ function lex(lang) {
       margin: 'الهامش',
       contributing: (cat, amt) => `أبرز مساهمة: ${cat} بمقدار ${amt}`,
       branchPct: (name, pct) => `${name} تمثّل ${pct}% من زيادة التكلفة`,
-      branchPressure: (name, amt) => `${name}: زيادة مصروفات بمقدار ${amt} شهريًا`,
+      branchPressure: (name, amt) => `${name}: زيادة مصروفات بمقدار ${amt} ${mw}`,
       actionFrom: (title) => arActionLine(title),
       stableWhat: 'الأداء مستقر دون انحرافات جوهرية.',
       whyOcf: (amt) => `التدفق النقدي التشغيلي: ${amt}.`,
@@ -69,7 +76,7 @@ function lex(lang) {
       margin: 'Marj',
       contributing: (cat, amt) => `${cat}: ${amt} katkı`,
       branchPct: (name, pct) => `${name} maliyet artışının %${pct}'ini sürüklüyor`,
-      branchPressure: (name, amt) => `${name} maliyet baskısı ${amt} Aylık`,
+      branchPressure: (name, amt) => `${name} maliyet baskısı ${amt} ${mw}`,
       actionFrom: (title) => String(title || '').trim(),
       stableWhat: 'Performans, önemli sapma olmadan istikrarlı.',
       whyOcf: (amt) => `İşletme nakdi: ${amt}.`,
@@ -104,7 +111,7 @@ function lex(lang) {
     margin: 'Margin',
     contributing: (cat, amt) => `${cat} contributing ${amt}`,
     branchPct: (name, pct) => `${name} driving ${pct}% of cost increase`,
-    branchPressure: (name, amt) => `${name} adding ${amt} expense MoM`,
+    branchPressure: (name, amt) => `${name} adding ${amt} expense ${mw}`,
     actionFrom: (title) => String(title || '').trim(),
     stableWhat: 'Performance stable with no material deviations.',
     whyOcf: (amt) => `Operating cash flow: ${amt}.`,
@@ -192,9 +199,9 @@ export function factOverlapsWhy(narrative, factText) {
   return hits.length >= Math.min(2, tokens.length) || (tokens.length === 1 && hits.length === 1)
 }
 
-function buildWhatLines(payload, L, lang = 'en') {
+function buildWhatLines(payload, L, lang = 'en', mw) {
   const lines = []
-  const mw = momWord(lang)
+  const momentum = mw != null && String(mw).trim() !== '' ? String(mw) : momWord(lang)
   const kpis = payload.kpi_block?.kpis || {}
   const wc = payload.financial_brain?.available ? payload.financial_brain?.what_changed : null
   const mom = wc?.mom || {}
@@ -210,30 +217,30 @@ function buildWhatLines(payload, L, lang = 'en') {
   if (revD != null && Number.isFinite(Number(revD))) {
     const pct =
       revMomPct != null && Number.isFinite(Number(revMomPct)) ? ` (${fmtPct(revMomPct)})` : ''
-    lines.push(`${L.revenue} ${arrowForDelta(revD)} ${fmtSignedMoney(revD)}${pct} ${mw}`)
+    lines.push(`${L.revenue} ${arrowForDelta(revD)} ${fmtSignedMoney(revD)}${pct} ${momentum}`)
   } else if (revMomPct != null && Number.isFinite(Number(revMomPct))) {
-    lines.push(`${L.revenue} ${arrowForDelta(revMomPct)} (${fmtPct(revMomPct)}) ${mw}`)
+    lines.push(`${L.revenue} ${arrowForDelta(revMomPct)} (${fmtPct(revMomPct)}) ${momentum}`)
   }
 
   if (expD != null && Number.isFinite(Number(expD))) {
     const pct =
       expMomPct != null && Number.isFinite(Number(expMomPct)) ? ` (${fmtPct(expMomPct)})` : ''
-    lines.push(`${L.expenses} ${arrowForDelta(expD)} ${fmtSignedMoney(expD)}${pct} ${mw}`)
+    lines.push(`${L.expenses} ${arrowForDelta(expD)} ${fmtSignedMoney(expD)}${pct} ${momentum}`)
   } else if (expMomPct != null && Number.isFinite(Number(expMomPct))) {
-    lines.push(`${L.expenses} ${arrowForDelta(expMomPct)} (${fmtPct(expMomPct)}) ${mw}`)
+    lines.push(`${L.expenses} ${arrowForDelta(expMomPct)} (${fmtPct(expMomPct)}) ${momentum}`)
   }
 
   if (ratioPp != null && Number.isFinite(Number(ratioPp))) {
     const a = Number(ratioPp) > 0 ? '↓' : Number(ratioPp) < 0 ? '↑' : '→'
-    lines.push(`${L.margin} ${a} ${fmtPp(ratioPp)} ${mw}`)
+    lines.push(`${L.margin} ${a} ${fmtPp(ratioPp)} ${momentum}`)
   } else if (nmMomPct != null && Number.isFinite(Number(nmMomPct))) {
-    lines.push(`${L.margin} ${arrowForDelta(nmMomPct)} (${fmtPct(nmMomPct)}) ${mw}`)
+    lines.push(`${L.margin} ${arrowForDelta(nmMomPct)} (${fmtPct(nmMomPct)}) ${momentum}`)
   }
 
   return lines.slice(0, MAX_COL)
 }
 
-function buildWhyLines(payload, L, lang) {
+function buildWhyLines(payload, L, lang, translate) {
   const lines = []
   const fb = payload.financial_brain
   const links = fb?.why?.links || {}
@@ -265,11 +272,13 @@ function buildWhyLines(payload, L, lang) {
     !lines.some((l) => l.includes(String(ineff.branch_name)))
   ) {
     const tag =
-      lang === 'ar'
-        ? 'من الإيرادات'
-        : lang === 'tr'
-          ? 'gelire göre gider payı'
-          : 'of revenue'
+      typeof translate === 'function'
+        ? String(translate('cmd_branch_of_rev') || '')
+        : lang === 'ar'
+          ? 'من الإيرادات'
+          : lang === 'tr'
+            ? 'gelire göre gider payı'
+            : 'of revenue'
     _dedupePush(lines, `${ineff.branch_name} · ${ineff.expense_pct_of_revenue}% ${tag}`)
   }
 
@@ -279,10 +288,10 @@ function buildWhyLines(payload, L, lang) {
     Array.isArray(payload.root_causes)
   ) {
     for (const rc of payload.root_causes) {
-      const t = rc?.title || rc?.key
-      if (t) {
-        const s = String(t).trim()
-        if (s.length > 120) _dedupePush(lines, s.slice(0, 117) + '…')
+      const rcTitle = rc?.title || rc?.key
+      if (rcTitle) {
+        const s = String(rcTitle).trim()
+        if (s.length > 120) _dedupePush(lines, s.slice(0, 117))
         else _dedupePush(lines, s)
       }
       if (lines.length >= MAX_COL) break
@@ -363,19 +372,19 @@ function buildDoLines(payload, L, lang = 'en') {
       const title = d?.title
       if (!title) continue
       let one = String(title).trim()
-      if (one.length > 88) one = `${one.slice(0, 85)}…`
+      if (one.length > 88) one = one.slice(0, 85)
       _dedupePush(lines, L.actionFrom(one))
       if (lines.length >= MAX_COL) break
     }
   }
   if (lines.length < MAX_COL && payload.top_focus) {
     let t = String(payload.top_focus).trim()
-    if (t.length > 88) t = `${t.slice(0, 85)}…`
+    if (t.length > 88) t = t.slice(0, 85)
     _dedupePush(lines, L.actionFrom(t))
   }
   if (lines.length < MAX_COL && Array.isArray(payload.decisions) && payload.decisions[0]?.title) {
     let t = String(payload.decisions[0].title).trim()
-    if (t.length > 88) t = `${t.slice(0, 85)}…`
+    if (t.length > 88) t = t.slice(0, 85)
     _dedupePush(lines, L.actionFrom(t))
   }
   return lines.slice(0, MAX_COL)
@@ -383,11 +392,13 @@ function buildDoLines(payload, L, lang = 'en') {
 
 /**
  * @param {Record<string, unknown>} payload - Executive `data`
- * @param {{ lang?: string }} [options]
+ * @param {{ lang?: string, t?: (key: string) => string }} [options] - pass `t` = strictT-bound lookup for aligned `mom_label` / `cmd_branch_of_rev` copy
  */
 export function buildExecutiveNarrative(payload = {}, options = {}) {
   const lang = options.lang || 'en'
-  const L = lex(lang)
+  const translate = typeof options.t === 'function' ? options.t : null
+  const mw = translate ? translate('mom_label') : momWord(lang)
+  const L = lex(lang, mw)
 
   if (!payload || typeof payload !== 'object') {
     return {
@@ -402,10 +413,10 @@ export function buildExecutiveNarrative(payload = {}, options = {}) {
   }
 
   const wc = payload.financial_brain?.what_changed
-  let whatLines = buildWhatLines(payload, L, lang).slice(0, 2)
+  let whatLines = buildWhatLines(payload, L, lang, mw).slice(0, 2)
   if (!whatLines.length) whatLines = [L.stableWhat]
 
-  const rawWhyLines = buildWhyLines(payload, L, lang)
+  const rawWhyLines = buildWhyLines(payload, L, lang, translate)
   const metricWhy = pickWhyNumberLine(payload, L)
   let whyLines = rawWhyLines.slice()
   if (!whyLines.length) {

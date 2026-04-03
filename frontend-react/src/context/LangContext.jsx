@@ -13,8 +13,7 @@
  */
 import { createContext, useContext, useEffect, useState, useCallback } from 'react'
 import { loadTranslations, LANGUAGES } from '../i18n/index.js'
-import { fallbackLabel } from '../i18n/criticalFallbacks.js'
-import { STRICT_I18N_PLACEHOLDER, looksLikeRawI18nKey } from '../utils/strictI18n.js'
+import { readTranslation, applyTranslationParams } from '../utils/strictI18n.js'
 
 const STORAGE_KEY = 'vcfo_lang'
 const DEFAULT_LANG = 'en'
@@ -67,28 +66,14 @@ export function LangProvider({ children }) {
     _setLang(code)
   }, [])
 
-  // ── 5. Translation helper (strict: no raw keys, no EN leakage into ar/tr) ─
-  const tr = useCallback((key, params = null) => {
-    const invalid = (val) =>
-      val == null ||
-      val === '' ||
-      val === key ||
-      (typeof val === 'string' && looksLikeRawI18nKey(val))
-
-    let s = translations[key]
-    if (invalid(s)) {
-      s = fallbackLabel(lang, key)
-    }
-    if (invalid(s)) {
-      console.error('[i18n] unresolved or invalid translation', { lang, key })
-      s = STRICT_I18N_PLACEHOLDER
-    }
-    if (!params) return s
-    for (const [k, v] of Object.entries(params)) {
-      s = s.replaceAll(`{${k}}`, v != null ? String(v) : STRICT_I18N_PLACEHOLDER)
-    }
-    return s
-  }, [translations, lang])
+  // ── 5. Translation helper — same resolution as strictT(readTranslation); no EN→ar/tr leakage ─
+  const tr = useCallback(
+    (key, params = null) => {
+      const s = readTranslation(translations, lang, key)
+      return applyTranslationParams(s, lang, params)
+    },
+    [translations, lang]
+  )
 
   return (
     <LangContext.Provider value={{ lang, setLang, tr, ready, translations }}>
