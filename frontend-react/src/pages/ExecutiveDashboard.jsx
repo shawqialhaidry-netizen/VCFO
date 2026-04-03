@@ -973,7 +973,7 @@ export default function ExecutiveDashboard() {
         return
       }
       const j = await r.json(); const d = j.data||{}
-      setNarrative(buildExecutiveNarrative(d, { lang, t: (k) => strictT(tr, lang, k) }))
+      setNarrative(buildExecutiveNarrative(d, { lang, t: tr }))
       setIntel(d.intelligence||null)
       setDecs(d.decisions||[])
       setCauses(d.root_causes||[])

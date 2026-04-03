@@ -6,6 +6,27 @@ import { fallbackLabel } from '../i18n/criticalFallbacks.js'
 
 export const STRICT_I18N_PLACEHOLDER = '\u2026'
 
+/** Single source of truth for UI language codes (Command Center, narrative, drills). */
+export function normalizeUiLang(lang) {
+  const l = String(lang ?? '')
+    .trim()
+    .toLowerCase()
+  if (l === 'ar') return 'ar'
+  if (l === 'tr') return 'tr'
+  return 'en'
+}
+
+/**
+ * Bound translator for narrative builders: supports `t(key)` and `t(key, params)`.
+ * Keeps one resolution path with strictT / strictTParams (no English leakage in ar/tr).
+ */
+export function makeStrictTr(tr, lang) {
+  return (key, params) => {
+    if (params != null && typeof params === 'object') return strictTParams(tr, lang, key, params)
+    return strictT(tr, lang, key)
+  }
+}
+
 /** Visible fallback when a key is missing — Arabic/Turkish get non-English copy from locale JSON. */
 export function localizedMissingPlaceholder(lang) {
   const code = String(lang || 'en').toLowerCase()
@@ -18,7 +39,7 @@ export function localizedMissingPlaceholder(lang) {
 export function looksLikeRawI18nKey(v) {
   if (typeof v !== 'string') return false
   const t = v.trim()
-  return /^(exec_|cmd_|nav_|dq_|kpi_label_|kpi_explain_|tab_|ratio_|domain_signal_)[a-z0-9_]+$/i.test(t)
+  return /^(exec_|cmd_|nav_|dq_|kpi_label_|kpi_explain_|tab_|ratio_|domain_signal_|narr_|drill_intel_|ai_cfo_)[a-z0-9_]+$/i.test(t)
 }
 
 function invalidTranslation(key, val) {

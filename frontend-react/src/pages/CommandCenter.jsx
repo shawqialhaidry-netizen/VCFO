@@ -16,7 +16,7 @@ import { formatCompact, formatFull } from '../utils/numberFormat.js'
 import { buildAnalysisQuery } from '../utils/buildAnalysisQuery.js'
 import { buildExecutiveNarrative } from '../utils/buildExecutiveNarrative.js'
 import { analysisPathFromPanelType, pathForDrillAnalysisTab } from '../utils/analysisRoutes.js'
-import { strictT, localizedMissingPlaceholder } from '../utils/strictI18n.js'
+import { strictT, strictTParams, localizedMissingPlaceholder } from '../utils/strictI18n.js'
 import { selectPrimaryDecision, firstExpenseActionLine } from '../utils/selectPrimaryDecision.js'
 import { CLAMP_FADE_MASK_SHORT } from '../utils/serverTextUi.js'
 import CmdServerText from '../components/CmdServerText.jsx'
@@ -32,6 +32,8 @@ import {
 import ExpenseInsightsSection from '../components/ExpenseInsightsSection.jsx'
 import CommandCenterDashboardGrid from '../components/CommandCenterDashboardGrid.jsx'
 import AiCfoPanel from '../components/AiCfoPanel.jsx'
+import DrillIntelligenceBlock from '../components/DrillIntelligenceBlock.jsx'
+import { buildDrillIntelligence } from '../utils/buildDrillIntelligence.js'
 import CmdSparkline from '../components/CmdSparkline.jsx'
 import {
   ExecutiveBranchCompareChart,
@@ -581,6 +583,9 @@ function HealthScorePanel({
 function ContextPanel({ type, payload, extra, tr, lang, onClose, onNavigate, impacts={} }) {
   if (!type || !payload) return null
   const dc = dClr[payload.domain] || T.accent
+  const tDrill = (k, p) => (p != null && typeof p === 'object' ? strictTParams(tr, lang, k, p) : strictT(tr, lang, k))
+  const drillLines = buildDrillIntelligence({ panelType: type, payload, extra, t: tDrill })
+  const drillTheme = { card: T.card, border: T.border, text1: T.text1, text2: T.text2, text3: T.text3, accent: T.accent }
 
   const Sec = ({ label, color=T.text3, children }) => (
     <div style={{marginBottom:22}}>
@@ -637,6 +642,15 @@ function ContextPanel({ type, payload, extra, tr, lang, onClose, onNavigate, imp
         ) : null}
         <Pill label={`${payload.confidence||'—'}%`} />
       </div>
+
+      <DrillIntelligenceBlock
+        what={drillLines.what}
+        why={drillLines.why}
+        do={drillLines.do}
+        tr={tr}
+        lang={lang}
+        theme={drillTheme}
+      />
 
       <Sec label={strictT(tr, lang, 'exec_why')} color={T.red}>
         <p style={{fontSize:12,color:T.text2,lineHeight:1.75,margin:0,marginBottom:extra?.causes?.length?10:0, ...CLAMP_FADE_MASK_SHORT}}>
@@ -751,12 +765,11 @@ function ContextPanel({ type, payload, extra, tr, lang, onClose, onNavigate, imp
     const plab = li >= 0 && periodsDrill[li] != null ? String(periodsDrill[li]).slice(0, 7) : null
     const topBr = ciDrill?.efficiency_ranking?.by_expense_pct_of_revenue_desc?.[0]
     const branchInfluence =
-      topBr?.branch_name != null
-        ? `${topBr.branch_name}${
-            topBr.expense_pct_of_revenue != null
-              ? ` · ${Number(topBr.expense_pct_of_revenue).toFixed(1)}% ${strictT(tr, lang, 'cmd_branch_of_rev')}`
-              : ''
-          }`
+      topBr?.branch_name != null && topBr.expense_pct_of_revenue != null
+        ? strictTParams(tr, lang, 'drill_intel_branch_expense_line', {
+            name: String(topBr.branch_name),
+            pct: Number(topBr.expense_pct_of_revenue).toFixed(1),
+          })
         : null
 
     const nmRaw = payload.type === 'net_margin' ? payload.raw : null
@@ -942,6 +955,14 @@ function ContextPanel({ type, payload, extra, tr, lang, onClose, onNavigate, imp
             </div>
           ))}
         </div>
+        <DrillIntelligenceBlock
+          what={drillLines.what}
+          why={drillLines.why}
+          do={drillLines.do}
+          tr={tr}
+          lang={lang}
+          theme={drillTheme}
+        />
         {extra?.alerts?.length > 0 && (
           <Sec label={strictT(tr, lang, 'alerts_title')} color={T.amber}>
             {extra.alerts.slice(0, 3).map((a, i) => (
@@ -1011,6 +1032,15 @@ function ContextPanel({ type, payload, extra, tr, lang, onClose, onNavigate, imp
             <div style={{fontSize:9,color:T.text3}}>/100</div>
           </div>
         </div>
+
+        <DrillIntelligenceBlock
+          what={drillLines.what}
+          why={drillLines.why}
+          do={drillLines.do}
+          tr={tr}
+          lang={lang}
+          theme={drillTheme}
+        />
 
         {causes.length>0 && (
           <Sec label={strictT(tr, lang, 'exec_why')} color={T.red}>
@@ -1089,6 +1119,14 @@ function ContextPanel({ type, payload, extra, tr, lang, onClose, onNavigate, imp
       <div style={{ marginBottom: 20 }}>
         <Pill label={strictT(tr, lang, `urgency_${payload.severity}`)} critical={payload.severity === 'high'} />
       </div>
+      <DrillIntelligenceBlock
+        what={drillLines.what}
+        why={drillLines.why}
+        do={drillLines.do}
+        tr={tr}
+        lang={lang}
+        theme={drillTheme}
+      />
       <Sec label={strictT(tr, lang, 'exec_why')} color={uClr[payload.severity]||T.amber}>
         <p style={{fontSize:12,color:T.text2,lineHeight:1.75,margin:0, ...CLAMP_FADE_MASK_SHORT}}>
           <CmdServerText lang={lang} tr={tr} as="span">
@@ -1123,6 +1161,14 @@ function ContextPanel({ type, payload, extra, tr, lang, onClose, onNavigate, imp
         <div style={{ marginBottom: 16 }}>
           <Pill label={strictT(tr, lang, `urgency_${pri}`)} critical={pri === 'high'} />
         </div>
+        <DrillIntelligenceBlock
+          what={drillLines.what}
+          why={drillLines.why}
+          do={drillLines.do}
+          tr={tr}
+          lang={lang}
+          theme={drillTheme}
+        />
         {d.rationale ? (
           <Sec label={strictT(tr, lang, 'exec_why')} color={T.red}>
             <p style={{ margin: 0, fontSize: 12, color: T.text2, lineHeight: 1.75, ...CLAMP_FADE_MASK_SHORT }}>
@@ -1199,11 +1245,21 @@ function ContextPanel({ type, payload, extra, tr, lang, onClose, onNavigate, imp
           {type==='domain'   && <Domain/>}
           {type==='alert'    && <Alert/>}
           {type==='branch_compare' && (
-            <ExecutiveBranchCompareChart
-              comparativeIntelligence={extra?.execChartBundle?.comparative_intelligence}
-              tr={tr}
-              lang={lang}
-            />
+            <>
+              <ExecutiveBranchCompareChart
+                comparativeIntelligence={extra?.execChartBundle?.comparative_intelligence}
+                tr={tr}
+                lang={lang}
+              />
+              <DrillIntelligenceBlock
+                what={drillLines.what}
+                why={drillLines.why}
+                do={drillLines.do}
+                tr={tr}
+                lang={lang}
+                theme={drillTheme}
+              />
+            </>
           )}
         </div>
         {!!onNavigate && (
@@ -1817,23 +1873,6 @@ export default function CommandCenter() {
   const [pType, setPType] = useState(null)
   const [pLoad, setPLoad] = useState(null)
   const [pXtra, setPXtra] = useState(null)
-  const open = useCallback((t, p, x = null) => {
-    setPType(t)
-    setPLoad(p)
-    const chartTypes = t === 'kpi' || t === 'decision' || t === 'expense_v2' || t === 'branch_compare'
-    setPXtra({
-      ...(x || {}),
-      execChartBundle:
-        chartTypes && main
-          ? {
-              kpi_block: main.kpi_block,
-              cashflow: main.cashflow,
-              comparative_intelligence: main.comparative_intelligence,
-            }
-          : null,
-    })
-  }, [main])
-  const close = useCallback(()=>{ setPType(null); setPLoad(null); setPXtra(null) },[])
 
   const drillAnalysis = useCallback(
     (tab) => {
@@ -1861,7 +1900,7 @@ export default function CommandCenter() {
         return
       }
       const j = await r.json(); const d = j.data||{}
-      setNarrative(buildExecutiveNarrative(d, { lang, t: (k) => strictT(tr, lang, k) }))
+      setNarrative(buildExecutiveNarrative(d, { lang, t: tr }))
       psSetResolved(j.meta?.scope || null)
       setIntel(d.intelligence||null)
       setDecs(d.decisions||[])
@@ -1993,6 +2032,43 @@ export default function CommandCenter() {
     actionLine: narrative?.actionLine,
     onDrillAnalysis: () => drillAnalysis('overview'),
   }
+
+  const open = useCallback(
+    (panelType, p, x = null) => {
+      setPType(panelType)
+      setPLoad(p)
+      const chartTypes =
+        panelType === 'kpi' ||
+        panelType === 'decision' ||
+        panelType === 'expense_v2' ||
+        panelType === 'branch_compare'
+      setPXtra({
+        ...(x || {}),
+        execChartBundle:
+          chartTypes && main
+            ? {
+                kpi_block: main.kpi_block,
+                cashflow: main.cashflow,
+                comparative_intelligence: main.comparative_intelligence,
+              }
+            : null,
+        drillIntelBundle: {
+          narrative: narrative || null,
+          kpis,
+          primaryResolution,
+          expenseIntel,
+          decisions: Array.isArray(decs) ? decs : [],
+          health,
+        },
+      })
+    },
+    [main, narrative, kpis, primaryResolution, expenseIntel, decs, health],
+  )
+  const close = useCallback(() => {
+    setPType(null)
+    setPLoad(null)
+    setPXtra(null)
+  }, [])
 
   return (
     <div className="cmd-page">

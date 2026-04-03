@@ -65,6 +65,8 @@ export function detectAiCfoIntent(question) {
   if (/\b(margin|margins)\b/.test(s) && !scores.WHY_PROFIT) add('MARGIN', 3)
   if (/\b(risk|alert|warning|problem)\b/.test(s)) add('RISK', 4)
   if (/\b(health|score|overall)\b/.test(s)) add('HEALTH', 3)
+  if (/\b(branch|branches|store|stores|location|locations|outlet|outlets|site|sites)\b/.test(s)) add('BRANCH', 5)
+  if (/\b(forecast|scenario|scenarios|projection|projections|outlook|run\s*rate|runrate)\b/.test(s)) add('FORECAST', 5)
 
   let best = 'GENERAL'
   let bestScore = 0
@@ -83,7 +85,93 @@ function pickFollowUpKey(intent) {
   if (intent === 'CASH') return 'ai_cfo_fu_q_cash'
   if (intent === 'WHAT_NOW' || intent === 'DECISION') return 'ai_cfo_fu_q_action'
   if (intent === 'REVENUE' || intent === 'MARGIN') return 'ai_cfo_fu_q_deeper'
+  if (intent === 'BRANCH') return 'ai_cfo_fu_q_branch'
+  if (intent === 'FORECAST') return 'ai_cfo_fu_q_deeper'
   return 'ai_cfo_fu_q_deeper'
+}
+
+const DRILL_BY_INTENT = {
+  WHY_PROFIT: [
+    { path: '/profitability', focus: 'profitability', labelKey: 'ai_cfo_action_profitability_lab' },
+    { path: '/expenses', focus: 'efficiency', labelKey: 'ai_cfo_action_expense_intel' },
+  ],
+  CASH: [
+    { path: '/cash', focus: 'liquidity', labelKey: 'ai_cfo_action_cash_liquidity' },
+    { path: '/profitability', focus: 'profitability', labelKey: 'ai_cfo_action_profitability_lab' },
+  ],
+  WHAT_NOW: [
+    { path: '/decisions', focus: 'decisions', labelKey: 'ai_cfo_action_decision_center' },
+    { path: '/analysis', focus: 'overview', labelKey: 'ai_cfo_action_analysis_overview' },
+  ],
+  DECISION: [
+    { path: '/decisions', focus: 'decisions', labelKey: 'ai_cfo_action_decision_center' },
+    { path: '/alerts', focus: 'alerts', labelKey: 'ai_cfo_action_alerts_root' },
+  ],
+  REVENUE: [
+    { path: '/revenue', focus: 'profitability', labelKey: 'ai_cfo_action_revenue_intel' },
+    { path: '/expenses', focus: 'efficiency', labelKey: 'ai_cfo_action_expense_intel' },
+  ],
+  EXPENSE: [
+    { path: '/expenses', focus: 'efficiency', labelKey: 'ai_cfo_action_expense_intel' },
+    { path: '/decisions', focus: 'decisions', labelKey: 'ai_cfo_action_decision_center' },
+  ],
+  MARGIN: [
+    { path: '/profitability', focus: 'profitability', labelKey: 'ai_cfo_action_profitability_lab' },
+    { path: '/revenue', focus: 'profitability', labelKey: 'ai_cfo_action_revenue_intel' },
+  ],
+  RISK: [
+    { path: '/alerts', focus: 'alerts', labelKey: 'ai_cfo_action_alerts_root' },
+    { path: '/analysis', focus: 'overview', labelKey: 'ai_cfo_action_analysis_overview' },
+  ],
+  HEALTH: [
+    { path: '/analysis', focus: 'overview', labelKey: 'ai_cfo_action_analysis_overview' },
+    { path: '/profitability', focus: 'profitability', labelKey: 'ai_cfo_action_profitability_lab' },
+  ],
+  BRANCH: [
+    { path: '/branches', labelKey: 'ai_cfo_action_branch_intel' },
+    { path: '/expenses', focus: 'efficiency', labelKey: 'ai_cfo_action_expense_intel' },
+  ],
+  FORECAST: [
+    { path: '/forecast', focus: 'overview', labelKey: 'ai_cfo_action_forecast' },
+    { path: '/profitability', focus: 'profitability', labelKey: 'ai_cfo_action_profitability_lab' },
+  ],
+  GENERAL: [
+    { path: '/analysis', focus: 'overview', labelKey: 'ai_cfo_action_analysis_overview' },
+    { path: '/profitability', focus: 'profitability', labelKey: 'ai_cfo_action_profitability_lab' },
+  ],
+}
+
+function mentionsBranchInQuestion(question) {
+  const s = norm(question)
+  return /\b(branch|branches|store|stores|location|locations|outlet|outlets|site|sites)\b/.test(s)
+}
+
+function dedupeDrillActions(rows) {
+  const seen = new Set()
+  const out = []
+  for (const r of rows) {
+    if (!r?.path) continue
+    const k = `${r.path}\0${r.focus ?? ''}`
+    if (seen.has(k)) continue
+    seen.add(k)
+    out.push(r)
+  }
+  return out.slice(0, 2)
+}
+
+/**
+ * Primary + optional secondary drill targets from the same intent as {@link detectAiCfoIntent}.
+ * @param {string} intent
+ * @param {string} [question]
+ * @returns {Array<{ path: string, focus?: string, labelKey: string }>}
+ */
+export function buildAiCfoDrillActions(intent, question = '') {
+  const base = DRILL_BY_INTENT[intent] || DRILL_BY_INTENT.GENERAL
+  let rows = [...base]
+  if (mentionsBranchInQuestion(question) && intent !== 'BRANCH' && rows.length >= 2) {
+    rows = [rows[0], { path: '/branches', labelKey: 'ai_cfo_action_branch_intel' }]
+  }
+  return dedupeDrillActions(rows)
 }
 
 function profitDriverLine(cx, tr) {
@@ -304,6 +392,9 @@ function generateForIntent(intent, cx, tr) {
       todo.push(...cx.narrative_do.slice(0, MAX_BULLETS))
       break
     }
+    case 'BRANCH':
+    case 'GENERAL':
+    case 'FORECAST':
     default: {
       const np = cx.profit.valueFmt
       const rev = cx.revenue.valueFmt
@@ -353,7 +444,7 @@ function generateForIntent(intent, cx, tr) {
  *   scopeSummary?: string | null,
  *   alerts?: unknown[],
  * }} ctx
- * @returns {{ intent: string, what: string[], why: string[], do: string[], followUp: string | null, followUpFill: string | null }}
+ * @returns {{ intent: string, what: string[], why: string[], do: string[], followUp: string | null, followUpFill: string | null, actions: Array<{ path: string, focus?: string, labelKey: string }> }}
  */
 export function buildAiCfoReply(question, ctx) {
   const { tr, narrative, kpis = {}, main = {}, decisions = [], expenseIntel, primaryResolution, health } = ctx
@@ -374,6 +465,7 @@ export function buildAiCfoReply(question, ctx) {
 
   const { intent } = detectAiCfoIntent(question)
   const { what, why, do: todo } = generateForIntent(intent, cx, tr)
+  const actions = buildAiCfoDrillActions(intent, question)
 
   const fuKey = pickFollowUpKey(intent)
   const followUp = tSafe(tr, fuKey)
@@ -386,5 +478,6 @@ export function buildAiCfoReply(question, ctx) {
     do: todo,
     followUp,
     followUpFill: followUpFill || followUp,
+    actions,
   }
 }

@@ -13,7 +13,7 @@
  */
 import { createContext, useContext, useEffect, useState, useCallback } from 'react'
 import { loadTranslations, LANGUAGES } from '../i18n/index.js'
-import { readTranslation, applyTranslationParams } from '../utils/strictI18n.js'
+import { readTranslation, applyTranslationParams, normalizeUiLang } from '../utils/strictI18n.js'
 
 const STORAGE_KEY = 'vcfo_lang'
 const DEFAULT_LANG = 'en'
@@ -30,7 +30,7 @@ function applyDocumentLang(code) {
 function readStoredLang() {
   try {
     const stored = localStorage.getItem(STORAGE_KEY)
-    if (stored && LANGUAGES.some(l => l.code === stored)) return stored
+    if (stored && LANGUAGES.some(l => l.code === stored)) return normalizeUiLang(stored)
   } catch { /* localStorage blocked in some contexts */ }
   return DEFAULT_LANG
 }
@@ -60,10 +60,11 @@ export function LangProvider({ children }) {
 
   // ── 4. Public setter: persist + apply direction synchronously ─────────────
   const setLang = useCallback((code) => {
-    if (!LANGUAGES.some(l => l.code === code)) return
-    try { localStorage.setItem(STORAGE_KEY, code) } catch { }
-    applyDocumentLang(code)   // sync — before React re-render
-    _setLang(code)
+    const normalized = normalizeUiLang(code)
+    if (!LANGUAGES.some(l => l.code === normalized)) return
+    try { localStorage.setItem(STORAGE_KEY, normalized) } catch { }
+    applyDocumentLang(normalized)   // sync — before React re-render
+    _setLang(normalized)
   }, [])
 
   // ── 5. Translation helper — same resolution as strictT(readTranslation); no EN→ar/tr leakage ─

@@ -191,7 +191,8 @@ export function primaryDecisionRelevant(cx, intent) {
       intent === 'MARGIN' ||
       intent === 'WHAT_NOW' ||
       intent === 'REVENUE' ||
-      intent === 'GENERAL'
+      intent === 'GENERAL' ||
+      intent === 'FORECAST'
     )
   }
   const dom = pd.domain || ''
@@ -202,5 +203,5 @@ export function primaryDecisionRelevant(cx, intent) {
   if (intent === 'WHAT_NOW' || intent === 'DECISION') return true
   if (intent === 'REVENUE' && (dom.includes('revenue') || dom.includes('growth') || dom.includes('scale'))) return true
   if (intent === 'RISK' || intent === 'HEALTH') return true
-  return intent === 'GENERAL'
+  return intent === 'GENERAL' || intent === 'FORECAST'
 }

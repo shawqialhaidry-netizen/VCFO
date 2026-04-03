@@ -2,10 +2,11 @@
  * AI CFO — context-aware Q&A from executive payload (no new API).
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import '../styles/aiCfoPanel.css'
 import { buildAiCfoReply } from '../utils/buildAiCfoReply.js'
 
-function AssistantBody({ what, why, doLines, followUp, onFollowUp, tr }) {
+function AssistantBody({ what, why, doLines, actions, onDrill, followUp, onFollowUp, tr }) {
   return (
     <div className="ai-cfo-msg__bubble">
       {what?.length ? (
@@ -36,6 +37,20 @@ function AssistantBody({ what, why, doLines, followUp, onFollowUp, tr }) {
               <li key={`d-${i}`}>{line}</li>
             ))}
           </ul>
+        </div>
+      ) : null}
+      {actions?.length ? (
+        <div className="ai-cfo-actions" role="group" aria-label={tr('ai_cfo_actions_aria')}>
+          {actions.map((a) => (
+            <button
+              key={`${a.path}-${a.focus ?? ''}`}
+              type="button"
+              className="ai-cfo-action-chip"
+              onClick={() => onDrill?.(a.path, a.focus)}
+            >
+              {tr(a.labelKey)}
+            </button>
+          ))}
         </div>
       ) : null}
       {followUp ? (
@@ -80,6 +95,7 @@ export default function AiCfoPanel({
   scopeLabel,
   scopeSummary,
 }) {
+  const navigate = useNavigate()
   const [open, setOpen] = useState(false)
   const [input, setInput] = useState('')
   const [messages, setMessages] = useState([])
@@ -139,6 +155,7 @@ export default function AiCfoPanel({
             do: [],
             followUp: null,
             followUpFill: null,
+            actions: [],
           },
         ])
         return
@@ -156,10 +173,21 @@ export default function AiCfoPanel({
           do: reply.do,
           followUp: reply.followUp,
           followUpFill: reply.followUpFill,
+          actions: reply.actions || [],
         },
       ])
     },
     [hasExecutiveData, tr, replyCtx],
+  )
+
+  const drillNavigate = useCallback(
+    (path, focus) => {
+      if (!path) return
+      if (focus) navigate(path, { state: { focus } })
+      else navigate(path)
+      setOpen(false)
+    },
+    [navigate],
   )
 
   const send = useCallback(() => {
@@ -222,6 +250,8 @@ export default function AiCfoPanel({
                     what={m.what}
                     why={m.why}
                     doLines={m.do}
+                    actions={m.actions}
+                    onDrill={drillNavigate}
                     followUp={m.followUp}
                     onFollowUp={
                       m.followUpFill ? () => runQuery(m.followUpFill) : undefined

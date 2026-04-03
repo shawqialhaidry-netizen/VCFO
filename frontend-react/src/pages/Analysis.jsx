@@ -12,9 +12,13 @@
  *
  * Data: single /executive fetch — no duplicate calculations.
  */
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { strictT, strictTParams } from '../utils/strictI18n.js'
+import { buildExecutiveNarrative } from '../utils/buildExecutiveNarrative.js'
+import { selectPrimaryDecision } from '../utils/selectPrimaryDecision.js'
+import { buildDrillIntelligence } from '../utils/buildDrillIntelligence.js'
 import CmdServerText from '../components/CmdServerText.jsx'
+import DrillIntelligenceBlock from '../components/DrillIntelligenceBlock.jsx'
 import { useNavigate, useLocation } from 'react-router-dom'
 import DrillBackBar from '../components/DrillBackBar.jsx'
 import { useLang }    from '../context/LangContext.jsx'
@@ -632,6 +636,65 @@ export default function Analysis({ routeDefaultTab = null } = {}) {
   const opps   = data ? deriveOpportunities(decs, causes, impacts, trends, ratios, tr, lang) : []
   const highAlerts = alerts.filter(a=>a.severity==='high').length
 
+  const drillBundle = useMemo(() => {
+    if (!data || !d || !Object.keys(d).length) return null
+    const narr = buildExecutiveNarrative(d, { lang, t: tr })
+    const pr = selectPrimaryDecision({
+      decisions: Array.isArray(decs) ? decs : [],
+      impacts,
+      kpis,
+      cashflow,
+      comparativeIntelligence: d.comparative_intelligence ?? null,
+      expenseIntelligence: d.expense_intelligence ?? null,
+      expenseDecisionsV2: d.expense_decisions_v2 ?? [],
+    })
+    return {
+      narrative: narr,
+      kpis,
+      kpi_block: d.kpi_block,
+      primaryResolution: pr,
+      expenseIntel: d.expense_intelligence ?? null,
+      decisions: decs,
+      health,
+      cashflow: d.cashflow,
+      comparative_intelligence: d.comparative_intelligence ?? null,
+    }
+  }, [data, d, decs, impacts, kpis, cashflow, health, lang, tr])
+
+  const drillExtra = useMemo(() => {
+    if (!drillBundle) return null
+    return {
+      drillIntelBundle: {
+        narrative: drillBundle.narrative,
+        kpis: drillBundle.kpis,
+        primaryResolution: drillBundle.primaryResolution,
+        expenseIntel: drillBundle.expenseIntel,
+        decisions: drillBundle.decisions,
+        health: drillBundle.health,
+        cashflow: drillBundle.cashflow,
+        comparative_intelligence: drillBundle.comparative_intelligence,
+      },
+      execChartBundle: {
+        kpi_block: drillBundle.kpi_block,
+        cashflow: drillBundle.cashflow,
+        comparative_intelligence: drillBundle.comparative_intelligence,
+      },
+    }
+  }, [drillBundle])
+
+  const analysisDrillLines = useCallback(
+    (tabKey) => {
+      if (!drillExtra) return { what: [], why: [], do: [] }
+      return buildDrillIntelligence({
+        panelType: 'analysis_tab',
+        payload: { tab: tabKey },
+        extra: drillExtra,
+        t: tr,
+      })
+    },
+    [drillExtra, tr],
+  )
+
   const kpiExplain = {
     revenue:    kpis.revenue?.mom_pct!=null
       ? (kpis.revenue.mom_pct>0
@@ -806,6 +869,14 @@ export default function Analysis({ routeDefaultTab = null } = {}) {
             cause={(()=>{const dec=(d?.decisions||[]).find(x=>x.domain==='profitability');return dec?.reason?dec.reason.split('. ')[0].slice(0,60):null})()}/>
         </div>
 
+        {drillExtra ? (
+          <DrillIntelligenceBlock
+            {...analysisDrillLines('overview')}
+            tr={tr}
+            lang={lang}
+          />
+        ) : null}
+
         {/* TOP ISSUES + OPPORTUNITIES — always visible */}
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:14}}>
           <Card style={{borderTop:'2px solid var(--red)'}}>
@@ -894,6 +965,32 @@ export default function Analysis({ routeDefaultTab = null } = {}) {
         {/* PROFITABILITY */}
         {tab==='profitability'&&(
           <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:14}}>
+            {drillExtra ? (
+              <div style={{ gridColumn: '1 / -1' }}>
+                <DrillIntelligenceBlock {...analysisDrillLines('profitability')} tr={tr} lang={lang} />
+              </div>
+            ) : null}
+            {Object.keys(prof).filter((k) => prof[k]?.value != null).length === 0 && drillExtra ? (
+              <Card style={{ gridColumn: '1 / -1', borderTop: '2px solid var(--amber)' }}>
+                <SectionHead label={tr('exec_kpi_title')} color="var(--amber)" sub={tr('drill_intel_tab_fallback_hint')} />
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, marginTop: 8 }}>
+                  {[
+                    { k: 'revenue', v: kpis.revenue?.value },
+                    { k: 'net_profit', v: kpis.net_profit?.value },
+                    { k: 'expenses', v: kpis.expenses?.value },
+                  ].map(({ k, v }) => (
+                    <div key={k} style={{ minWidth: 120 }}>
+                      <div style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase' }}>
+                        {tr(`kpi_label_${k}`)}
+                      </div>
+                      <div style={{ fontFamily: 'var(--font-mono)', fontSize: 16, fontWeight: 800, direction: 'ltr' }}>
+                        {v != null && Number.isFinite(Number(v)) ? formatCompact(Number(v)) : '—'}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </Card>
+            ) : null}
             <div style={{display:'flex',flexDirection:'column',gap:14}}>
               <Card>
                 <SectionHead label={tr('profitability')} color='var(--green)'
@@ -932,6 +1029,20 @@ export default function Analysis({ routeDefaultTab = null } = {}) {
         {/* LIQUIDITY */}
         {tab==='liquidity'&&(
           <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:14}}>
+            {drillExtra ? (
+              <div style={{ gridColumn: '1 / -1' }}>
+                <DrillIntelligenceBlock {...analysisDrillLines('liquidity')} tr={tr} lang={lang} />
+              </div>
+            ) : null}
+            {Object.keys(liq).filter((k) => liq[k]?.value != null).length === 0 && drillExtra ? (
+              <Card style={{ gridColumn: '1 / -1', borderTop: '2px solid var(--amber)' }}>
+                <SectionHead label={tr('liquidity')} color="var(--blue)" sub={tr('drill_intel_tab_fallback_hint')} />
+                <div style={{ fontFamily: 'var(--font-mono)', fontSize: 20, fontWeight: 800, direction: 'ltr', color: 'var(--accent)' }}>
+                  {cashflow?.operating_cashflow != null ? formatCompact(cashflow.operating_cashflow) : '—'}
+                </div>
+                <p style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 8 }}>{tr('cashflow_operating_sub')}</p>
+              </Card>
+            ) : null}
             <div style={{display:'flex',flexDirection:'column',gap:14}}>
               <Card>
                 <SectionHead label={tr('liquidity')} color='var(--blue)'
@@ -971,6 +1082,36 @@ export default function Analysis({ routeDefaultTab = null } = {}) {
         {/* EFFICIENCY */}
         {tab==='efficiency'&&(
           <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:14}}>
+            {drillExtra ? (
+              <div style={{ gridColumn: '1 / -1' }}>
+                <DrillIntelligenceBlock {...analysisDrillLines('efficiency')} tr={tr} lang={lang} />
+              </div>
+            ) : null}
+            {Object.keys(eff).filter((k) => eff[k]?.value != null).length === 0 &&
+            Object.keys(lev).filter((k) => lev[k]?.value != null).length === 0 &&
+            drillExtra ? (
+              <Card style={{ gridColumn: '1 / -1', borderTop: '2px solid var(--amber)' }}>
+                <SectionHead label={tr('efficiency')} color="var(--violet)" sub={tr('drill_intel_tab_fallback_hint')} />
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, marginTop: 8 }}>
+                  <div>
+                    <div style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase' }}>
+                      {tr('kpi_label_expenses')}
+                    </div>
+                    <div style={{ fontFamily: 'var(--font-mono)', fontSize: 16, fontWeight: 800, direction: 'ltr' }}>
+                      {kpis.expenses?.value != null ? formatCompact(kpis.expenses.value) : '—'}
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase' }}>
+                      {tr('net_margin')}
+                    </div>
+                    <div style={{ fontFamily: 'var(--font-mono)', fontSize: 16, fontWeight: 800, direction: 'ltr' }}>
+                      {kpis.net_margin?.value != null ? fmtP(kpis.net_margin.value) : '—'}
+                    </div>
+                  </div>
+                </div>
+              </Card>
+            ) : null}
             <div style={{display:'flex',flexDirection:'column',gap:14}}>
               <Card>
                 <SectionHead label={tr('efficiency')} color='var(--violet)'
@@ -1010,10 +1151,20 @@ export default function Analysis({ routeDefaultTab = null } = {}) {
         {/* DECISIONS */}
         {tab==='decisions'&&(
           <div style={{maxWidth:760}}>
+            {drillExtra ? <DrillIntelligenceBlock {...analysisDrillLines('decisions')} tr={tr} lang={lang} /> : null}
             <SectionHead label={tr('exec_action_strip')} count={decs.length} color='var(--red)'
               sub={tr('exec_action_strip_ranked_sub')}/>
             {decs.length===0
-              ?<p style={{color:'var(--text-secondary)',fontSize:13}}>—</p>
+              ? (
+                <Card style={{ borderTop: '2px solid var(--amber)', marginTop: 12 }}>
+                  <p style={{ color: 'var(--text-secondary)', fontSize: 12, margin: 0 }}>{tr('drill_intel_tab_fallback_hint')}</p>
+                  {drillBundle?.primaryResolution?.kind === 'expense' && drillBundle.primaryResolution.expense?.title ? (
+                    <p style={{ fontSize: 13, fontWeight: 700, marginTop: 10 }}>
+                      <CmdServerText lang={lang} tr={tr}>{drillBundle.primaryResolution.expense.title}</CmdServerText>
+                    </p>
+                  ) : null}
+                </Card>
+              )
               :decs.map((dec,i)=><DecCard key={i} dec={dec} tr={tr} lang={lang} impacts={impacts} onOpen={setSelDec}/>)}
           </div>
         )}
@@ -1021,10 +1172,20 @@ export default function Analysis({ routeDefaultTab = null } = {}) {
         {/* ALERTS */}
         {tab==='alerts'&&(
           <div style={{maxWidth:760}}>
+            {drillExtra ? <DrillIntelligenceBlock {...analysisDrillLines('alerts')} tr={tr} lang={lang} /> : null}
             <SectionHead label={tr('alerts_title')} count={alerts.length} color='var(--amber)'
               sub={tr('alerts_by_severity_sub')}/>
             {alerts.length===0
-              ?<p style={{color:'var(--text-secondary)',fontSize:13}}>—</p>
+              ? (
+                <Card style={{ borderTop: '2px solid var(--amber)', marginTop: 12 }}>
+                  <p style={{ color: 'var(--text-secondary)', fontSize: 12, margin: 0 }}>{tr('drill_intel_do_fallback')}</p>
+                  {health != null ? (
+                    <p style={{ fontFamily: 'var(--font-mono)', fontSize: 18, fontWeight: 800, marginTop: 10, direction: 'ltr' }}>
+                      {tr('drill_intel_health_score', { v: String(Math.round(health)) })}
+                    </p>
+                  ) : null}
+                </Card>
+              )
               :alerts.map((a,i)=><AlertCard key={i} alert={a} tr={tr} lang={lang}/>)}
             {causes.length>0&&<>
               <div style={{height:14}}/>

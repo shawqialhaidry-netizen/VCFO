@@ -23,7 +23,7 @@ export default function ExecutiveNarrativeStrip({
   compact = false,
   onOpenFullAnalysis,
 }) {
-  const n = narrative ?? buildExecutiveNarrative({}, { lang })
+  const n = narrative ?? buildExecutiveNarrative({}, tr ? { lang, t: tr } : { lang })
   const { whatChanged, why, whatToDo } = n
 
   const pad = compact ? '14px 16px 16px' : '16px 18px 18px'

@@ -4,23 +4,55 @@
  */
 
 import { formatCompact, formatMultiple } from './numberFormat.js'
+import { normalizeUiLang } from './strictI18n.js'
 
 const MAX_COL = 3
 
 /** Period label: one word, language-consistent (numbers stay Western). */
 function momWord(lang) {
-  const l = (lang || 'en').toLowerCase()
+  const l = normalizeUiLang(lang)
   if (l === 'ar') return 'شهريًا'
   if (l === 'tr') return 'Aylık'
   return 'MoM'
 }
 
-/** Arabic action line — imperative prefix when source text is Latin-heavy. */
-function arActionLine(title) {
-  const t = String(title || '').trim()
-  if (!t) return t
-  if (/[A-Za-z]{4,}/.test(t)) return `نفّذ سريعًا: ${t}`
-  return t
+/**
+ * Narrative lexicon from i18n (single source; no hardcoded English in ar/tr paths).
+ * @param {(key: string, params?: Record<string, string>) => string} t
+ * @param {string} mw - momentum label (e.g. mom_label)
+ */
+function lexFromTranslate(t, mw) {
+  return {
+    revenue: t('narr_word_revenue'),
+    expenses: t('narr_word_expenses'),
+    margin: t('narr_word_margin'),
+    contributing: (cat, amt) => t('narr_contributing', { cat, amt }),
+    branchPct: (name, pct) => t('narr_branch_pct', { name, pct: String(pct) }),
+    branchPressure: (name, amt) => t('narr_branch_pressure', { name, amt, mom_word: mw }),
+    actionFrom: (title) => t('narr_action_entity', { title }),
+    stableWhat: t('narr_stable_what'),
+    whyOcf: (amt) => t('narr_why_ocf', { amt }),
+    whyOcfMom: (p) => t('narr_why_ocf_mom', { p }),
+    whyWc: (amt) => t('narr_why_wc', { amt }),
+    whyCr: (r) => t('narr_why_cr', { r }),
+    whyNp: (amt) => t('narr_why_np', { amt }),
+    whyNoNumber: t('narr_why_no_number'),
+    doDefault: t('narr_do_default'),
+    healthMarginDown: (pp, cat, branch) => {
+      if (branch && cat) return t('narr_hm_down_both', { pp, cat, branch })
+      if (cat) return t('narr_hm_down_cat', { pp, cat })
+      if (branch) return t('narr_hm_down_branch', { pp, branch })
+      return t('narr_hm_down_plain', { pp })
+    },
+    healthMarginUp: (pp, cat, branch) => {
+      if (branch && cat) return t('narr_hm_up_both', { pp, cat, branch })
+      if (cat) return t('narr_hm_up_cat', { pp, cat })
+      if (branch) return t('narr_hm_up_branch', { pp, branch })
+      return t('narr_hm_up_plain', { pp })
+    },
+    actionPrefix: t('narr_action_prefix'),
+    rootCauseLine: (title) => t('narr_root_cause_item', { title }),
+  }
 }
 
 /**
@@ -28,7 +60,7 @@ function arActionLine(title) {
  * @param {string} momentumSuffix - MoM wording from i18n `mom_label` (or legacy fallback)
  */
 function lex(lang, momentumSuffix) {
-  const l = (lang || 'en').toLowerCase()
+  const l = normalizeUiLang(lang)
   const mw =
     momentumSuffix != null && String(momentumSuffix).trim() !== ''
       ? String(momentumSuffix)
@@ -41,7 +73,7 @@ function lex(lang, momentumSuffix) {
       contributing: (cat, amt) => `أبرز مساهمة: ${cat} بمقدار ${amt}`,
       branchPct: (name, pct) => `${name} تمثّل ${pct}% من زيادة التكلفة`,
       branchPressure: (name, amt) => `${name}: زيادة مصروفات بمقدار ${amt} ${mw}`,
-      actionFrom: (title) => arActionLine(title),
+      actionFrom: (title) => String(title || '').trim(),
       stableWhat: 'الأداء مستقر دون انحرافات جوهرية.',
       whyOcf: (amt) => `التدفق النقدي التشغيلي: ${amt}.`,
       whyOcfMom: (p) => `مقارنة بالشهر السابق: ${p}.`,
@@ -67,6 +99,7 @@ function lex(lang, momentumSuffix) {
               ? `ارتفع الهامش ${pp}؛ أعلى ضغط في ${branch}`
               : `ارتفع الهامش ${pp}`,
       actionPrefix: 'إجراء:',
+      rootCauseLine: (title) => `سبب جذري: ${title}`,
     }
   }
   if (l === 'tr') {
@@ -103,6 +136,7 @@ function lex(lang, momentumSuffix) {
               ? `Marj ${pp} arttı; en yüksek baskı ${branch}`
               : `Marj ${pp} arttı`,
       actionPrefix: 'EYLEM:',
+      rootCauseLine: (title) => `Kök neden: ${title}`,
     }
   }
   return {
@@ -138,6 +172,7 @@ function lex(lang, momentumSuffix) {
             ? `Margin rose ${pp}; ${branch} highest pressure`
             : `Margin rose ${pp}`,
     actionPrefix: 'ACTION:',
+    rootCauseLine: (title) => `Root cause: ${title}`,
   }
 }
 
@@ -271,28 +306,28 @@ function buildWhyLines(payload, L, lang, translate) {
     ineff.expense_pct_of_revenue != null &&
     !lines.some((l) => l.includes(String(ineff.branch_name)))
   ) {
-    const tag =
-      typeof translate === 'function'
-        ? String(translate('cmd_branch_of_rev') || '')
-        : lang === 'ar'
-          ? 'من الإيرادات'
-          : lang === 'tr'
-            ? 'gelire göre gider payı'
-            : 'of revenue'
-    _dedupePush(lines, `${ineff.branch_name} · ${ineff.expense_pct_of_revenue}% ${tag}`)
+    const pct = Number(ineff.expense_pct_of_revenue).toFixed(1)
+    const name = String(ineff.branch_name)
+    if (typeof translate === 'function') {
+      const ofRev = translate('cmd_branch_of_rev')
+      _dedupePush(lines, translate('narr_ineff_branch_line', { name, pct, of_rev: ofRev }))
+    } else {
+      const tag = lang === 'ar' ? 'من الإيرادات' : lang === 'tr' ? 'gelire göre' : 'of revenue'
+      _dedupePush(lines, `${name} · ${pct}% ${tag}`)
+    }
   }
 
-  if (
-    lang === 'en' &&
-    lines.length < MAX_COL &&
-    Array.isArray(payload.root_causes)
-  ) {
+  if (lines.length < MAX_COL && Array.isArray(payload.root_causes)) {
     for (const rc of payload.root_causes) {
       const rcTitle = rc?.title || rc?.key
       if (rcTitle) {
         const s = String(rcTitle).trim()
-        if (s.length > 120) _dedupePush(lines, s.slice(0, 117))
-        else _dedupePush(lines, s)
+        const short = s.length > 120 ? `${s.slice(0, 117)}…` : s
+        const line =
+          typeof translate === 'function'
+            ? translate('narr_root_cause_item', { title: short })
+            : L.rootCauseLine(short)
+        _dedupePush(lines, line)
       }
       if (lines.length >= MAX_COL) break
     }
@@ -392,13 +427,13 @@ function buildDoLines(payload, L, lang = 'en') {
 
 /**
  * @param {Record<string, unknown>} payload - Executive `data`
- * @param {{ lang?: string, t?: (key: string) => string }} [options] - pass `t` = strictT-bound lookup for aligned `mom_label` / `cmd_branch_of_rev` copy
+ * @param {{ lang?: string, t?: (key: string, params?: Record<string, string>) => string }} [options] — pass LangContext `tr` (supports params) for i18n-backed lines
  */
 export function buildExecutiveNarrative(payload = {}, options = {}) {
-  const lang = options.lang || 'en'
+  const lang = normalizeUiLang(options.lang)
   const translate = typeof options.t === 'function' ? options.t : null
   const mw = translate ? translate('mom_label') : momWord(lang)
-  const L = lex(lang, mw)
+  const L = translate ? lexFromTranslate(translate, mw) : lex(lang, mw)
 
   if (!payload || typeof payload !== 'object') {
     return {
