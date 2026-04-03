@@ -1,6 +1,7 @@
 /**
  * Command Center sections — GET /executive payload only; presentation only.
  */
+import { useState } from 'react'
 import { formatCompact, formatMultiple } from '../utils/numberFormat.js'
 import { factOverlapsWhy } from '../utils/buildExecutiveNarrative.js'
 import { strictT as st } from '../utils/strictI18n.js'
@@ -652,7 +653,18 @@ function decisionImpactSummary(d, tr, lang) {
 }
 
 /** expense_decisions_v2; max 3; always at least one row (baseline if empty). */
-export function DecisionsSection({ expenseDecisionsV2, expenseIntel, tr, lang, onOpenDecision, visualTier = 2 }) {
+export function DecisionsSection({
+  expenseDecisionsV2,
+  expenseIntel,
+  tr,
+  lang,
+  onOpenDecision,
+  visualTier = 2,
+  defaultCollapsed = false,
+  omitDecisionIds = null,
+}) {
+  const [expanded, setExpanded] = useState(!defaultCollapsed)
+
   let list = Array.isArray(expenseDecisionsV2) ? expenseDecisionsV2.filter((d) => d && d.title) : []
   if (!list.length && expenseIntel?.available && Array.isArray(expenseIntel.decisions)) {
     list = expenseIntel.decisions
@@ -666,6 +678,9 @@ export function DecisionsSection({ expenseDecisionsV2, expenseIntel, tr, lang, o
         action: typeof d.action === 'object' && d.action != null ? d.action : undefined,
       }))
   }
+  if (omitDecisionIds && omitDecisionIds.size > 0) {
+    list = list.filter((d) => d.decision_id && !omitDecisionIds.has(d.decision_id))
+  }
   if (!list.length) {
     list = [
       {
@@ -678,12 +693,12 @@ export function DecisionsSection({ expenseDecisionsV2, expenseIntel, tr, lang, o
   }
 
   const sub = st(tr, lang, 'cmd_decisions_prioritized_sub')
+  const displayList = list.slice(0, 3)
+  const n = displayList.length
 
-  return sectionShell(
-    st(tr, lang, 'cmd_decisions'),
-    sub,
+  const listBody = (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      {list.slice(0, 3).map((d, idx) => {
+      {displayList.map((d, idx) => {
         const pr = priorityLabel(d.priority, tr, lang)
         const pc = priorityColor(d.priority)
         const first = idx === 0
@@ -805,7 +820,58 @@ export function DecisionsSection({ expenseDecisionsV2, expenseIntel, tr, lang, o
           </div>
         )
       })}
-    </div>,
-    visualTier
+    </div>
+  )
+
+  const collapsedControls =
+    defaultCollapsed && !expanded ? (
+      <button
+        type="button"
+        onClick={() => setExpanded(true)}
+        style={{
+          width: '100%',
+          padding: '8px 10px',
+          borderRadius: 10,
+          border: `1px solid ${P.border}`,
+          background: 'rgba(255,255,255,0.03)',
+          color: P.text2,
+          fontSize: 10,
+          fontWeight: 700,
+          cursor: 'pointer',
+          textAlign: 'center',
+        }}
+      >
+        {st(tr, lang, 'cmd_decisions_expand')} ({n})
+      </button>
+    ) : defaultCollapsed && expanded ? (
+      <button
+        type="button"
+        onClick={() => setExpanded(false)}
+        style={{
+          width: '100%',
+          marginBottom: 8,
+          padding: '6px 10px',
+          borderRadius: 8,
+          border: `1px solid ${P.border}`,
+          background: 'transparent',
+          color: P.accent,
+          fontSize: 9,
+          fontWeight: 800,
+          cursor: 'pointer',
+          textAlign: 'center',
+        }}
+      >
+        {st(tr, lang, 'cmd_decisions_collapse')}
+      </button>
+    ) : null
+
+  return sectionShell(
+    st(tr, lang, 'cmd_decisions'),
+    sub,
+    <>
+      {collapsedControls}
+      {(!defaultCollapsed || expanded) && listBody}
+    </>,
+    visualTier,
   )
 }

@@ -14,6 +14,7 @@ import { buildAnalysisQuery } from '../utils/buildAnalysisQuery.js'
 import { buildExecutiveNarrative } from '../utils/buildExecutiveNarrative.js'
 import { analysisTabFromDrill } from '../utils/commandCenterDrill.js'
 import { strictT, localizedMissingPlaceholder } from '../utils/strictI18n.js'
+import { selectPrimaryDecision, firstExpenseActionLine } from '../utils/selectPrimaryDecision.js'
 import { CLAMP_FADE_MASK_SHORT } from '../utils/serverTextUi.js'
 import CmdServerText from '../components/CmdServerText.jsx'
 import PeriodSelector from '../components/PeriodSelector.jsx'
@@ -47,28 +48,6 @@ const dIco = {liquidity:'💧', profitability:'📈', efficiency:'⚡', leverage
 const uClr = {high:T.red, medium:T.amber, low:T.blue}
 const fmtP = v => (v == null || !Number.isFinite(Number(v)) ? '' : `${Number(v).toFixed(1)}%`)
 
-const URGENCY_RANK = { high: 0, medium: 1, low: 2 }
-
-/** Single CFO decision to feature: urgency first, then quantitative impact when present. */
-function pickPrimaryDecision(decs, impacts) {
-  if (!Array.isArray(decs) || decs.length === 0) return null
-  const impactScore = (d) => {
-    const k = d.key || d.domain
-    const row = impacts?.[k]
-    const imp = row?.impact
-    if (!imp || imp.type === 'qualitative' || imp.value == null) return -Infinity
-    const v = Number(imp.value)
-    return Number.isFinite(v) ? v : -Infinity
-  }
-  const ur = (u) => URGENCY_RANK[String(u || 'low').toLowerCase()] ?? 2
-  const sorted = [...decs].sort((a, b) => {
-    const diff = ur(a.urgency) - ur(b.urgency)
-    if (diff !== 0) return diff
-    return impactScore(b) - impactScore(a)
-  })
-  return sorted[0] || null
-}
-
 function firstRecommendedLine(action) {
   if (!action || typeof action !== 'string') return ''
   const t = action.trim()
@@ -89,11 +68,9 @@ const lift = color => ({
   onMouseLeave: e => { e.currentTarget.style.transform=''; e.currentTarget.style.boxShadow='' },
 })
 
-function PrimaryDecisionHero({ decision, impacts, tr, lang, causes, allDecisions, onOpen }) {
-  if (!decision) return null
-  const dc = dClr[decision.domain] || T.accent
-  const impKey = decision.key || decision.domain
-  const imp = impacts[impKey]?.impact
+function PrimaryDecisionHero({ resolution, impacts, tr, lang, causes, allDecisions, onOpen }) {
+  if (!resolution) return null
+
   const fmtV = (v) =>
     v == null
       ? '—'
@@ -102,6 +79,199 @@ function PrimaryDecisionHero({ decision, impacts, tr, lang, causes, allDecisions
         : v >= 1e3
           ? `+${(v / 1e3).toFixed(0)}K`
           : `+${v.toFixed(0)}`
+
+  if (resolution.kind === 'expense') {
+    const ex = resolution.expense
+    if (!ex?.title) return null
+    const isBaseline = ex.decision_id === '_cmd_baseline'
+    const dc = isBaseline ? T.text3 : T.violet
+    const pri = String(ex.priority || 'medium').toLowerCase()
+    const pc = { high: T.red, medium: T.amber, low: T.accent }[pri] || T.text3
+    const sav = ex.expected_financial_impact?.estimated_monthly_savings
+    const hasSav = sav != null && Number.isFinite(Number(sav)) && Number(sav) > 0
+    const recLine = firstExpenseActionLine(ex)
+
+    const shell = isBaseline
+      ? {
+          border: '1px solid rgba(148,163,184,0.18)',
+          borderRadius: 14,
+          padding: '14px 16px 14px',
+          background: 'linear-gradient(165deg, rgba(17,24,39,0.92) 0%, rgba(15,23,42,0.96) 100%)',
+          boxShadow: '0 0 0 1px rgba(0,0,0,0.35), 0 8px 24px rgba(0,0,0,0.28)',
+          hoverLift: false,
+        }
+      : {
+          border: `1px solid ${dc}55`,
+          borderRadius: 18,
+          padding: '22px 22px 18px',
+          background: `linear-gradient(165deg, rgba(17,24,39,0.99) 0%, rgba(15,23,42,1) 100%)`,
+          boxShadow: `0 0 0 1px ${dc}38, 0 24px 64px rgba(0,0,0,0.52), 0 0 128px -26px ${dc}50`,
+          hoverLift: true,
+        }
+
+    return (
+      <button
+        type="button"
+        onClick={() => onOpen('expense_v2', ex, {})}
+        className={isBaseline ? undefined : 'cmd-level-1'}
+        style={{
+          width: '100%',
+          textAlign: 'start',
+          cursor: 'pointer',
+          border: shell.border,
+          borderRadius: shell.borderRadius,
+          padding: shell.padding,
+          background: shell.background,
+          boxShadow: shell.boxShadow,
+          color: T.text1,
+          display: 'block',
+          opacity: isBaseline ? 0.92 : 1,
+          transition: 'transform 0.18s ease, box-shadow 0.18s ease, opacity 0.18s ease',
+        }}
+        onMouseEnter={(e) => {
+          if (!shell.hoverLift) return
+          e.currentTarget.style.transform = 'translateY(-2px)'
+          e.currentTarget.style.boxShadow = `0 0 0 1px ${dc}50, 0 28px 72px rgba(0,0,0,0.58), 0 0 150px -22px ${dc}60`
+        }}
+        onMouseLeave={(e) => {
+          if (!shell.hoverLift) return
+          e.currentTarget.style.transform = ''
+          e.currentTarget.style.boxShadow = shell.boxShadow
+        }}
+      >
+        <div
+          style={{
+            fontSize: isBaseline ? 9 : 10,
+            fontWeight: 800,
+            color: isBaseline ? T.text3 : dc,
+            letterSpacing: '.1em',
+            textTransform: 'uppercase',
+            marginBottom: isBaseline ? 6 : 10,
+          }}
+        >
+          {strictT(tr, lang, isBaseline ? 'cmd_primary_baseline_eyebrow' : 'cmd_primary_decision_label')}
+        </div>
+        <div
+          style={{
+            fontSize: isBaseline ? 17 : 24,
+            fontWeight: isBaseline ? 700 : 800,
+            color: isBaseline ? T.text2 : T.text1,
+            lineHeight: 1.22,
+            marginBottom: isBaseline ? 8 : 12,
+            ...CLAMP_FADE_MASK_SHORT,
+          }}
+        >
+          <CmdServerText lang={lang} tr={tr} as="span">
+            {ex.title}
+          </CmdServerText>
+        </div>
+        {!isBaseline ? (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
+          <Pill label={strictT(tr, lang, `priority_${pri}`)} color={pc} />
+        </div>
+        ) : null}
+        {ex.rationale ? (
+          <div style={{ marginBottom: 10 }}>
+            <div
+              style={{
+                fontSize: 9,
+                fontWeight: 800,
+                color: T.text3,
+                textTransform: 'uppercase',
+                letterSpacing: '.08em',
+                marginBottom: 4,
+              }}
+            >
+              {strictT(tr, lang, 'exec_why')}
+            </div>
+            <p style={{ margin: 0, fontSize: 14, color: T.text2, lineHeight: 1.55, ...CLAMP_FADE_MASK_SHORT }}>
+              <CmdServerText lang={lang} tr={tr} as="span">
+                {ex.rationale}
+              </CmdServerText>
+            </p>
+          </div>
+        ) : null}
+        {hasSav ? (
+          <div
+            style={{
+              marginBottom: 10,
+              padding: '12px 14px',
+              borderRadius: 11,
+              background: `${T.green}10`,
+              border: `1px solid ${T.green}30`,
+            }}
+          >
+            <div
+              style={{
+                fontSize: 9,
+                fontWeight: 800,
+                color: T.green,
+                textTransform: 'uppercase',
+                letterSpacing: '.08em',
+                marginBottom: 4,
+              }}
+            >
+              {strictT(tr, lang, 'cmd_dec_impact_monthly')}
+            </div>
+            <div style={{ fontFamily: 'monospace', fontSize: 24, fontWeight: 800, color: T.green, direction: 'ltr' }}>
+              {formatCompact(sav)}
+            </div>
+          </div>
+        ) : null}
+        {recLine ? (
+          <div style={{ marginBottom: 8 }}>
+            <div
+              style={{
+                fontSize: 9,
+                fontWeight: 800,
+                color: dc,
+                textTransform: 'uppercase',
+                letterSpacing: '.08em',
+                marginBottom: 4,
+              }}
+            >
+              {strictT(tr, lang, 'exec_actions')}
+            </div>
+            <p
+              style={{
+                margin: 0,
+                fontSize: 14,
+                fontWeight: 600,
+                color: T.text1,
+                lineHeight: 1.45,
+                ...CLAMP_FADE_MASK_SHORT,
+              }}
+            >
+              <CmdServerText lang={lang} tr={tr} as="span">
+                {recLine}
+              </CmdServerText>
+            </p>
+          </div>
+        ) : null}
+        <div
+          style={{
+            fontSize: isBaseline ? 9 : 10,
+            fontWeight: isBaseline ? 600 : 700,
+            color: isBaseline ? T.text3 : T.accent,
+            marginTop: isBaseline ? 6 : 4,
+          }}
+        >
+          {strictT(
+            tr,
+            lang,
+            isBaseline ? 'cmd_primary_baseline_footer' : 'cmd_open_full_analysis_decisions',
+          )}
+          {!isBaseline ? ' →' : null}
+        </div>
+      </button>
+    )
+  }
+
+  const decision = resolution.decision
+  if (!decision) return null
+  const dc = dClr[decision.domain] || T.accent
+  const impKey = decision.key || decision.domain
+  const imp = impacts[impKey]?.impact
   const hasQuant =
     imp && imp.type !== 'qualitative' && imp.value != null && Number.isFinite(Number(imp.value))
   const recLine = firstRecommendedLine(decision.action)
@@ -116,21 +286,21 @@ function PrimaryDecisionHero({ decision, impacts, tr, lang, causes, allDecisions
         textAlign: 'start',
         cursor: 'pointer',
         border: `1px solid ${dc}55`,
-        borderRadius: 16,
-        padding: '18px 20px 16px',
+        borderRadius: 18,
+        padding: '22px 22px 18px',
         background: `linear-gradient(165deg, rgba(17,24,39,0.99) 0%, rgba(15,23,42,1) 100%)`,
-        boxShadow: `0 0 0 1px ${dc}33, 0 20px 56px rgba(0,0,0,0.5), 0 0 120px -28px ${dc}44`,
+        boxShadow: `0 0 0 1px ${dc}33, 0 24px 64px rgba(0,0,0,0.52), 0 0 128px -28px ${dc}48`,
         color: T.text1,
         display: 'block',
         transition: 'transform 0.18s ease, box-shadow 0.18s ease',
       }}
       onMouseEnter={(e) => {
         e.currentTarget.style.transform = 'translateY(-2px)'
-        e.currentTarget.style.boxShadow = `0 0 0 1px ${dc}44, 0 24px 64px rgba(0,0,0,0.55), 0 0 140px -24px ${dc}55`
+        e.currentTarget.style.boxShadow = `0 0 0 1px ${dc}44, 0 28px 72px rgba(0,0,0,0.58), 0 0 150px -24px ${dc}58`
       }}
       onMouseLeave={(e) => {
         e.currentTarget.style.transform = ''
-        e.currentTarget.style.boxShadow = `0 0 0 1px ${dc}33, 0 20px 56px rgba(0,0,0,0.5), 0 0 120px -28px ${dc}44`
+        e.currentTarget.style.boxShadow = `0 0 0 1px ${dc}33, 0 24px 64px rgba(0,0,0,0.52), 0 0 128px -28px ${dc}48`
       }}
     >
       <div
@@ -140,17 +310,17 @@ function PrimaryDecisionHero({ decision, impacts, tr, lang, causes, allDecisions
           color: dc,
           letterSpacing: '.1em',
           textTransform: 'uppercase',
-          marginBottom: 8,
+          marginBottom: 10,
         }}
       >
         {strictT(tr, lang, 'cmd_primary_decision_label')}
       </div>
       <div
         style={{
-          fontSize: 20,
+          fontSize: 24,
           fontWeight: 800,
           color: T.text1,
-          lineHeight: 1.25,
+          lineHeight: 1.22,
           marginBottom: 12,
           ...CLAMP_FADE_MASK_SHORT,
         }}
@@ -181,7 +351,7 @@ function PrimaryDecisionHero({ decision, impacts, tr, lang, causes, allDecisions
         >
           {strictT(tr, lang, 'exec_why')}
         </div>
-        <p style={{ margin: 0, fontSize: 13, color: T.text2, lineHeight: 1.55, ...CLAMP_FADE_MASK_SHORT }}>
+        <p style={{ margin: 0, fontSize: 14, color: T.text2, lineHeight: 1.55, ...CLAMP_FADE_MASK_SHORT }}>
           <CmdServerText lang={lang} tr={tr} as="span">
             {decision.reason}
           </CmdServerText>
@@ -191,8 +361,8 @@ function PrimaryDecisionHero({ decision, impacts, tr, lang, causes, allDecisions
         <div
           style={{
             marginBottom: 10,
-            padding: '10px 12px',
-            borderRadius: 10,
+            padding: '12px 14px',
+            borderRadius: 11,
             background: `${T.green}10`,
             border: `1px solid ${T.green}30`,
           }}
@@ -209,7 +379,7 @@ function PrimaryDecisionHero({ decision, impacts, tr, lang, causes, allDecisions
           >
             {strictT(tr, lang, 'impact_expected_label')}
           </div>
-          <div style={{ fontFamily: 'monospace', fontSize: 22, fontWeight: 800, color: T.green, direction: 'ltr' }}>
+          <div style={{ fontFamily: 'monospace', fontSize: 24, fontWeight: 800, color: T.green, direction: 'ltr' }}>
             {fmtV(Number(imp.value))}
           </div>
           {imp.description ? (
@@ -234,7 +404,7 @@ function PrimaryDecisionHero({ decision, impacts, tr, lang, causes, allDecisions
           >
             {strictT(tr, lang, 'exec_effect')}
           </div>
-          <p style={{ margin: 0, fontSize: 12, color: T.text2, lineHeight: 1.5, ...CLAMP_FADE_MASK_SHORT }}>
+          <p style={{ margin: 0, fontSize: 13, color: T.text2, lineHeight: 1.5, ...CLAMP_FADE_MASK_SHORT }}>
             <CmdServerText lang={lang} tr={tr} as="span">
               {decision.expected_effect}
             </CmdServerText>
@@ -255,7 +425,16 @@ function PrimaryDecisionHero({ decision, impacts, tr, lang, causes, allDecisions
           >
             {strictT(tr, lang, 'exec_actions')}
           </div>
-          <p style={{ margin: 0, fontSize: 13, fontWeight: 600, color: T.text1, lineHeight: 1.45, ...CLAMP_FADE_MASK_SHORT }}>
+          <p
+            style={{
+              margin: 0,
+              fontSize: 14,
+              fontWeight: 600,
+              color: T.text1,
+              lineHeight: 1.45,
+              ...CLAMP_FADE_MASK_SHORT,
+            }}
+          >
             <CmdServerText lang={lang} tr={tr} as="span">
               {recLine}
             </CmdServerText>
@@ -999,7 +1178,7 @@ function ExecutiveKpiRow({
             </span>
           )}
         </div>
-        <div style={{fontFamily:'var(--font-display)',fontSize:isHero?26:compact?15:18,fontWeight:900,color:'#ffffff',
+        <div style={{fontFamily:'var(--font-display)',fontSize:isHero?26:compact?14:18,fontWeight:900,color:'#ffffff',
           marginBottom:2,direction:'ltr',letterSpacing:'-0.025em',lineHeight:1}}>
           {c.value}
         </div>
@@ -1043,8 +1222,8 @@ function ExecutiveKpiRow({
         style={{
           display: 'grid',
           gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
-          gap: supportingOnly ? 6 : 8,
-          opacity: supportingOnly ? 0.93 : 1,
+          gap: supportingOnly ? 5 : 8,
+          opacity: supportingOnly ? 0.9 : 1,
         }}
       >
         {cmdCards.map((c) => renderCard(c, { isHero: false, compact: supportingOnly }))}
@@ -1606,7 +1785,34 @@ export default function CommandCenter() {
   const period = main?.intelligence?.latest_period || main?.periods?.slice(-1)[0]
   const dupIneffBranch = keySignalsShowsInefficientBranch(main?.comparative_intelligence, narrative, tr, lang)
   const expenseIntel = main?.expense_intelligence
-  const primaryDecision = pickPrimaryDecision(decs, impacts)
+
+  const primaryResolution =
+    main &&
+    (selectPrimaryDecision({
+      decisions: Array.isArray(decs) ? decs : [],
+      impacts,
+      kpis,
+      cashflow: main?.cashflow || {},
+      comparativeIntelligence: main?.comparative_intelligence ?? null,
+      expenseIntelligence: expenseIntel ?? null,
+      expenseDecisionsV2: main?.expense_decisions_v2 ?? [],
+    }) || {
+      kind: 'expense',
+      expense: {
+        decision_id: '_cmd_baseline',
+        title: strictT(tr, lang, 'cmd_decision_baseline'),
+        rationale: null,
+        priority: 'medium',
+      },
+      score: 0,
+    })
+
+  const omitPrimaryExpenseId =
+    primaryResolution?.kind === 'expense' &&
+    primaryResolution.expense?.decision_id &&
+    primaryResolution.expense.decision_id !== '_cmd_baseline'
+      ? new Set([primaryResolution.expense.decision_id])
+      : null
 
   return (
     <div style={{ padding: '22px 24px', minHeight: 'calc(100vh - 62px)', background: T.bg }}>
@@ -1637,7 +1843,7 @@ export default function CommandCenter() {
             alignSelf: 'flex-start',
           }}
         >
-          <CommandCenterRail tr={tr} lang={lang} showPrimaryRow={!!primaryDecision} />
+          <CommandCenterRail tr={tr} lang={lang} showPrimaryRow={!!primaryResolution} />
         </aside>
 
         <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -1731,23 +1937,25 @@ export default function CommandCenter() {
             </div>
           </div>
 
+          {primaryResolution ? (
+            <div id="cmd-row-0" style={{ scrollMarginTop: 16 }}>
+              <PrimaryDecisionHero
+                resolution={primaryResolution}
+                impacts={impacts}
+                tr={tr}
+                lang={lang}
+                causes={causes}
+                allDecisions={decs}
+                onOpen={open}
+              />
+            </div>
+          ) : null}
+
           <DataQualityBanner validation={main?.pipeline_validation} lang={lang} tr={tr} />
 
           <CommandCenterDashboardGrid
-            supportingDemoted={!!primaryDecision}
-            primaryHero={
-              primaryDecision ? (
-                <PrimaryDecisionHero
-                  decision={primaryDecision}
-                  impacts={impacts}
-                  tr={tr}
-                  lang={lang}
-                  causes={causes}
-                  allDecisions={decs}
-                  onOpen={open}
-                />
-              ) : null
-            }
+            supportingDemoted={!!primaryResolution}
+            primaryHero={null}
             row1Narrative={
               <ExecutiveNarrativeStrip
                 narrative={narrative}
@@ -1788,7 +1996,7 @@ export default function CommandCenter() {
                   ctxLabel={ctxLabel}
                   hideTitle
                   layout="command"
-                  supportingOnly={!!primaryDecision}
+                  supportingOnly={!!primaryResolution}
                 />
               ) : null
             }
@@ -1804,7 +2012,7 @@ export default function CommandCenter() {
                 intel={intel}
                 expenseIntel={expenseIntel}
                 onOpenAnalysis={(tab) => drillAnalysis(tab)}
-                visualTier={primaryDecision ? 3 : 2}
+                visualTier={primaryResolution ? 3 : 2}
               />
             }
             row3Branch={
@@ -1823,7 +2031,7 @@ export default function CommandCenter() {
                     },
                   })
                 }
-                visualTier={primaryDecision ? 3 : 2}
+                visualTier={primaryResolution ? 3 : 2}
               />
             }
             row4Expense={
@@ -1834,17 +2042,26 @@ export default function CommandCenter() {
                 period={expenseIntel?.period || period}
                 embedded
                 onDrillExpense={() => drillAnalysis('profitability')}
-                visualTier={primaryDecision ? 3 : 2}
+                visualTier={primaryResolution ? 3 : 2}
               />
             }
             row4Decisions={
               <DecisionsSection
+                key={
+                  primaryResolution
+                    ? primaryResolution.kind === 'expense'
+                      ? `pd-${primaryResolution.expense?.decision_id || 'x'}`
+                      : `pd-${primaryResolution.decision?.key || primaryResolution.decision?.domain || 'cfo'}`
+                    : 'dec-section'
+                }
                 expenseDecisionsV2={main?.expense_decisions_v2}
                 expenseIntel={expenseIntel}
                 tr={tr}
                 lang={lang}
                 onOpenDecision={(d) => open('expense_v2', d, {})}
-                visualTier={primaryDecision ? 3 : 2}
+                visualTier={primaryResolution ? 3 : 2}
+                defaultCollapsed={!!primaryResolution}
+                omitDecisionIds={omitPrimaryExpenseId}
               />
             }
             secondaryTitle={
