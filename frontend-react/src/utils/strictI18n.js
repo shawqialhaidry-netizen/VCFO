@@ -1,6 +1,6 @@
 /**
- * Strict i18n for Command Center: no English UI fallbacks.
- * Missing/invalid keys → console.error + locale-neutral placeholder.
+ * Strict i18n: missing/invalid keys → console.error + locale-neutral placeholder (U+2026).
+ * LangContext `tr` uses the same rules (no raw keys, no EN→AR/TR leakage via fallbackLabel).
  */
 export const STRICT_I18N_PLACEHOLDER = '\u2026'
 

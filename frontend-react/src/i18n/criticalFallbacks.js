@@ -34,9 +34,15 @@ export function mergeCritical(lang, fetched) {
   return fromDisk
 }
 
-/** Resolve a label when the async map lookup runs before merge completed (edge case). */
+/**
+ * Synchronous read from bundled locale JSON only (same locale as `lang`).
+ * Never falls back to English for ar/tr — avoids mixed-language UI.
+ */
 export function fallbackLabel(lang, key) {
   if (!key) return null
   const primary = pickBundled(lang)
-  return primary[key] ?? bundledEn[key] ?? null
+  const v = primary[key]
+  if (v == null || v === '') return null
+  if (typeof v === 'string' && v.trim() === key) return null
+  return v
 }

@@ -1,6 +1,7 @@
 /**
- * CommandCenter.jsx — Premium unified Command Center (single executive column).
- * Order: Narrative → Health & KPIs → Key signals → Branch intelligence → Decisions → Secondary detail.
+ * CommandCenter.jsx — Command Center orchestrator (state, fetch, drill, chrome).
+ * Main body: CSS grid via CommandCenterDashboardGrid — row1 narrative|health, row2 KPIs×4,
+ * row3 signals|branch, row4 expense|decisions, row5 secondary.
  */
 import { useState, useCallback, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
@@ -23,6 +24,7 @@ import {
   keySignalsShowsInefficientBranch,
 } from '../components/CommandCenterUnifiedSections.jsx'
 import ExpenseInsightsSection from '../components/ExpenseInsightsSection.jsx'
+import CommandCenterDashboardGrid from '../components/CommandCenterDashboardGrid.jsx'
 
 const API = '/api/v1'
 function auth() {
@@ -735,9 +737,10 @@ function ExecutiveKpiRow({
     const cmdCards = cmdOrder.map((k) => cards.find((c) => c.key === k)).filter(Boolean)
     return (
       <div
+        className="cmd-kpi-four"
         style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))',
+          gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
           gap: 8,
         }}
       >
@@ -1277,6 +1280,12 @@ export default function CommandCenter() {
           .cmd-dashboard-grid { grid-template-columns: 1fr !important; }
           .cmd-dashboard-grid .cmd-full { grid-column: 1 / -1 !important; }
         }
+        @media (max-width: 960px) {
+          .cmd-kpi-four { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+        }
+        @media (max-width: 480px) {
+          .cmd-kpi-four { grid-template-columns: minmax(0, 1fr) !important; }
+        }
       `}</style>
 
       <div style={{ display: 'flex', gap: 22, alignItems: 'flex-start' }}>
@@ -1384,73 +1393,36 @@ export default function CommandCenter() {
 
           <DataQualityBanner validation={main?.pipeline_validation} lang={lang} tr={tr} />
 
-          <div
-            className="cmd-dashboard-grid"
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
-              gap: 12,
-              alignItems: 'stretch',
-            }}
-          >
-            {/* ROW 1 — Level 1: narrative + health */}
-            <div
-              id="cmd-row-1"
-              className="cmd-r1"
-              style={{
-                gridColumn: '1 / -1',
-                display: 'grid',
-                gridTemplateColumns: 'minmax(0, 1.12fr) minmax(0, 0.88fr)',
-                gap: 12,
-                alignItems: 'stretch',
-                scrollMarginTop: 16,
-              }}
-            >
-              <div style={{ minWidth: 0 }}>
-                <ExecutiveNarrativeStrip
-                  narrative={narrative}
-                  tr={tr}
-                  lang={lang}
-                  compact
-                  onOpenFullAnalysis={() => drillAnalysis('overview')}
-                />
-              </div>
-              <div style={{ minWidth: 0 }}>
-                <HealthScorePanel
-                  tr={tr}
-                  lang={lang}
-                  health={health}
-                  status={status}
-                  companyName={selectedCompany?.name}
-                  period={period}
-                  loading={loading}
-                  onRefresh={load}
-                  periodCount={main?.periods?.length}
-                  scopeLabel={main?.scope_label}
-                  healthHeadline={narrative?.healthHeadline}
-                  actionPrefix={narrative?.actionPrefix}
-                  actionLine={narrative?.actionLine}
-                  onDrillAnalysis={() => drillAnalysis('overview')}
-                />
-              </div>
-            </div>
-
-            {/* ROW 2 — Level 2: KPI strip (4 across) */}
-            <div
-              id="cmd-row-2"
-              className="cmd-full cmd-level-2"
-              style={{
-                gridColumn: '1 / -1',
-                minWidth: 0,
-                scrollMarginTop: 16,
-                padding: '10px 12px',
-                borderRadius: 12,
-                border: '1px solid rgba(148,163,184,0.14)',
-                background: 'linear-gradient(165deg, rgba(17,24,39,0.95) 0%, rgba(15,23,42,0.98) 100%)',
-                boxShadow: '0 0 0 1px rgba(0,212,170,0.05), 0 8px 28px rgba(0,0,0,0.35)',
-              }}
-            >
-              {main ? (
+          <CommandCenterDashboardGrid
+            row1Narrative={
+              <ExecutiveNarrativeStrip
+                narrative={narrative}
+                tr={tr}
+                lang={lang}
+                compact
+                onOpenFullAnalysis={() => drillAnalysis('overview')}
+              />
+            }
+            row1Health={
+              <HealthScorePanel
+                tr={tr}
+                lang={lang}
+                health={health}
+                status={status}
+                companyName={selectedCompany?.name}
+                period={period}
+                loading={loading}
+                onRefresh={load}
+                periodCount={main?.periods?.length}
+                scopeLabel={main?.scope_label}
+                healthHeadline={narrative?.healthHeadline}
+                actionPrefix={narrative?.actionPrefix}
+                actionLine={narrative?.actionLine}
+                onDrillAnalysis={() => drillAnalysis('overview')}
+              />
+            }
+            row2Kpis={
+              main ? (
                 <ExecutiveKpiRow
                   kpis={kpis}
                   cashflow={main?.cashflow || {}}
@@ -1463,11 +1435,9 @@ export default function CommandCenter() {
                   hideTitle
                   layout="command"
                 />
-              ) : null}
-            </div>
-
-            {/* ROW 3 — Level 2: signals | branch */}
-            <div id="cmd-row-3" className="cmd-level-2" style={{ minWidth: 0, scrollMarginTop: 16 }}>
+              ) : null
+            }
+            row3Signals={
               <KeySignalsSection
                 financialBrain={main?.financial_brain}
                 comparativeIntel={main?.comparative_intelligence}
@@ -1481,8 +1451,8 @@ export default function CommandCenter() {
                 onOpenAnalysis={(tab) => drillAnalysis(tab)}
                 visualTier={2}
               />
-            </div>
-            <div className="cmd-level-2" style={{ minWidth: 0, scrollMarginTop: 16 }}>
+            }
+            row3Branch={
               <BranchIntelligenceSection
                 comparativeIntel={main?.comparative_intelligence}
                 tr={tr}
@@ -1500,10 +1470,8 @@ export default function CommandCenter() {
                 }
                 visualTier={2}
               />
-            </div>
-
-            {/* ROW 4 — Level 2: expense | decisions */}
-            <div id="cmd-row-4" className="cmd-level-2" style={{ minWidth: 0, scrollMarginTop: 16 }}>
+            }
+            row4Expense={
               <ExpenseInsightsSection
                 expenseIntel={expenseIntel}
                 tr={tr}
@@ -1513,8 +1481,8 @@ export default function CommandCenter() {
                 onDrillExpense={() => drillAnalysis('profitability')}
                 visualTier={2}
               />
-            </div>
-            <div className="cmd-level-2" style={{ minWidth: 0, scrollMarginTop: 16 }}>
+            }
+            row4Decisions={
               <DecisionsSection
                 expenseDecisionsV2={main?.expense_decisions_v2}
                 expenseIntel={expenseIntel}
@@ -1523,23 +1491,8 @@ export default function CommandCenter() {
                 onOpenDecision={(d) => open('expense_v2', d, {})}
                 visualTier={2}
               />
-            </div>
-
-            {/* ROW 5 — Level 3: secondary */}
-            <div
-              id="cmd-row-5"
-              className="cmd-full cmd-level-3"
-              style={{
-                gridColumn: '1 / -1',
-                scrollMarginTop: 16,
-                paddingTop: 10,
-                borderTop: '1px solid rgba(148,163,184,0.1)',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 8,
-                opacity: 0.9,
-              }}
-            >
+            }
+            secondaryTitle={
               <div
                 style={{
                   fontSize: 9,
@@ -1551,9 +1504,13 @@ export default function CommandCenter() {
               >
                 {strictT(tr, lang, 'cmd_secondary_section')}
               </div>
+            }
+            secondarySubtitle={
               <div style={{ fontSize: 8, color: T.text3, lineHeight: 1.35, marginTop: -4 }}>
                 {strictT(tr, lang, 'cmd_secondary_section_sub')}
               </div>
+            }
+            secondaryBlock={
               <SecondaryInsightsGrid
                 fcData={fcData}
                 intel={intel}
@@ -1566,8 +1523,8 @@ export default function CommandCenter() {
                 rootCauses={causes}
                 decisions={decs}
               />
-            </div>
-          </div>
+            }
+          />
         </div>
       </div>
 
