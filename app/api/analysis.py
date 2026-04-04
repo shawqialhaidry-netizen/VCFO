@@ -39,6 +39,18 @@ from app.services.metric_definitions import cogs_ratio_pct, opex_ratio_pct, tota
 from app.services.metric_resolver import MetricResolver
 from app.services.confidence_engine import score_confidence
 from app.services.attribution_engine import profit_bridge_attribution
+from app.services.narrative_engine import (
+    build_narrative,
+    collect_default_narrative_warning_items,
+    collect_period_block_warning_items,
+    enrich_trend_object,
+    format_narrative_warning_item,
+    format_narrative_warning_items,
+    format_prev_comparison_label,
+    format_simple_narrative,
+    normalize_narrative_lang,
+    reconciliation_warning_payload,
+)
 
 # ── Phase 22 scope helper ─────────────────────────────────────────────────────
 
@@ -1147,6 +1159,8 @@ def _reconciliation_warning(
     main_stmts: list[dict],
     branch_stmts: list[dict],
     tolerance_pct: float = 10.0,
+    *,
+    lang: str = "en",
 ) -> dict:
     """
     Compare MAIN entity latest-period figures against sum of branch consolidated figures.
@@ -1190,28 +1204,17 @@ def _reconciliation_warning(
         av = abs(v)
         return f"{av/1e6:.2f}M" if av >= 1e6 else f"{av/1e3:.0f}K"
 
-    parts = []
-    if rev_warn:
-        sign = "+" if rev_pct > 0 else ""
-        parts.append(
-            f"MAIN revenue {_fmt(m_rev)} vs branch sum {_fmt(b_rev)} "
-            f"({sign}{rev_pct}% gap)"
-        )
-    if np_warn:
-        sign = "+" if np_pct > 0 else ""
-        parts.append(
-            f"MAIN net profit {_fmt(m_np)} vs branch sum {_fmt(b_np)} "
-            f"({sign}{np_pct}% gap)"
-        )
-
-    return {
-        "consolidation_warning": True,
-        "consolidation_reason": "; ".join(parts),
-        "consolidation_note": (
-            "Divergence may reflect intercompany eliminations, holding-level entries, "
-            "or incomplete branch data. Numbers are unchanged."
-        ),
-    }
+    return reconciliation_warning_payload(
+        lang=lang,
+        rev_warn=rev_warn,
+        np_warn=np_warn,
+        main_rev_fmt=_fmt(m_rev),
+        branch_rev_fmt=_fmt(b_rev),
+        rev_gap_pct=rev_pct,
+        main_np_fmt=_fmt(m_np),
+        branch_np_fmt=_fmt(b_np),
+        np_gap_pct=np_pct,
+    )
 
 
 @router.get("/{company_id}/analysis-summary")
@@ -1224,6 +1227,7 @@ def get_analysis_summary(
     from_period: str  = Query(default=""),
     to_period:   str  = Query(default=""),
     consolidate: bool = Query(default=False),
+    lang:        str  = Query(default="en", description="Locale for alerts, Phase-43 narratives, decisions: en | ar | tr"),
     db: Session = Depends(get_db),
 ):
     """
@@ -1250,7 +1254,9 @@ def get_analysis_summary(
     from app.services.fin_intelligence  import build_intelligence
     from app.services.period_aggregation import build_annual_layer
 
-    safe_lang = "en"
+    _req_lang = (lang or "en").strip().lower()
+    safe_lang = normalize_narrative_lang(lang)
+    locale_fallback = _req_lang not in ("en", "ar", "tr")
     _debug: dict = {}
 
     company = db.query(Company).filter(Company.id == company_id).first()
@@ -1549,8 +1555,12 @@ def get_analysis_summary(
             "mom_pct":   cf_mom,
             "yoy_pct":   None,
             "direction": _trend_direction(cf_mom),
+            "trend_quality": _trend_quality(cf_mom),
         },
     }
+
+    for _tk in ("revenue", "net_profit", "gross_margin", "expenses", "operating_cashflow"):
+        enrich_trend_object(structured_trends.get(_tk), safe_lang)
 
     # ── Metric Resolver shadow-mode comparisons (log-only) ────────────────────
     try:
@@ -1616,12 +1626,12 @@ def get_analysis_summary(
             )
             if main_uploads:
                 main_stmts = _build_period_statements(company_id, main_uploads)
-                reconciliation = _reconciliation_warning(main_stmts, all_stmts)
+                reconciliation = _reconciliation_warning(main_stmts, all_stmts, lang=safe_lang)
         else:
             # On MAIN path — compare against branch consolidation
             branch_stmts = _build_consolidated_statements(company_id, db)
             if branch_stmts:
-                reconciliation = _reconciliation_warning(all_stmts, branch_stmts)
+                reconciliation = _reconciliation_warning(all_stmts, branch_stmts, lang=safe_lang)
     except Exception as _exc:
         logger.warning("reconciliation check failed: %s", _exc)
 
@@ -1809,6 +1819,9 @@ def get_analysis_summary(
     return {
         "company_id":   company_id,
         "company_name": company.name,
+        "lang":         safe_lang,
+        "locale_requested": lang,
+        "locale_fallback": locale_fallback,
         "data_source":  data_source,
         **reconciliation,
         "validation":   _validation,
@@ -2599,7 +2612,10 @@ def get_board_report(
         def _mt(sk, mk):
             s=_trends_r.get(sk,[]); m=_trends_r.get(mk,[])
             v=[x for x in s if x is not None]
-            return {"series":s,"mom_pct":m,"direction":_trend_direction(m),"trend_quality":_tq(m),"loss_flag":bool(v and v[-1]<0)}
+            d = {"series": s, "mom_pct": m, "direction": _trend_direction(m), "trend_quality": _tq(m),
+                 "loss_flag": bool(v and v[-1] < 0)}
+            enrich_trend_object(d, safe_lang)
+            return d
 
         analysis_dict = {
             "company_id":   company_id,
@@ -2830,7 +2846,9 @@ def get_board_report(
                     "rev_chg_pct":    _chg(_curr_rev, _prev_rev),
                     "np_chg_pct":     _chg(_curr_np,  _prev_np),
                     "nm_chg_pts":     round(_curr_nm - _prev_nm, 2) if (_curr_nm is not None and _prev_nm is not None) else None,
-                    "label":          f"vs previous {_safe_win2}",
+                    "label":          format_prev_comparison_label(_safe_win2, safe_lang),
+                    "label_key":      "prev_comparison_vs_window",
+                    "label_params":   {"window": _safe_win2},
                 }
     except Exception as _exc:
         logger.warning("previous-window comparison failed: %s", _exc)
@@ -3084,10 +3102,12 @@ def get_forecast_scenarios(
 def what_if(
     company_id: str,
     body: WhatIfRequest,
+    lang: str = Query(default="en", description="Locale for period data-quality warnings: en | ar | tr"),
     db: Session = Depends(get_db),
 ):
     CLAMP_MAX = 500.0
     CLAMP_MIN = -100.0
+    _lang = normalize_narrative_lang(lang)
 
     # ── Company ───────────────────────────────────────────────────────────────
     company = db.query(Company).filter(Company.id == company_id).first()
@@ -3119,16 +3139,23 @@ def what_if(
     # ── Collect warnings ──────────────────────────────────────────────────────
     warnings: list[str] = []
 
-    # Input clamping warnings
+    # Input clamping warnings (localized templates)
     for field, val in [("revenue_pct", body.revenue_pct),
                        ("cogs_pct",    body.cogs_pct),
                        ("opex_pct",    body.opex_pct)]:
         if val > CLAMP_MAX:
-            warnings.append(f"{field} clamped from {val} to {CLAMP_MAX}")
+            warnings.append(format_narrative_warning_item({
+                "key": "warn_whatif_clamp_max",
+                "params": {"field": field, "from_value": val, "to_value": CLAMP_MAX},
+            }, _lang))
         elif val < CLAMP_MIN:
-            warnings.append(f"{field} clamped from {val} to {CLAMP_MIN}")
+            warnings.append(format_narrative_warning_item({
+                "key": "warn_whatif_clamp_min",
+                "params": {"field": field, "from_value": val, "to_value": CLAMP_MIN},
+            }, _lang))
 
     # ── Resolve baseline block (scope22 overrides legacy basis) ─────────────
+    period_kind: str = "ytd"
     if body.scope_basis_type and body.scope_basis_type.strip().lower() not in ("","all"):
         # Phase 22 universal scope path
         scoped_stmts, scope22 = _apply_scope(
@@ -3140,6 +3167,7 @@ def what_if(
         block        = annual_for_wi.get("ytd") or annual_for_wi.get("latest_month") or {}
         period_label = scope22["label"] if scope22 else "custom"
         basis        = "scope"
+        period_kind = "ytd" if annual_for_wi.get("ytd") else "latest_month"
     else:
         # Legacy basis path
         scope22 = None
@@ -3150,20 +3178,20 @@ def what_if(
             if not block:
                 raise HTTPException(422, "latest_month data not available.")
             period_label = block.get("period", "latest_month")
+            period_kind = "latest_month"
             if not block.get("tax"):
-                warnings.append("tax defaulted to 0 — not present in source data")
+                warnings.append(format_narrative_warning_item(
+                    {"key": "warn_tax_not_in_source", "params": {}}, _lang))
 
         elif basis == "ytd":
             block = annual.get("ytd")
             if not block:
                 raise HTTPException(422, "YTD data not available.")
             period_label = f"YTD {block.get('year', '')}"
-            if block.get("has_gaps"):
-                warnings.append(
-                    f"YTD basis has {block.get('missing_count','?')} missing month(s) — totals are incomplete"
-                )
+            period_kind = "ytd"
             if not block.get("tax"):
-                warnings.append("tax defaulted to 0 — not present in source data")
+                warnings.append(format_narrative_warning_item(
+                    {"key": "warn_tax_not_in_source", "params": {}}, _lang))
 
         elif basis == "full_year":
             fy_list = annual.get("full_years", [])
@@ -3176,21 +3204,17 @@ def what_if(
             else:
                 block = fy_list[0]
             period_label = f"FY {block['year']}"
-            if not block.get("complete", False):
-                warnings.append(
-                    f"Year {block['year']} is partial ({block.get('month_count','?')}/12 months) — "
-                    "simulation is indicative only"
-                )
-            if block.get("has_gaps"):
-                warnings.append(
-                    f"Year {block['year']} has gaps — results may be understated"
-                )
+            period_kind = "full_year"
             if not block.get("tax"):
-                warnings.append("tax defaulted to 0 — not present in source data")
+                warnings.append(format_narrative_warning_item(
+                    {"key": "warn_tax_not_in_source", "params": {}}, _lang))
 
         else:
             # Should never reach here — field_validator enforces allowed values
             raise HTTPException(422, f"Unexpected basis value: {basis}")
+
+    wi_period = collect_period_block_warning_items(block, period_kind=period_kind, what_if_mode=True)
+    warnings.extend(format_narrative_warning_items(wi_period, _lang))
 
     # ── Run simulation ────────────────────────────────────────────────────────
     result = run_what_if(
@@ -3212,11 +3236,14 @@ def what_if(
         baseline_np = result.get("baseline", {}).get("net_profit", 0) or 0
         # Apply cash conversion improvement as proportional cash flow uplift
         projected_ocf = round(baseline_np * (1 + cip_clamped / 100), 2)
+        _cf_note_key = "whatif_cashflow_collection_note"
         collection_adj = {
             "collection_improvement_pct": cip_clamped,
             "projected_operating_cashflow": projected_ocf,
             "cashflow_method":  "collection_adjustment",
-            "cashflow_note":    "Estimated from Net Profit baseline × cash conversion improvement rate",
+            "cashflow_note":    format_simple_narrative(_cf_note_key, _lang),
+            "cashflow_note_key": _cf_note_key,
+            "cashflow_note_params": {},
         }
 
     return {
@@ -3225,6 +3252,8 @@ def what_if(
         "basis":        basis,
         "period_label": period_label,
         "warnings":     warnings,
+        "period_warning_items": wi_period,
+        "lang":         _lang,
         **result,
         **({"cashflow_impact": collection_adj} if collection_adj else {}),
     }
@@ -3261,7 +3290,9 @@ def get_decisions(
     lang: str = Query("en"),
     db: Session = Depends(get_db),
 ):
-    safe_lang = lang if lang in ("en", "ar", "tr") else "en"
+    _req_lang = (lang or "en").strip().lower()
+    safe_lang = normalize_narrative_lang(lang)
+    locale_fallback = _req_lang not in ("en", "ar", "tr")
 
     try:
         company = db.query(Company).filter(Company.id == company_id).first()
@@ -3288,7 +3319,7 @@ def get_decisions(
             raise HTTPException(422, "Could not build annual layer.")
 
         # Phase 22: scope override
-        warnings: list[str] = []
+        period_kind: str = "ytd"
         if body.scope_basis_type and body.scope_basis_type.strip().lower() not in ("","all"):
             scoped_stmts, scope22 = _apply_scope(
                 all_stmts,
@@ -3298,6 +3329,7 @@ def get_decisions(
             annual_scoped = build_annual_layer(scoped_stmts) if scoped_stmts else annual
             block = annual_scoped.get("ytd") or annual_scoped.get("latest_month") or {}
             period_label = scope22["label"] if scope22 else "custom"
+            period_kind = "ytd" if annual_scoped.get("ytd") else "latest_month"
         else:
             scope22 = None
             # Resolve baseline block (legacy)
@@ -3307,21 +3339,23 @@ def get_decisions(
                 if not block:
                     raise HTTPException(422, "latest_month not available.")
                 period_label = block.get("period", "latest_month")
+                period_kind = "latest_month"
             elif basis == "ytd":
                 block = annual.get("ytd")
                 if not block:
                     raise HTTPException(422, "YTD not available.")
                 period_label = f"YTD {block.get('year', '')}"
-                if block.get("has_gaps"):
-                    warnings.append(f"YTD has {block.get('missing_count','?')} missing month(s)")
+                period_kind = "ytd"
             else:  # full_year
                 fy_list = annual.get("full_years", [])
                 if not fy_list:
                     raise HTTPException(422, "No full-year data.")
                 block = next((fy for fy in fy_list if fy["year"] == body.year), fy_list[0]) if body.year else fy_list[0]
                 period_label = f"FY {block['year']}"
-                if not block.get("complete", False):
-                    warnings.append(f"Year {block['year']} is partial ({block.get('month_count','?')}/12 months)")
+                period_kind = "full_year"
+
+        wi_period = collect_period_block_warning_items(block, period_kind=period_kind, what_if_mode=False)
+        warnings = format_narrative_warning_items(wi_period, safe_lang)
 
         result = rank_scenarios(block, lang=safe_lang)
 
@@ -3332,7 +3366,13 @@ def get_decisions(
             "basis":        getattr(body, 'basis', 'scope') if not (body.scope_basis_type and body.scope_basis_type.strip().lower() not in ("","all")) else "scope",
             "period_label": period_label,
             "warnings":     warnings,
-            "meta":         {"company_id": company_id, "lang": safe_lang},
+            "warning_items": wi_period,
+            "meta":         {
+                "company_id": company_id,
+                "lang": safe_lang,
+                "locale_requested": lang,
+                "locale_fallback": locale_fallback,
+            },
             **result,
         }
 
@@ -3351,7 +3391,6 @@ def get_decisions(
 #  Phase 17 — Narrative endpoint
 # ══════════════════════════════════════════════════════════════════════════════
 
-from app.services.narrative_engine import build_narrative
 from app.services.scenario_ranker import rank_scenarios
 
 
@@ -3369,8 +3408,10 @@ def get_narrative(
 ):
     if basis not in {"latest_month", "ytd", "full_year"}:
         raise HTTPException(400, "basis must be latest_month | ytd | full_year")
-    if lang not in {"en", "ar"}:
-        lang = "en"
+
+    _req_lang = (lang or "en").strip().lower()
+    effective_lang = normalize_narrative_lang(lang)
+    locale_fallback = _req_lang not in ("en", "ar", "tr")
 
     company = db.query(Company).filter(Company.id == company_id).first()
     if not company:
@@ -3398,33 +3439,30 @@ def get_narrative(
     ytd_block = annual.get("ytd") or annual.get("latest_month") or {}
     best_sc = None
     try:
-        ranked   = rank_scenarios(ytd_block)
+        ranked   = rank_scenarios(ytd_block, lang=effective_lang)
         best_sc  = ranked.get("best_scenario")
     except Exception:
         pass
 
-    # Collect warnings
-    warnings: list[str] = []
-    ytd = annual.get("ytd") or {}
-    if ytd.get("has_gaps"):
-        warnings.append(f"YTD has {ytd.get('missing_count','?')} missing month(s)")
-    fy_list = annual.get("full_years") or []
-    if fy_list and not fy_list[0].get("complete"):
-        warnings.append(f"Current year {fy_list[0]['year']} is partial")
+    narrative_warning_items = collect_default_narrative_warning_items(annual)
 
     narrative = build_narrative(
         annual_layer  = annual,
         analysis      = analysis,
         best_scenario = best_sc,
-        warnings      = warnings,
+        warnings      = [],
+        warning_items = narrative_warning_items,
         currency      = company.currency or "",
-        lang          = lang,
+        lang          = effective_lang,
     )
 
     return {
         "company_id":   company_id,
         "company_name": company.name,
         "basis":        basis,
+        "locale_requested": lang,
+        "locale_effective": effective_lang,
+        "locale_fallback": locale_fallback,
         **narrative,
     }
 
@@ -3474,7 +3512,9 @@ def _resolve_export_data(company_id: str, basis: str, lang: str, db, scope_basis
     annual   = build_annual_layer(stmts_for_analysis)
     analysis = run_analysis(filter_periods(stmts_for_analysis, "ALL"))
 
-    warnings: list[str] = []
+    lang_eff = normalize_narrative_lang(lang)
+    narrative_wi = collect_default_narrative_warning_items(annual)
+    warnings: list[str] = format_narrative_warning_items(narrative_wi, lang_eff)
     ytd_block = annual.get("ytd") or annual.get("latest_month") or {}
 
     # Period label
@@ -3484,18 +3524,14 @@ def _resolve_export_data(company_id: str, basis: str, lang: str, db, scope_basis
     elif basis == "full_year":
         fy = (annual.get("full_years") or [{}])[0]
         period_label = f"FY {fy.get('year','')}"
-        if not fy.get("complete"):
-            warnings.append(f"Year {fy.get('year')} is partial ({fy.get('month_count','?')}/12 months)")
     else:
         ytd = annual.get("ytd") or {}
         period_label = f"YTD {ytd.get('year','')}"
-        if ytd.get("has_gaps"):
-            warnings.append(f"YTD has {ytd.get('missing_count','?')} missing month(s)")
 
     # Decisions
     decisions: dict = {}
     try:
-        decisions = rank_scenarios(ytd_block, lang=lang if lang in ("en","ar","tr") else "en")
+        decisions = rank_scenarios(ytd_block, lang=lang_eff)
     except Exception as e:
         logger.warning("decisions failed: %s", e)
 
@@ -3519,9 +3555,10 @@ def _resolve_export_data(company_id: str, basis: str, lang: str, db, scope_basis
             annual_layer  = annual,
             analysis      = analysis,
             best_scenario = best_sc,
-            warnings      = warnings,
+            warnings      = [],
+            warning_items = narrative_wi,
             currency      = company.currency or "",
-            lang          = lang if lang in ("en", "ar") else "en",
+            lang          = lang_eff,
         )
     except Exception as e:
         logger.warning("narrative failed: %s", e)

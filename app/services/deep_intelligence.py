@@ -10,10 +10,11 @@ Goal:
 
 Primary outputs:
 {
-  "expense_intelligence": {...},
+  "expense_intelligence": {...},   # pressure_assessment.causal_items (Wave 2B)
   "trend_intelligence": {...},
-  "profitability_intelligence": {...},
+  "profitability_intelligence": {...},  # interpretation.causal_items when available
 }
+Executive profitability adds interpretation.causal_items (deep + exec rules merged).
 """
 from __future__ import annotations
 
@@ -76,6 +77,175 @@ def _accel(mom: list[float]) -> Optional[float]:
     if a is None or b is None:
         return None
     return round(a - b, 2)
+
+
+def _causal_params_scalar(d: dict[str, Any]) -> dict[str, Any]:
+    """Template params: scalars only (deterministic ordering for stable payloads)."""
+    out: dict[str, Any] = {}
+    for k in sorted(d.keys()):
+        v = d[k]
+        if v is None:
+            continue
+        if isinstance(v, bool):
+            out[k] = v
+        elif isinstance(v, (int, float, str)):
+            out[k] = v
+    return out
+
+
+def _expense_pressure_causal_item(
+    *,
+    branch_key: str,
+    pressure_level: str,
+    prim: Any,
+    tc_val: Any,
+    ox_val: Any,
+    cogs_val: Any,
+    tc_st: str,
+    ox_st: str,
+    flags: list[dict],
+) -> dict[str, Any]:
+    """Single causal row for expense pressure assessment (no realization here)."""
+    flag_types = sorted({str(f.get("type") or "") for f in (flags or []) if f})
+    params = _causal_params_scalar({
+        "pressure_level": pressure_level,
+        "pressure_branch": branch_key,
+        "total_cost_ratio_pct": tc_val,
+        "opex_ratio_pct": ox_val,
+        "cogs_ratio_pct": cogs_val,
+        "total_cost_threshold_status": tc_st,
+        "opex_threshold_status": ox_st,
+        "primary_pressure_category": str(prim) if prim is not None else "",
+        "flag_count": len(flags or []),
+    })
+    sm: dict[str, Any] = {}
+    if tc_val is not None:
+        sm["total_cost_ratio_pct"] = tc_val
+    if ox_val is not None:
+        sm["opex_ratio_pct"] = ox_val
+    if cogs_val is not None:
+        sm["cogs_ratio_pct"] = cogs_val
+    sm["total_cost_threshold_status"] = tc_st
+    sm["opex_threshold_status"] = ox_st
+    for ft in flag_types:
+        sm[f"flag_{ft}"] = True
+    tid = f"expense_deep.pressure.{branch_key}"
+    return {
+        "id": f"expense_deep:pressure:{branch_key}",
+        "topic": "cost",
+        "severity": pressure_level if pressure_level in ("low", "medium", "high") else "medium",
+        "source": "expense_deep",
+        "change": {"key": f"{tid}.change", "params": dict(params)},
+        "cause": {"key": f"{tid}.cause", "params": dict(params)},
+        "action": {"key": f"{tid}.action", "params": dict(params)},
+        "evidence": {
+            "source_metrics": sm,
+            "template_ids": [tid],
+            "merged_from": [branch_key],
+        },
+    }
+
+
+def _profitability_deep_note_causal_items(
+    *,
+    op_press: str,
+    earn_quality: str,
+    gm_pp: Any,
+    nm_pp: Any,
+    tc_pp: Any,
+    rev_eff: Any,
+) -> list[dict[str, Any]]:
+    """Causal rows for deep profitability interpretation notes (parallel to legacy English notes)."""
+    items: list[dict[str, Any]] = []
+    base_params = _causal_params_scalar({
+        "operating_pressure": op_press,
+        "earnings_quality": earn_quality,
+        "gross_margin_change_pp": gm_pp,
+        "net_margin_change_pp": nm_pp,
+        "total_cost_ratio_change_pp": tc_pp,
+        "revenue_bridge_effect_units": rev_eff,
+    })
+    sm = {k: v for k, v in base_params.items() if v is not None and v != ""}
+
+    def _add(note_id: str, topic: str, severity: str) -> None:
+        tid = f"profitability_deep.note.{note_id}"
+        p = dict(base_params)
+        p["note_id"] = note_id
+        items.append({
+            "id": f"profitability_deep:note:{note_id}",
+            "topic": topic,
+            "severity": severity,
+            "source": "profitability_deep",
+            "change": {"key": f"{tid}.change", "params": dict(p)},
+            "cause": {"key": f"{tid}.cause", "params": dict(p)},
+            "action": {"key": f"{tid}.action", "params": dict(p)},
+            "evidence": {
+                "source_metrics": dict(sm),
+                "template_ids": [tid],
+                "merged_from": [note_id],
+            },
+        })
+
+    if op_press == "high":
+        _add("operating_pressure_high", "margin", "high")
+    if earn_quality == "volatile_earnings_vs_sales":
+        _add("volatile_earnings_vs_sales", "risk", "medium")
+    elif earn_quality == "deteriorating_earnings_trend":
+        _add("deteriorating_earnings_trend", "margin", "high")
+    return items
+
+
+def _executive_profitability_causal_items(
+    *,
+    signals: dict[str, bool],
+    net_margin_pct: Any,
+    total_cost_share: Any,
+    opex_pp_driver: Any,
+    nm_pp: Any,
+    rev_dir: str,
+    np_dir: str,
+    rev_up_period: bool,
+) -> list[dict[str, Any]]:
+    """Causal rows for executive profitability rules (parallel to localized insight strings)."""
+    items: list[dict[str, Any]] = []
+    base = _causal_params_scalar({
+        "net_margin_pct": net_margin_pct,
+        "cogs_plus_opex_pct": total_cost_share,
+        "opex_ratio_change_pp": opex_pp_driver,
+        "net_margin_change_pp": nm_pp,
+        "revenue_trend_direction": rev_dir,
+        "net_profit_trend_direction": np_dir,
+        "revenue_up_period": rev_up_period,
+    })
+
+    def _add(rule: str, topic: str, severity: str) -> None:
+        tid = f"profitability_deep.exec.{rule}"
+        p = dict(base)
+        p["rule_id"] = rule
+        items.append({
+            "id": f"profitability_deep:exec:{rule}",
+            "topic": topic,
+            "severity": severity,
+            "source": "profitability_deep",
+            "change": {"key": f"{tid}.change", "params": dict(p)},
+            "cause": {"key": f"{tid}.cause", "params": dict(p)},
+            "action": {"key": f"{tid}.action", "params": dict(p)},
+            "evidence": {
+                "source_metrics": dict(base),
+                "template_ids": [tid],
+                "merged_from": [rule],
+            },
+        })
+
+    if signals.get("strong_profit_heavy_cost_structure"):
+        _add("strong_but_heavy", "margin", "medium")
+    if signals.get("margin_decline_expense_pressure"):
+        _add("margins_declining_expenses", "margin", "high")
+    if signals.get("revenue_growth_not_flowing_to_profit"):
+        _add("rev_not_profit", "revenue", "medium")
+    if not items:
+        _add("neutral", "margin", "low")
+    return items
 
 
 def build_expense_intelligence_deep(period_statements: list[dict], lang: str = "en") -> dict:
@@ -186,17 +356,35 @@ def build_expense_intelligence_deep(period_statements: list[dict], lang: str = "
             })
 
     if tc_val is not None and ox_val is not None and ox_val > 0 and tc_val > ox_val + 1:
+        pressure_branch = "cogs_material_vs_opex"
         press_note = "COGS-inclusive cost base is material relative to OpEx alone — review gross margin and direct costs alongside operating spend."
     elif ox_st in ("critical", "warning"):
+        pressure_branch = "opex_elevated"
         press_note = "Operating expense load vs revenue is elevated relative to internal targets."
     elif tc_st in ("critical", "warning"):
+        pressure_branch = "total_cost_elevated"
         press_note = "Full cost load (COGS + OpEx + unclassified P&L debits) vs revenue is elevated."
     else:
+        pressure_branch = "neutral_bands"
         press_note = "Cost ratios are within neutral bands versus default SME thresholds; continue monitoring category movers."
 
     pressure_level = "high" if tc_st == "critical" or ox_st == "critical" else (
         "medium" if tc_st in ("warning", "elevated") or ox_st in ("warning", "elevated") else "low"
     )
+
+    expense_pressure_causal = [
+        _expense_pressure_causal_item(
+            branch_key=pressure_branch,
+            pressure_level=pressure_level,
+            prim=prim,
+            tc_val=tc_val,
+            ox_val=ox_val,
+            cogs_val=summary.get("cogs_ratio_pct"),
+            tc_st=tc_st,
+            ox_st=ox_st,
+            flags=flags[:8],
+        ),
+    ]
 
     return {
         "latest_period": raw.get("latest_period"),
@@ -215,6 +403,7 @@ def build_expense_intelligence_deep(period_statements: list[dict], lang: str = "
             },
             "interpretation": press_note,
             "flags": flags[:8],
+            "causal_items": list(expense_pressure_causal),
         },
     }
 
@@ -445,6 +634,15 @@ def build_profitability_intelligence_deep(
         )
     elif earn_quality == "deteriorating_earnings_trend":
         interpretation["notes"].append("Several consecutive profit MoM readings are weak — confirm cost and price discipline.")
+
+    interpretation["causal_items"] = _profitability_deep_note_causal_items(
+        op_press=op_press,
+        earn_quality=earn_quality,
+        gm_pp=gm_pp,
+        nm_pp=nm_pp,
+        tc_pp=tc_pp,
+        rev_eff=rev_eff,
+    )
 
     return {
         "available": True,
@@ -919,6 +1117,18 @@ def build_executive_profitability_intelligence(
 
     headline = insights[0] if insights else _EXEC_PI_TEXT["neutral"][lang]
 
+    deep_causal = (deep_pi.get("interpretation") or {}).get("causal_items") or []
+    exec_causal = _executive_profitability_causal_items(
+        signals=signals,
+        net_margin_pct=net_margin_pct,
+        total_cost_share=total_cost_share,
+        opex_pp_driver=opex_pp_driver,
+        nm_pp=nm_pp,
+        rev_dir=str(rev_dir),
+        np_dir=str(np_dir),
+        rev_up_period=rev_up_period,
+    )
+
     return {
         "available": True,
         "latest_period": windowed[-1].get("period"),
@@ -944,6 +1154,7 @@ def build_executive_profitability_intelligence(
             "headline": headline,
             "insights": insights if insights else [headline],
             "signals": signals,
+            "causal_items": list(deep_causal) + list(exec_causal),
         },
     }
 

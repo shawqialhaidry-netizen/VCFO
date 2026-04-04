@@ -26,6 +26,7 @@ import {
   formatFullForLang,
   formatPctForLang,
   formatMultipleForLang,
+  formatDays,
 } from '../utils/numberFormat.js'
 
 const API = '/api/v1'
@@ -35,7 +36,6 @@ function auth() {
 }
 
 // ── Formatters ────────────────────────────────────────────────────────────────
-const fmtX = (v) => (v == null ? '—' : `${Number(v).toFixed(2)}x`)
 const fmtD  = (v,base) => { if(v==null||base==null||base===0)return null; return v-base }
 const fmtDp = (v,base) => { if(v==null||base==null||base===0)return null; return ((v-base)/Math.abs(base))*100 }
 const arr   = v => v==null?'':v>0?'▲':v<0?'▼':'─'
@@ -101,7 +101,7 @@ function stmtInsight(key, d, tr) {
 }
 
 // Phase 6.2: cause text for statement lines — reads decisions/root_causes only
-function stmtCause(key, d, tr) {
+function stmtCause(key, d, tr, lang) {
   const decs    = d?.decisions   || []
   const causes  = d?.root_causes || []
   const cf      = d?.cashflow    || {}
@@ -117,7 +117,7 @@ function stmtCause(key, d, tr) {
       const sk = nm.status === 'good' ? 'stmt_kpi_net_margin_cause_good'
         : nm.status === 'warning' ? 'stmt_kpi_net_margin_cause_warning'
           : 'stmt_kpi_net_margin_cause_risk'
-      return tr(sk, { value: nm.value.toFixed(1) })
+      return tr(sk, { value: formatPctForLang(nm.value, 1, lang) })
     }
     case 'cashflow':       return hasFlag(cf?.flags,'single_period') ? tr('stmt_kpi_cf_single_period') : null
     case 'working_capital':return clip(rcT('liquidity')   || decR('liquidity'))
@@ -126,14 +126,20 @@ function stmtCause(key, d, tr) {
 }
 
 // Phase 6.4: forecast text helper — reads fcData.scenarios.base.[key][0]
-function stmtForecast(key, fcData, tr, fmtFn) {
+function stmtForecast(key, fcData, tr, fmtFn, lang) {
   if (!fcData?.available) return null
-  const next = (fcData?.scenarios?.base?.[key] || [])[0]
+  const series = fcData?.scenarios?.base?.[key] || []
+  const next = series[0]
   if (!next?.point) return null
-  const val = fmtFn ? fmtFn(next.point) : next.point.toFixed(0)
-  const dir = next.mom_applied > 0 ? '↑' : next.mom_applied < 0 ? '↓' : '→'
-  const conf = next.confidence != null ? tr('stmt_kpi_forecast_conf', { confidence: next.confidence }) : ''
-  return `${dir} ${val}${conf}`
+  const val = fmtFn ? fmtFn(next.point) : formatFullForLang(next.point, lang)
+  const dir = next.mom_applied != null
+    ? (next.mom_applied > 0 ? '↑' : next.mom_applied < 0 ? '↓' : '→')
+    : ''
+  const conf = next.confidence != null
+    ? tr('stmt_kpi_forecast_conf', { confidence: formatPctForLang(next.confidence, 0, lang) })
+    : ''
+  const body = [dir, val].filter(Boolean).join(' ')
+  return `${body}${conf}`
 }
 
 // ── Shared badge ──────────────────────────────────────────────────────────────
@@ -270,10 +276,10 @@ function KpiCard({label,value,fullValue,mom,yoy,color,sub,badge,onClick,insight,
           padding:'1px 5px',borderRadius:8,
           background:`${clrV(mom)}14`,
         }}>
-          {arr(mom)} {Math.abs(mom).toFixed(1)}% {momWord}
+          {arr(mom)} {formatPctForLang(Math.abs(mom), 1, lang)} {momWord}
         </span>}
         {yoy!=null&&<span style={{fontFamily:'var(--font-mono)',fontSize:9,color:clrV(yoy),opacity:.8}}>
-          {arr(yoy)} {Math.abs(yoy).toFixed(1)}% {yoyWord}
+          {arr(yoy)} {formatPctForLang(Math.abs(yoy), 1, lang)} {yoyWord}
         </span>}
         {sub&&<span style={{fontSize:10,color:'var(--text-muted)'}}>{sub}</span>}
       </div>
@@ -359,6 +365,7 @@ function RatioRow({ label, value, status, unit, lang }) {
   if (value != null && Number.isFinite(Number(value))) {
     if (unit === '%') disp = formatPctForLang(value, 2, lang)
     else if (unit === 'x') disp = formatMultipleForLang(value, 2, lang)
+    else if (unit === 'd' || unit === 'days') disp = formatDays(value)
     else disp = formatCompactForLang(value, lang)
   }
   return (
@@ -702,8 +709,8 @@ export default function Statements() {
             yoy={cmpMode==='yoy'?yoyRev:null}
             color='var(--accent)'
             insight={stmtInsight('revenue',data?.data,tr)}
-            cause={stmtCause('revenue',data?.data,tr)}
-            forecast={stmtForecast('revenue', fcData, tr, (v) => formatCompactForLang(v, lang))}
+            cause={stmtCause('revenue',data?.data,tr,lang)}
+            forecast={stmtForecast('revenue', fcData, tr, (v) => formatCompactForLang(v, lang), lang)}
             onClick={()=>setTab('income')}/>
           <KpiCard label={tr('fc_net_profit')}
             value={formatCompactForLang(smry.net_profit, lang)}
@@ -717,8 +724,8 @@ export default function Statements() {
             color={smry.net_profit>=0?'var(--green)':'var(--red)'}
             sub={smry.net_margin_pct != null ? formatPctForLang(smry.net_margin_pct, 1, lang) : null}
             insight={stmtInsight('net_profit',data?.data,tr)}
-            cause={stmtCause('net_profit',data?.data,tr)}
-            forecast={stmtForecast('net_profit', fcData, tr, (v) => formatCompactForLang(v, lang))}
+            cause={stmtCause('net_profit',data?.data,tr,lang)}
+            forecast={stmtForecast('net_profit', fcData, tr, (v) => formatCompactForLang(v, lang), lang)}
             onClick={()=>setTab('income')}/>
           <KpiCard label={tr('cashflow_operating')}
             value={formatCompactForLang(smry.operating_cashflow, lang)}
@@ -731,7 +738,7 @@ export default function Statements() {
             color={cfFlagClr}
             badge={cfEstimated?tr('label_estimated_short'):null}
             insight={stmtInsight('cashflow',data?.data,tr)}
-            cause={stmtCause('cashflow',data?.data,tr)}
+            cause={stmtCause('cashflow',data?.data,tr,lang)}
             onClick={()=>setTab('cashflow')}/>
           <KpiCard label={tr('working_capital')}
             value={formatCompactForLang(smry.working_capital, lang)}
@@ -743,7 +750,7 @@ export default function Statements() {
             color={smry.working_capital>=0?'var(--green)':'var(--red)'}
             sub={smry.working_capital<0?tr('wc_negative'):null}
             insight={stmtInsight('working_capital',data?.data,tr)}
-            cause={stmtCause('working_capital',data?.data,tr)}
+            cause={stmtCause('working_capital',data?.data,tr,lang)}
             onClick={()=>setPanel(insights.find(x=>x.key==='negative_working_capital')||null)}/>
           {/* Health card */}
           <div style={{background:'var(--bg-panel)',border:'1px solid var(--border)',

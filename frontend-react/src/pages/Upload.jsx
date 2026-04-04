@@ -3,6 +3,7 @@ import { useLang }       from '../context/LangContext.jsx'
 import { useCompany }    from '../context/CompanyContext.jsx'
 import CompanySelector   from '../components/CompanySelector.jsx'
 import { mapError }      from '../utils/errorMessages.js'
+import { formatFullForLang } from '../utils/numberFormat.js'
 
 const API = '/api/v1'
 
@@ -761,7 +762,7 @@ export default function Upload() {
             )}
 
             {error  && <div style={s.errorBox}>⚠ {error}</div>}
-            {result && <ResultPanel result={result} tr={tr} />}
+            {result && <ResultPanel result={result} tr={tr} lang={lang} />}
           </div>
 
           {/* ── RIGHT COLUMN ── */}
@@ -772,6 +773,7 @@ export default function Upload() {
               branches={branches}
               onDelete={openDeleteModal}
               tr={tr}
+              lang={lang}
             />
           </div>
 
@@ -782,7 +784,7 @@ export default function Upload() {
 }
 
 // ── Result panel ───────────────────────────────────────────────────────────────
-function ResultPanel({ result, tr }) {
+function ResultPanel({ result, tr, lang }) {
   const summary    = result.summary         || {}
   const breakdown  = summary.type_breakdown  || {}
   const unknowns   = summary.unknown_accounts || []
@@ -875,11 +877,11 @@ function ResultPanel({ result, tr }) {
                         {row.account_code}
                       </td>
                       <td style={s.td}>{row.account_name}</td>
-                      <td style={{ ...s.td, fontFamily:'monospace', color:'var(--blue)', textAlign:'right' }}>
-                        {new Intl.NumberFormat('en-US').format(row.debit || 0)}
+                      <td style={{ ...s.td, fontFamily:'monospace', color:'var(--blue)', textAlign:'right', direction:'ltr' }}>
+                        {formatFullForLang(row.debit ?? 0, lang)}
                       </td>
-                      <td style={{ ...s.td, fontFamily:'monospace', color:'var(--purple)', textAlign:'right' }}>
-                        {new Intl.NumberFormat('en-US').format(row.credit || 0)}
+                      <td style={{ ...s.td, fontFamily:'monospace', color:'var(--purple)', textAlign:'right', direction:'ltr' }}>
+                        {formatFullForLang(row.credit ?? 0, lang)}
                       </td>
                       <td style={{ ...s.td, fontSize:11, color:'var(--text-muted)', fontFamily:'monospace' }}>
                         {row.period || '—'}
@@ -899,7 +901,7 @@ function ResultPanel({ result, tr }) {
 }
 
 // ── Upload history list ────────────────────────────────────────────────────────
-function UploadHistory({ uploads, branches = [], onDelete, tr }) {
+function UploadHistory({ uploads, branches = [], onDelete, tr, lang }) {
   const [expandedId, setExpandedId] = useState(null)
 
   return (
@@ -1007,11 +1009,11 @@ function UploadHistory({ uploads, branches = [], onDelete, tr }) {
                     </>}
                     {u.total_debit != null && <>
                       <span style={{ color:'var(--text-secondary)' }}>{tr('upload_debit_label')}:</span>{' '}
-                      {new Intl.NumberFormat('en-US').format(u.total_debit)}<br />
+                      <span style={{ fontFamily:'monospace', direction:'ltr', display:'inline-block' }}>{formatFullForLang(u.total_debit, lang)}</span><br />
                     </>}
                     {u.total_credit != null && <>
                       <span style={{ color:'var(--text-secondary)' }}>{tr('upload_credit_label')}:</span>{' '}
-                      {new Intl.NumberFormat('en-US').format(u.total_credit)}<br />
+                      <span style={{ fontFamily:'monospace', direction:'ltr', display:'inline-block' }}>{formatFullForLang(u.total_credit, lang)}</span><br />
                     </>}
                   </div>
                   {u.error_message && (

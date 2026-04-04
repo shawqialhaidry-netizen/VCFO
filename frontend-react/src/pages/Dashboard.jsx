@@ -46,7 +46,7 @@ function getAuthHeaders() {
 //  Translation hooks — ALL hoisted (Rules of Hooks)
 // ══════════════════════════════════════════════════════════════════════════════
 function useTSignal() {
-  const { translations } = useLang()
+  const { translations, lang } = useLang()
   return useCallback((sig) => {
     if (!sig) return ''
     if (sig.key && translations[sig.key]) {
@@ -57,17 +57,17 @@ function useTSignal() {
         if (typeof v === 'number') {
           const fmt = raw.includes(':') ? raw.split(':')[1] : ''
           if (fmt.includes('f')) return v.toFixed(parseInt((fmt.match(/\.(\d+)/) || [0,'1'])[1]))
-          return Math.abs(v) >= 1000 ? `${(v/1000).toFixed(0)}K` : String(v)
+          return formatCompactForLang(v, lang)
         }
         return String(v)
       })
     }
     return sig.what || sig.message || ''
-  }, [translations])
+  }, [translations, lang])
 }
 
 function useTSignalSub() {
-  const { translations } = useLang()
+  const { translations, lang } = useLang()
   return useCallback((sig) => {
     if (!sig) return ''
     const key = sig.why_key
@@ -79,13 +79,13 @@ function useTSignalSub() {
         if (typeof v === 'number') {
           const fmt = raw.includes(':') ? raw.split(':')[1] : ''
           if (fmt.includes('f')) return v.toFixed(parseInt((fmt.match(/\.(\d+)/) || [0,'1'])[1]))
-          return Math.abs(v) >= 1000 ? `${(v/1000).toFixed(0)}K` : String(v)
+          return formatCompactForLang(v, lang)
         }
         return String(v)
       })
     }
     return sig.why || ''
-  }, [translations])
+  }, [translations, lang])
 }
 
 function useTForecast() {
@@ -614,7 +614,7 @@ function Legend({color,label}) {
 
 // ── Phase 6.2: KPI cause derivation ─────────────────────────────────────────
 // Reads ONLY: d.decisions[].reason, d.cashflow.flags, d.root_causes[]
-function kpiCause(type, data, tr) {
+function kpiCause(type, data, tr, lang) {
   const d = data?.data || {}
   const decs   = d.decisions   || []
   const causes = d.root_causes || []
@@ -639,7 +639,7 @@ function kpiCause(type, data, tr) {
       const sk = nm.status === 'good' ? 'stmt_kpi_net_margin_cause_good'
         : nm.status === 'warning' ? 'stmt_kpi_net_margin_cause_warning'
           : 'stmt_kpi_net_margin_cause_risk'
-      return tr(sk, { value: nm.value.toFixed(1) })
+      return tr(sk, { value: formatPctForLang(nm.value, 1, lang) })
     }
     case 'cashflow': {
       const rc = rcTitle('cashflow'); if (rc) return rc
@@ -650,7 +650,7 @@ function kpiCause(type, data, tr) {
     case 'net_margin': {
       const rc = rcTitle('profitability'); if (rc) return rc
       const gm = ratios?.profitability?.gross_margin_pct
-      return gm?.value != null ? tr('dash_gross_margin_line', { value: gm.value.toFixed(1) }) : null
+      return gm?.value != null ? tr('dash_gross_margin_line', { value: formatPctForLang(gm.value, 1, lang) }) : null
     }
     default: return null
   }
@@ -659,17 +659,17 @@ function kpiCause(type, data, tr) {
 // ── Phase 6.4: forecast line helper ─────────────────────────────────────────
 // Reads ONLY: fcData.scenarios.base.[metric][0].point / confidence
 // Returns display string or null — zero frontend calculations
-function kpiForecast(type, fcData, tr, fmtFn) {
+function kpiForecast(type, fcData, tr, fmtFn, lang) {
   if (!fcData?.available) return null
   const base = fcData?.scenarios?.base || {}
   const series = base[type] || []
   const next = series[0]
   if (!next?.point) return null
-  const val  = fmtFn ? fmtFn(next.point) : next.point.toFixed(0)
+  const val  = fmtFn ? fmtFn(next.point) : formatFullForLang(next.point, lang)
   const dir  = next.mom_applied != null
     ? next.mom_applied > 0 ? '↑' : next.mom_applied < 0 ? '↓' : '→'
     : ''
-  const conf = next.confidence != null ? tr('stmt_kpi_forecast_conf', { confidence: next.confidence }) : ''
+  const conf = next.confidence != null ? tr('stmt_kpi_forecast_conf', { confidence: formatPctForLang(next.confidence, 0, lang) }) : ''
   return `${dir} ${val}${conf}`
 }
 
@@ -986,7 +986,7 @@ function KpiCard({labelKey,value,fullValue,mom,yoy,color,icon,spark,tr,lang,kpiT
             fontFamily:'var(--font-mono)',padding:'1px 6px',
             borderRadius:10,background:`${clr(mom)}14`,lineHeight:1.4,
           }}>
-            {arr(mom)} {Math.abs(mom).toFixed(1)}% {momWord}
+            {arr(mom)} {formatPctForLang(Math.abs(mom), 1, lang)} {momWord}
           </span>
         )}
       </div>
@@ -1006,7 +1006,7 @@ function KpiCard({labelKey,value,fullValue,mom,yoy,color,icon,spark,tr,lang,kpiT
       }}>{fullValue}</div>}
       {/* ③ YoY secondary */}
       {yoy!=null&&<div style={{fontSize:9,color:clr(yoy),fontFamily:'var(--font-mono)',
-        marginBottom:3}}>{arr(yoy)} {Math.abs(yoy).toFixed(1)}% {yoyWord}</div>}
+        marginBottom:3}}>{arr(yoy)} {formatPctForLang(Math.abs(yoy), 1, lang)} {yoyWord}</div>}
       {sub&&<div style={{fontSize:9,color:C.text3,marginBottom:3}}>{sub}</div>}
       {/* ④ Cause — 1 concise line */}
       {cause&&<div style={{fontSize:9,color:C.text3,marginTop:4,lineHeight:1.4,
@@ -1024,7 +1024,7 @@ function KpiCard({labelKey,value,fullValue,mom,yoy,color,icon,spark,tr,lang,kpiT
       {ytdValue&&<div style={{display:'flex',alignItems:'center',gap:5,marginTop:5,paddingTop:5,borderTop:`1px solid ${BG.border}`}}>
         <span style={{fontSize:9,color:C.text3,textTransform:'uppercase',letterSpacing:'.05em'}}>{tr('al_ytd_label')}</span>
         <span style={{fontSize:11,fontWeight:700,color:C.text2,fontFamily:'var(--font-mono)',direction:'ltr'}}>{ytdValue}</span>
-        {ytdTrend!=null&&<span style={{fontSize:9,fontWeight:700,color:ytdTrend>=0?C.green:C.red,fontFamily:'var(--font-mono)'}}>{ytdTrend>=0?'▲':'▼'}{Math.abs(ytdTrend).toFixed(1)}%</span>}
+        {ytdTrend!=null&&<span style={{fontSize:9,fontWeight:700,color:ytdTrend>=0?C.green:C.red,fontFamily:'var(--font-mono)'}}>{ytdTrend>=0?'▲':'▼'}{formatPctForLang(Math.abs(ytdTrend), 1, lang)}</span>}
       </div>}
       {/* Sparkline */}
       {spark&&<div style={{marginTop:8,opacity:hov?1:0.7,transition:'opacity .2s'}}><SparkLine data={spark} color={color}/></div>}
@@ -1146,7 +1146,7 @@ function ExpenseBreakdown({ items, total, lang = 'en' }) {
                 <div style={{fontSize:11,color:C.text2,overflow:'hidden',textOverflow:'clip',whiteSpace:'nowrap'}}>{it.account_name}</div>
               </div>
               <span style={{fontSize:11,fontWeight:700,color:C.text1,fontFamily:'monospace',direction:'ltr'}}>{formatCompactForLang(Math.abs(it.amount), lang)}</span>
-              <span style={{fontSize:10,color:C.text2}}>{pct.toFixed(0)}%</span>
+              <span style={{fontSize:10,color:C.text2}}>{formatPctForLang(pct, 0, lang)}</span>
             </div>
           )
         })}
@@ -1848,17 +1848,17 @@ function WhatIfPanel({data,tr,selectedId}) {
               {tr('wi_impact')}
             </div>
             {[
-              {label:tr('wi_revenue'),   val:diffFmt(result.impact?.revenue_pct_change)},
-              {label:tr('wi_net_profit'),val:diffFmt(result.impact?.net_profit_pct_change)},
+              {label:tr('wi_revenue'),   val:diffFmt(result.impact?.revenue_pct_change),   num:result.impact?.revenue_pct_change},
+              {label:tr('wi_net_profit'),val:diffFmt(result.impact?.net_profit_pct_change), num:result.impact?.net_profit_pct_change},
               {label:tr('wi_margin_pp'), val:result.impact?.net_margin_pp!=null
                 ? formatPpForLang(result.impact.net_margin_pp, 2, lang)
-                : null},
-            ].map(({label,val})=>(
+                : null, num:result.impact?.net_margin_pp},
+            ].map(({label,val,num})=>(
               <div key={label} style={{display:'flex',justifyContent:'space-between',
                 alignItems:'center',marginBottom:6}}>
                 <span style={{fontSize:11,color:C.text2}}>{label}</span>
                 <span style={{fontFamily:'var(--font-mono)',fontSize:12,fontWeight:700,
-                  color:val?diffClr(Number(String(val).replace(/[^\d.+-]/g,''))):C.text2,direction:'ltr'}}>{val||'—'}</span>
+                  color:val!=null?diffClr(Number(num)):C.text2,direction:'ltr'}}>{val||'—'}</span>
               </div>
             ))}
           </div>
@@ -1911,7 +1911,6 @@ function DecisionIntelPanel({tr, selectedId, data, lang}) {
     finally { setLoading(false) }
   }
 
-  const fmtK = v => { if(v==null) return '—'; const a=Math.abs(v); return a>=1e6?`${(v/1e6).toFixed(1)}M`:a>=1000?`${(v/1e3).toFixed(0)}K`:`${v.toFixed(0)}`}
   const pClr = v => v>0?C.green:v<0?C.red:C.text2
 
   const best    = result?.best_scenario
@@ -1991,7 +1990,7 @@ function DecisionIntelPanel({tr, selectedId, data, lang}) {
                 <div>
                   <div style={{display:'flex',justifyContent:'space-between',marginBottom:4}}>
                     <span style={{fontSize:10,color:C.text2,textTransform:'uppercase',letterSpacing:'.05em'}}>{tr('dec_confidence')}</span>
-                    <span style={{fontSize:9,fontFamily:'var(--font-mono)',color:C.text2,direction:'ltr'}}>{best.confidence}%</span>
+                    <span style={{fontSize:9,fontFamily:'var(--font-mono)',color:C.text2,direction:'ltr'}}>{formatPctForLang(best.confidence, 0, lang)}</span>
                   </div>
                   <div style={{height:4,background:BG.border,borderRadius:2,overflow:'hidden'}}>
                     <div style={{height:'100%',width:`${best.confidence}%`,
@@ -2004,13 +2003,13 @@ function DecisionIntelPanel({tr, selectedId, data, lang}) {
                 <div>
                   <div style={{fontSize:10,color:C.text2,textTransform:'uppercase',letterSpacing:'.05em'}}>{tr('dec_np_delta')}</div>
                   <div style={{fontFamily:'var(--font-mono)',fontSize:13,fontWeight:700,color:pClr(best.impact?.net_profit_delta||0),direction:'ltr'}}>
-                    {(best.impact?.net_profit_delta||0)>0?'+':''}{fmtK(best.impact?.net_profit_delta)}
+                    {(() => { const d = best.impact?.net_profit_delta; return d != null ? `${d > 0 ? '+' : ''}${formatCompactForLang(d, lang)}` : '—' })()}
                   </div>
                 </div>
                 <div>
                   <div style={{fontSize:10,color:C.text2,textTransform:'uppercase',letterSpacing:'.05em'}}>{tr('dec_margin_pp')}</div>
                   <div style={{fontFamily:'var(--font-mono)',fontSize:13,fontWeight:700,color:pClr(best.impact?.net_margin_pp||0),direction:'ltr'}}>
-                    {best.impact?.net_margin_pp!=null?(best.impact.net_margin_pp>0?'+':'')+best.impact.net_margin_pp.toFixed(2)+'pp':'—'}
+                    {best.impact?.net_margin_pp!=null?formatPpForLang(best.impact.net_margin_pp, 2, lang):'—'}
                   </div>
                 </div>
               </div>
@@ -2037,7 +2036,7 @@ function DecisionIntelPanel({tr, selectedId, data, lang}) {
                           <div style={{height:'100%',width:`${pct}%`,
                             background:key===best.sensitivity.primary_lever?C.blue:`${C.blue}40`,borderRadius:2}}/>
                         </div>
-                        <span style={{fontSize:9,fontFamily:'var(--font-mono)',color:C.text2,minWidth:28,textAlign:'end',direction:'ltr'}}>{pct}%</span>
+                        <span style={{fontSize:9,fontFamily:'var(--font-mono)',color:C.text2,minWidth:28,textAlign:'end',direction:'ltr'}}>{formatPctForLang(pct, 0, lang)}</span>
                       </div>
                     ))}
                   </div>
@@ -2077,11 +2076,11 @@ function DecisionIntelPanel({tr, selectedId, data, lang}) {
                   })()}
                   <span style={{fontFamily:'var(--font-mono)',fontSize:10,
                     color:pClr(sc.np_pct_change||0),direction:'ltr',minWidth:44,textAlign:'end'}}>
-                    {sc.np_pct_change!=null?(sc.np_pct_change>0?'+':'')+sc.np_pct_change.toFixed(1)+'%':'—'}
+                    {sc.np_pct_change!=null?formatSignedPctForLang(sc.np_pct_change, 1, lang):'—'}
                   </span>
                   <span style={{fontFamily:'var(--font-mono)',fontSize:10,
                     color:pClr(sc.margin_pp||0),direction:'ltr',minWidth:44,textAlign:'end'}}>
-                    {sc.margin_pp!=null?(sc.margin_pp>0?'+':'')+sc.margin_pp.toFixed(2)+'pp':'—'}
+                    {sc.margin_pp!=null?formatPpForLang(sc.margin_pp, 2, lang):'—'}
                   </span>
                   <span style={{fontFamily:'var(--font-mono)',fontSize:10,
                     color:C.text2,minWidth:28,textAlign:'end',direction:'ltr'}}>
@@ -2121,21 +2120,21 @@ function DecisionIntelPanel({tr, selectedId, data, lang}) {
                           <span style={{fontSize:10,color:C.text2}}>{tr('dec_pack_np_pct')}</span>
                           <span style={{fontFamily:'var(--font-mono)',fontSize:11,fontWeight:700,
                             color:pClr(pk.net_profit_pct_change||0),direction:'ltr'}}>
-                            {pk.net_profit_pct_change!=null?(pk.net_profit_pct_change>0?'+':'')+pk.net_profit_pct_change.toFixed(1)+'%':'—'}
+                            {pk.net_profit_pct_change!=null?formatSignedPctForLang(pk.net_profit_pct_change, 1, lang):'—'}
                           </span>
                         </div>
                         <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
                           <span style={{fontSize:10,color:C.text2}}>{tr('dec_pack_margin_pp')}</span>
                           <span style={{fontFamily:'var(--font-mono)',fontSize:11,fontWeight:700,
                             color:pClr(pk.net_margin_pp||0),direction:'ltr'}}>
-                            {pk.net_margin_pp!=null?(pk.net_margin_pp>0?'+':'')+pk.net_margin_pp.toFixed(2)+'pp':'—'}
+                            {pk.net_margin_pp!=null?formatPpForLang(pk.net_margin_pp, 2, lang):'—'}
                           </span>
                         </div>
                         <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
                           <span style={{fontSize:10,color:C.text2}}>{tr('dec_pack_np_delta')}</span>
                           <span style={{fontFamily:'var(--font-mono)',fontSize:10,
                             color:pClr(pk.net_profit_delta||0),direction:'ltr'}}>
-                            {pk.net_profit_delta!=null?((pk.net_profit_delta>0?'+':'')+fmtK(pk.net_profit_delta)):'—'}
+                            {pk.net_profit_delta!=null?`${pk.net_profit_delta>0?'+':''}${formatCompactForLang(pk.net_profit_delta, lang)}`:'—'}
                           </span>
                         </div>
                       </div>
@@ -2563,11 +2562,11 @@ function ManagementReportPanel({tr, selectedId, lang}) {
           <SecHead label={tr('rep_kpi_snapshot')} color={C.accent} icon="📊"/>
           <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(130px,1fr))',gap:10}}>
             <KpiCell label={tr('al_kpi_revenue')}    value={ytd.revenue_fmt||'—'} color={C.accent}
-              sub={ytd.revenue_vs_prior_pct!=null?`${ytd.revenue_vs_prior_pct>0?'+':''}${ytd.revenue_vs_prior_pct?.toFixed(1)}% ${tr('rep_vs_prior')}`:undefined}/>
+              sub={ytd.revenue_vs_prior_pct!=null?`${formatSignedPctForLang(ytd.revenue_vs_prior_pct, 1, repLang)} ${tr('rep_vs_prior')}`:undefined}/>
             <KpiCell label={tr('al_kpi_net_profit')} value={ytd.net_profit_fmt||'—'} color={C.green}
-              sub={ytd.net_profit_vs_prior_pct!=null?`${ytd.net_profit_vs_prior_pct>0?'+':''}${ytd.net_profit_vs_prior_pct?.toFixed(1)}% ${tr('rep_vs_prior')}`:undefined}/>
+              sub={ytd.net_profit_vs_prior_pct!=null?`${formatSignedPctForLang(ytd.net_profit_vs_prior_pct, 1, repLang)} ${tr('rep_vs_prior')}`:undefined}/>
             <KpiCell label={tr('wi_net_margin')}     value={ytd.net_margin_fmt||'—'} color={C.violet}
-              sub={ytd.margin_vs_prior_pp!=null?`${ytd.margin_vs_prior_pp>0?'+':''}${ytd.margin_vs_prior_pp?.toFixed(2)} pp ${tr('rep_vs_prior')}`:undefined}/>
+              sub={ytd.margin_vs_prior_pp!=null?`${formatPpForLang(ytd.margin_vs_prior_pp, 2, repLang)} ${tr('rep_vs_prior')}`:undefined}/>
             <KpiCell label={`${tr('al_ytd_label')} ${ytd.year||''}`}
               value={`${ytd.month_count||'?'} ${tr('rep_months')}`}
               color={ytd.has_gaps?C.amber:C.text2}
@@ -2620,7 +2619,7 @@ function ManagementReportPanel({tr, selectedId, lang}) {
               <div style={{marginBottom:10}}>
                 <div style={{display:'flex',justifyContent:'space-between',marginBottom:4}}>
                   <span style={{fontSize:10,color:C.text2,textTransform:'uppercase',letterSpacing:'.05em'}}>{tr('rep_confidence')}</span>
-                  <span style={{fontSize:9,fontFamily:'var(--font-mono)',color:C.text2,direction:'ltr'}}>{best.confidence}%</span>
+                  <span style={{fontSize:9,fontFamily:'var(--font-mono)',color:C.text2,direction:'ltr'}}>{formatPctForLang(best.confidence, 0, repLang)}</span>
                 </div>
                 <div style={{height:4,background:BG.border,borderRadius:2,overflow:'hidden'}}>
                   <div style={{height:'100%',width:`${best.confidence}%`,
@@ -2638,7 +2637,7 @@ function ManagementReportPanel({tr, selectedId, lang}) {
               {best.margin_pp!=null&&<div>
                 <div style={{fontSize:10,color:C.text2,textTransform:'uppercase',letterSpacing:'.05em'}}>{tr('dec_margin_pp')}</div>
                 <div style={{fontFamily:'var(--font-mono)',fontSize:14,fontWeight:700,color:C.violet,direction:'ltr'}}>
-                  {best.margin_pp>0?'+':''}{best.margin_pp?.toFixed(2)}pp
+                  {formatPpForLang(best.margin_pp, 2, repLang)}
                 </div>
               </div>}
             </div>
@@ -2685,8 +2684,8 @@ function ManagementReportPanel({tr, selectedId, lang}) {
                       letterSpacing:'.05em',marginBottom:10}}>{packLbl(pid)}</div>
                     <div style={{display:'flex',flexDirection:'column',gap:6}}>
                       {[
-                        {label:tr('dec_pack_np_pct'),  val:pk.np_pct!=null?`${pk.np_pct>0?'+':''}${pk.np_pct?.toFixed(1)}%`:null, clr:pk.np_pct>=0?C.green:C.red},
-                        {label:tr('dec_pack_margin_pp'),val:pk.margin_pp!=null?`${pk.margin_pp>0?'+':''}${pk.margin_pp?.toFixed(2)}pp`:null, clr:pk.margin_pp>=0?C.green:C.red},
+                        {label:tr('dec_pack_np_pct'),  val:pk.np_pct!=null?formatSignedPctForLang(pk.np_pct, 1, repLang):null, clr:pk.np_pct>=0?C.green:C.red},
+                        {label:tr('dec_pack_margin_pp'),val:pk.margin_pp!=null?formatPpForLang(pk.margin_pp, 2, repLang):null, clr:pk.margin_pp>=0?C.green:C.red},
                         {label:tr('dec_pack_np_delta'), val:pk.np_delta_fmt||null, clr:C.text2},
                       ].map(({label,val,clr})=>(
                         <div key={label} style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
@@ -2771,26 +2770,41 @@ function FinIntelPanel({tr, selectedId, lang, data}) {
     </div>
   )
 
-  const RatioCard = ({label, value, unit, status: s}) => (
-    <div style={{background:BG.elevated,borderRadius:9,padding:'10px 12px',
-      borderWidth:'2px 1px 1px 1px',borderStyle:'solid',borderColor:`${ratioSt(s)} ${ratioSt(s)}30 ${ratioSt(s)}30 ${ratioSt(s)}30`}}>
-      <div style={{fontSize:10,color:C.text2,textTransform:'uppercase',letterSpacing:'.05em',marginBottom:4}}>{label}</div>
-      <div style={{fontFamily:'var(--font-mono)',fontSize:15,fontWeight:700,color:ratioSt(s),direction:'ltr',lineHeight:1}}>
-        {value!=null?value:'—'}<span style={{fontSize:10,color:C.text2,marginLeft:3}}>{unit}</span>
+  const RatioCard = ({label, value, unit, status: s}) => {
+    const u = String(unit || '')
+    let main = '—'
+    let suffix = ''
+    if (value != null && value !== '' && Number.isFinite(Number(value))) {
+      const n = Number(value)
+      if (u === '%') main = formatPctForLang(n, 1, lang)
+      else if (u === 'x') main = formatMultipleForLang(n, 2, lang)
+      else if (u === 'days') main = formatDays(n)
+      else {
+        main = formatCompactForLang(n, lang)
+        suffix = u ? ` ${u}` : ''
+      }
+    }
+    return (
+      <div style={{background:BG.elevated,borderRadius:9,padding:'10px 12px',
+        borderWidth:'2px 1px 1px 1px',borderStyle:'solid',borderColor:`${ratioSt(s)} ${ratioSt(s)}30 ${ratioSt(s)}30 ${ratioSt(s)}30`}}>
+        <div style={{fontSize:10,color:C.text2,textTransform:'uppercase',letterSpacing:'.05em',marginBottom:4}}>{label}</div>
+        <div style={{fontFamily:'var(--font-mono)',fontSize:15,fontWeight:700,color:ratioSt(s),direction:'ltr',lineHeight:1}}>
+          {main}<span style={{fontSize:10,color:C.text2,marginLeft:3}}>{suffix}</span>
+        </div>
       </div>
-    </div>
-  )
+    )
+  }
 
-  const TrendRow = ({label, dir, yoy, ytd, roll}) => (
+  const TrendRow = ({label, dir, yoy, ytd, roll, ytdAsPp}) => (
     <div style={{display:'flex',alignItems:'center',gap:10,padding:'8px 12px',
       background:BG.elevated,borderRadius:8,border:`1px solid ${BG.border}`}}>
       <span style={{flex:1,fontSize:11,color:C.text2}}>{label}</span>
       <span style={{fontSize:11,fontWeight:700,color:dirClr(dir),minWidth:80}}>{dirLabel(dir)}</span>
       {yoy!=null&&<span style={{fontFamily:'var(--font-mono)',fontSize:10,color:yoy>=0?C.green:C.red,direction:'ltr',minWidth:55}}>
-        {yoy>=0?'+':''}{yoy?.toFixed(1)}% {tr('intel_yoy')}
+        {formatSignedPctForLang(yoy, 1, lang)} {tr('intel_yoy')}
       </span>}
       {ytd!=null&&<span style={{fontFamily:'var(--font-mono)',fontSize:10,color:ytd>=0?C.green:C.red,direction:'ltr',minWidth:65}}>
-        {ytd>=0?'+':''}{ytd?.toFixed(1)}% {tr('intel_ytd_vs_prior')}
+        {ytdAsPp ? formatPpForLang(ytd, 1, lang) : formatSignedPctForLang(ytd, 1, lang)} {tr('intel_ytd_vs_prior')}
       </span>}
     </div>
   )
@@ -2845,7 +2859,7 @@ function FinIntelPanel({tr, selectedId, lang, data}) {
               {label:tr('intel_ccc'),            ...(ratios.efficiency?.ccc_days||{})},
             ].map(({label,value,unit,status:s})=>(
               <RatioCard key={label} label={label}
-                value={value!=null?value.toFixed(1):null} unit={unit||''} status={s||'neutral'}/>
+                value={value} unit={unit||''} status={s||'neutral'}/>
             ))}
           </div>
         </div>
@@ -2861,7 +2875,7 @@ function FinIntelPanel({tr, selectedId, lang, data}) {
               dir={trends.net_profit?.direction} yoy={trends.net_profit?.yoy_change}
               ytd={trends.net_profit?.ytd_vs_prior}/>
             <TrendRow label={tr('intel_gross_margin_trend')}
-              dir={trends.gross_margin?.direction} ytd={trends.gross_margin?.ytd_margin_pp}/>
+              dir={trends.gross_margin?.direction} ytd={trends.gross_margin?.ytd_margin_pp} ytdAsPp/>
           </div>
         </div>
 
@@ -2889,7 +2903,7 @@ function FinIntelPanel({tr, selectedId, lang, data}) {
                         <span style={{fontFamily:'var(--font-mono)',fontSize:10,color:C.text2}}>{a.period}</span>
                         {a.change_pct!=null&&<span style={{fontFamily:'var(--font-mono)',fontSize:10,
                           color:a.change_pct>=0?C.green:C.red,direction:'ltr'}}>
-                          {a.change_pct>=0?'+':''}{a.change_pct?.toFixed(1)}%
+                          {formatSignedPctForLang(a.change_pct, 1, lang)}
                         </span>}
                       </div>
                       <div style={{fontSize:11,color:C.text2,lineHeight:1.4}}>{a.detail}</div>
@@ -2938,7 +2952,7 @@ function FinIntelPanel({tr, selectedId, lang, data}) {
                             {tr(`alerts_${a.severity}`)||a.severity}
                           </span>
                           <span style={{fontSize:10,color:C.text2,fontFamily:'var(--font-mono)'}}>
-                            {a.confidence}%
+                            {formatPctForLang(a.confidence, 0, lang)}
                           </span>
                         </div>
                         <div style={{fontSize:11,color:C.text2,lineHeight:1.5,marginBottom:6}}>{a.message}</div>
@@ -3043,7 +3057,7 @@ function DecisionsPanelV2({tr, selectedId, lang}) {
             <span style={{fontSize:10,color:C.text2,fontFamily:'var(--font-mono)',
               background:BG.panel,padding:'2px 7px',borderRadius:5,
               border:`1px solid ${BG.border}`}}>
-              {dec.confidence}%
+              {formatPctForLang(dec.confidence, 0, lang)}
             </span>
           </div>
         </div>
@@ -3125,7 +3139,7 @@ function DecisionsPanelV2({tr, selectedId, lang}) {
               <Badge label={tr(`impact_${top.impact_level}`)||top.impact_level}
                      color={impClr[top.impact_level]||C.text3}/>
               <span style={{fontFamily:'var(--font-mono)',fontSize:10,color:C.text2,
-                alignSelf:'center'}}>{top.confidence}%</span>
+                alignSelf:'center'}}>{formatPctForLang(top.confidence, 0, lang)}</span>
             </div>
           </div>
 
@@ -3249,7 +3263,7 @@ function RootCausesPanel({tr, selectedId, lang}) {
                 {tr(`impact_${c.impact}`)||c.impact}
               </span>
               <span style={{fontSize:10,color:C.text2,fontFamily:'var(--font-mono)',flexShrink:0}}>
-                {c.confidence}%
+                {formatPctForLang(c.confidence, 0, lang)}
               </span>
               <span style={{color:C.text2,fontSize:10,flexShrink:0}}>{isOpen?'▲':'▼'}</span>
             </div>
@@ -3410,15 +3424,6 @@ function ForecastPanel({tr, selectedId, lang}) {
   const allVals = [...acts.filter(Boolean), ...fpts.filter(Boolean)]
   const chartMax = allVals.length ? Math.max(...allVals) * 1.12 : 1
 
-  const fmtK = (v) => {
-    if (v==null) return '—'
-    const a = Math.abs(v)
-    const s = v<0?'-':''
-    if (a>=1e6) return `${s}${(a/1e6).toFixed(1)}M`
-    if (a>=1e3) return `${s}${(a/1e3).toFixed(0)}K`
-    return `${s}${a.toFixed(0)}`
-  }
-
   return (
     <div style={{display:'flex',flexDirection:'column',gap:14,maxWidth:960}}>
 
@@ -3443,7 +3448,7 @@ function ForecastPanel({tr, selectedId, lang}) {
               {tr(`risk_level_${sum.risk_level}`)}
             </span>
             <span style={{fontSize:10,color:C.text2}}>
-              {tr('fc_confidence')}: <b style={{color:C.text2}}>{sum.base_confidence}%</b>
+              {tr('fc_confidence')}: <b style={{color:C.text2}}>{formatPctForLang(sum.base_confidence, 0, lang)}</b>
             </span>
           </div>
         )}
@@ -3520,7 +3525,7 @@ function ForecastPanel({tr, selectedId, lang}) {
                     fill={barColor} rx={3} opacity={isHist?0.6:0.95}/>
                   {/* Value label */}
                   {val!=null&&<text x={x+22} y={180-20-barH-4} textAnchor="middle"
-                    fontSize={8} fill={C.text2}>{fmtK(val)}</text>}
+                    fontSize={8} fill={C.text2}>{formatCompactForLang(val, lang)}</text>}
                   {/* Period label */}
                   <text x={x+22} y={178} textAnchor="middle" fontSize={7.5}
                     fill={isHist?C.text3:scClr[scenario]}>{p.slice(2)}</text>
@@ -3577,16 +3582,16 @@ function ForecastPanel({tr, selectedId, lang}) {
                     return (
                       <td key={m} style={{padding:'9px 14px',textAlign:'end',
                         fontFamily:'var(--font-mono)',color:isNeg?C.red:C.text1}}>
-                        <div>{fmtK(pt)}</div>
+                        <div>{formatCompactForLang(pt, lang)}</div>
                         <div style={{fontSize:10,color:C.text2}}>
-                          {fmtK(lo)} – {fmtK(hi)}
+                          {formatCompactForLang(lo, lang)} – {formatCompactForLang(hi, lang)}
                         </div>
                       </td>
                     )
                   })}
                   <td style={{padding:'9px 14px',textAlign:'end',fontFamily:'var(--font-mono)',
                     fontSize:10,color:C.text2}}>
-                    {((sc.revenue||[])[i]||{}).confidence||'—'}%
+                    {(() => { const c = ((sc.revenue||[])[i]||{}).confidence; return c != null && c !== '' ? formatPctForLang(Number(c), 0, lang) : '—' })()}
                   </td>
                 </tr>
               ))}
@@ -3611,7 +3616,7 @@ function ForecastPanel({tr, selectedId, lang}) {
                     {tr('fc_revenue')} {tr('mom_label')}:{' '}
                     <b style={{color:sum.trend_mom_revenue>=0?C.green:C.red,
                       fontFamily:'var(--font-mono)'}}>
-                      {sum.trend_mom_revenue>=0?'+':''}{sum.trend_mom_revenue?.toFixed(1)}%
+                      {formatSignedPctForLang(sum.trend_mom_revenue, 1, lang)}
                     </b>
                   </span>
                 )}
@@ -3620,7 +3625,7 @@ function ForecastPanel({tr, selectedId, lang}) {
                     {tr('fc_net_profit')} {tr('mom_label')}:{' '}
                     <b style={{color:sum.trend_mom_net_profit>=0?C.green:C.red,
                       fontFamily:'var(--font-mono)'}}>
-                      {sum.trend_mom_net_profit>=0?'+':''}{sum.trend_mom_net_profit?.toFixed(1)}%
+                      {formatSignedPctForLang(sum.trend_mom_net_profit, 1, lang)}
                     </b>
                   </span>
                 )}
@@ -4099,11 +4104,11 @@ export default function Dashboard() {
       {/* 3. KPI ROW — 5 key metrics */}
       {data&&(
         <div style={{display:'grid',gridTemplateColumns:'repeat(5,1fr)',gap:10}}>
-          <KpiCard tr={tr} lang={lang} momWord={tr('mom_label')} yoyWord={tr('yoy_label')} labelKey="kpi_total_revenue"  kpiType="revenue"    value={formatCompactForLang(kpis.revenue?.value, lang)} fullValue={formatFullForLang(kpis.revenue?.value, lang)}    mom={kpis.revenue?.mom_pct}    yoy={kpis.revenue?.yoy_pct}    color={C.accent} icon="📈" spark={series.revenue?.slice(-8)}    onClick={()=>setModal('revenue')}   insight={kpiInsight('revenue',data,lang,tr)}    cause={kpiCause('revenue',data,tr)}    forecast={kpiForecast('revenue', fcData, tr, (v) => formatCompactForLang(v, lang))}/>
-          <KpiCard tr={tr} lang={lang} momWord={tr('mom_label')} yoyWord={tr('yoy_label')} labelKey="kpi_total_expenses" kpiType="expenses"   value={formatCompactForLang(kpis.expenses?.value, lang)} fullValue={formatFullForLang(kpis.expenses?.value, lang)}   mom={kpis.expenses?.mom_pct}   yoy={kpis.expenses?.yoy_pct}   color={C.red}    icon="📉" spark={series.expenses?.slice(-8)}   onClick={()=>setModal('expenses')}  insight={kpiInsight('expenses',data,lang,tr)}   cause={kpiCause('expenses',data,tr)}/>
-          <KpiCard tr={tr} lang={lang} momWord={tr('mom_label')} yoyWord={tr('yoy_label')} labelKey="kpi_net_profit"     kpiType="net_profit" value={formatCompactForLang(kpis.net_profit?.value, lang)} fullValue={formatFullForLang(kpis.net_profit?.value, lang)} mom={kpis.net_profit?.mom_pct} yoy={kpis.net_profit?.yoy_pct} color={C.green}  icon="💰" spark={series.net_profit?.slice(-8)} onClick={()=>setModal('net_profit')} insight={kpiInsight('net_profit',data,lang,tr)} cause={kpiCause('net_profit',data,tr)} forecast={kpiForecast('net_profit', fcData, tr, (v) => formatCompactForLang(v, lang))}/>
-          <KpiCard tr={tr} lang={lang} momWord={tr('mom_label')} yoyWord={tr('yoy_label')} labelKey="kpi_net_margin"     kpiType="net_margin" value={fmtP(kpis.net_margin?.value)} mom={kpis.net_margin?.mom_pct}                                 color={C.violet} icon="%"  onClick={()=>setModal('net_margin')} insight={kpiInsight('net_margin',data,lang,tr)} cause={kpiCause('net_margin',data,tr)}/>
-          <KpiCard tr={tr} lang={lang} momWord={tr('mom_label')} yoyWord={tr('yoy_label')} labelKey="cashflow_operating" kpiType="cashflow"   value={formatCompactForLang(d.cashflow?.operating_cashflow, lang)} fullValue={formatFullForLang(d.cashflow?.operating_cashflow, lang)} mom={d.cashflow?.operating_cashflow_mom} color={C.amber} icon="💧" onClick={()=>setModal('cashflow')} insight={kpiInsight('cashflow',data,lang,tr)} cause={kpiCause('cashflow',data,tr)} sub={d.cashflow?.reliability==='estimated'?tr('label_estimated_short'):null}/>
+          <KpiCard tr={tr} lang={lang} momWord={tr('mom_label')} yoyWord={tr('yoy_label')} labelKey="kpi_total_revenue"  kpiType="revenue"    value={formatCompactForLang(kpis.revenue?.value, lang)} fullValue={formatFullForLang(kpis.revenue?.value, lang)}    mom={kpis.revenue?.mom_pct}    yoy={kpis.revenue?.yoy_pct}    color={C.accent} icon="📈" spark={series.revenue?.slice(-8)}    onClick={()=>setModal('revenue')}   insight={kpiInsight('revenue',data,lang,tr)}    cause={kpiCause('revenue',data,tr,lang)}    forecast={kpiForecast('revenue', fcData, tr, (v) => formatCompactForLang(v, lang), lang)}/>
+          <KpiCard tr={tr} lang={lang} momWord={tr('mom_label')} yoyWord={tr('yoy_label')} labelKey="kpi_total_expenses" kpiType="expenses"   value={formatCompactForLang(kpis.expenses?.value, lang)} fullValue={formatFullForLang(kpis.expenses?.value, lang)}   mom={kpis.expenses?.mom_pct}   yoy={kpis.expenses?.yoy_pct}   color={C.red}    icon="📉" spark={series.expenses?.slice(-8)}   onClick={()=>setModal('expenses')}  insight={kpiInsight('expenses',data,lang,tr)}   cause={kpiCause('expenses',data,tr,lang)}/>
+          <KpiCard tr={tr} lang={lang} momWord={tr('mom_label')} yoyWord={tr('yoy_label')} labelKey="kpi_net_profit"     kpiType="net_profit" value={formatCompactForLang(kpis.net_profit?.value, lang)} fullValue={formatFullForLang(kpis.net_profit?.value, lang)} mom={kpis.net_profit?.mom_pct} yoy={kpis.net_profit?.yoy_pct} color={C.green}  icon="💰" spark={series.net_profit?.slice(-8)} onClick={()=>setModal('net_profit')} insight={kpiInsight('net_profit',data,lang,tr)} cause={kpiCause('net_profit',data,tr,lang)} forecast={kpiForecast('net_profit', fcData, tr, (v) => formatCompactForLang(v, lang), lang)}/>
+          <KpiCard tr={tr} lang={lang} momWord={tr('mom_label')} yoyWord={tr('yoy_label')} labelKey="kpi_net_margin"     kpiType="net_margin" value={formatPctForLang(kpis.net_margin?.value, 1, lang)} mom={kpis.net_margin?.mom_pct}                                 color={C.violet} icon="%"  onClick={()=>setModal('net_margin')} insight={kpiInsight('net_margin',data,lang,tr)} cause={kpiCause('net_margin',data,tr,lang)}/>
+          <KpiCard tr={tr} lang={lang} momWord={tr('mom_label')} yoyWord={tr('yoy_label')} labelKey="cashflow_operating" kpiType="cashflow"   value={formatCompactForLang(d.cashflow?.operating_cashflow, lang)} fullValue={formatFullForLang(d.cashflow?.operating_cashflow, lang)} mom={d.cashflow?.operating_cashflow_mom} color={C.amber} icon="💧" onClick={()=>setModal('cashflow')} insight={kpiInsight('cashflow',data,lang,tr)} cause={kpiCause('cashflow',data,tr,lang)} sub={d.cashflow?.reliability==='estimated'?tr('label_estimated_short'):null}/>
         </div>
       )}
 
@@ -4151,7 +4156,7 @@ export default function Dashboard() {
               {[
                 {key:'revenue',    label:tr('al_kpi_revenue'),   val:alYtd?.revenue??null,    chg:ytdChg?.revenue??null,    color:C.accent},
                 {key:'net_profit', label:tr('al_kpi_net_profit'),val:alYtd?.net_profit??null,  chg:ytdChg?.net_profit??null,  color:(alYtd?.net_profit??0)>=0?C.green:C.red},
-                {key:'margin',     label:tr('al_kpi_margin'),     val:alYtd?.net_margin_pct!=null?alYtd?.net_margin_pct+'%':null,
+                {key:'margin',     label:tr('al_kpi_margin'),     val:alYtd?.net_margin_pct!=null?formatPctForLang(alYtd.net_margin_pct, 1, lang):null,
                                     chg:ytdChg?.net_margin_pct??null, color:C.violet},
               ].map(({key,label,val,chg,color})=>(
                 <div key={key} style={{minWidth:120}}>
@@ -4160,7 +4165,7 @@ export default function Dashboard() {
                     {key==='margin'?val:(val!=null?formatCompactForLang(val, lang):'—')}
                   </div>
                   {chg!=null&&<div style={{fontSize:9,fontWeight:700,color:chg>=0?C.green:C.red,marginTop:2}}>
-                    {chg>=0?'▲':'▼'} {Math.abs(chg).toFixed(1)}% {tr('al_vs_prior_year')}
+                    {chg>=0?'▲':'▼'} {formatPctForLang(Math.abs(chg), 1, lang)} {tr('al_vs_prior_year')}
                   </div>}
                 </div>
               ))}
@@ -4190,7 +4195,7 @@ export default function Dashboard() {
                     </div>
                     {fy.net_margin_pct!=null&&<div style={{display:'flex',justifyContent:'space-between'}}>
                       <span style={{fontSize:10,color:C.text2}}>{tr('al_kpi_margin')}</span>
-                      <span style={{fontFamily:'var(--font-mono)',fontSize:11,fontWeight:600,color:C.violet}}>{fy.net_margin_pct}%</span>
+                      <span style={{fontFamily:'var(--font-mono)',fontSize:11,fontWeight:600,color:C.violet}}>{formatPctForLang(fy.net_margin_pct, 1, lang)}</span>
                     </div>}
                   </div>
                 </div>

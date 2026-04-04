@@ -15,6 +15,12 @@ import { useLang }    from '../context/LangContext.jsx'
 import { usePeriodScope } from '../context/PeriodScopeContext.jsx'
 import { useCompany } from '../context/CompanyContext.jsx'
 import { buildAnalysisQuery } from '../utils/buildAnalysisQuery.js'
+import {
+  formatCompactForLang,
+  formatPctForLang,
+  formatMultipleForLang,
+  formatDays,
+} from '../utils/numberFormat.js'
 
 const API = '/api/v1'
 function auth() {
@@ -22,15 +28,6 @@ function auth() {
   catch { return {} }
 }
 
-// ── Number formatters (always Latin digits) ───────────────────────────────────
-const fmtN = v => {
-  if (v == null) return '—'
-  const a = Math.abs(v), s = v<0?'-':''
-  if (a>=1e6) return `${s}${(a/1e6).toFixed(1)}M`
-  if (a>=1e3) return `${s}${(a/1e3).toFixed(0)}K`
-  return `${s}${Math.round(a)}`
-}
-const fmtP = v => v==null?'—':`${Number(v).toFixed(1)}%`
 const fmtDir = d => d==='improving'?'↑':d==='declining'?'↓':'→'
 
 // ── Tone detection from user message ─────────────────────────────────────────
@@ -97,8 +94,8 @@ function buildPrompt(c, lg, memory={}, tone='auto') {
   const co=c.company||{}, d=c.dashboard||{}, s=c.statements||{}, an=c.analysis||{}
   const cf=c.cashflow||{}, br=c.branches||{}, val=c.validation||{}, decs=c.decisions||{}
   const liq=an.liquidity||{}, eff=an.efficiency||{}
-  const perPeriod=(an.periods_data||[]).map(p=>`${p.period}: إيراد=${fmtN(p.revenue)} ربح=${fmtN(p.net_profit)} هامش=${fmtP(p.net_margin)}`).join(' | ')||'—'
-  const brLines=(br.branches||[]).slice(0,6).map(b=>`  • ${b.branch_name}: إيراد=${fmtN(b.revenue)} هامش=${fmtP(b.net_margin)} ربح=${fmtN(b.net_profit)}${b.is_loss?' ⚠ خسارة':''}`).join('\n')||'  لا يوجد'
+  const perPeriod=(an.periods_data||[]).map(p=>`${p.period}: إيراد=${formatCompactForLang(p.revenue, lg)} ربح=${formatCompactForLang(p.net_profit, lg)} هامش=${formatPctForLang(p.net_margin, 1, lg)}`).join(' | ')||'—'
+  const brLines=(br.branches||[]).slice(0,6).map(b=>`  • ${b.branch_name}: إيراد=${formatCompactForLang(b.revenue, lg)} هامش=${formatPctForLang(b.net_margin, 1, lg)} ربح=${formatCompactForLang(b.net_profit, lg)}${b.is_loss?' ⚠ خسارة':''}`).join('\n')||'  لا يوجد'
   const val_st=val.status||'UNKNOWN'
   let valBlock=val_st==='PASS'?'✓ سليمة':`${val_st==='FAIL'?'✗ فشل':'⚠ تحذير'}: ${[...(val.errors||[]).slice(0,2),...(val.warnings||[]).slice(0,1)].join(' | ')||''}`
   if (val.approximation_detected) valBlock+=' | ⚠ نسبة التداول تقريبية'
@@ -126,17 +123,17 @@ ${memStr?`سياق سابق: ${memStr}`:''}
 ━ ${co.name||'?'} | ${c.period||'?'} | نافذة: ${c.window||'ALL'}
 
 ━ الأداء:
-إيراد: ${fmtN(d.revenue_latest)} | ربح صافي: ${fmtN(d.np_latest)} | ربح إجمالي: ${fmtN(d.gross_profit)}
-COGS: ${fmtN(d.cogs)} | مصاريف تشغيل: ${fmtN(d.expenses_opex)}
-MoM إيراد: ${fmtP(d.revenue_mom_pct)} (${d.revenue_direction||'?'}) | MoM ربح: ${fmtP(d.net_profit_mom_pct)}
+إيراد: ${formatCompactForLang(d.revenue_latest, lg)} | ربح صافي: ${formatCompactForLang(d.np_latest, lg)} | ربح إجمالي: ${formatCompactForLang(d.gross_profit, lg)}
+COGS: ${formatCompactForLang(d.cogs, lg)} | مصاريف تشغيل: ${formatCompactForLang(d.expenses_opex, lg)}
+MoM إيراد: ${formatPctForLang(d.revenue_mom_pct, 1, lg)} (${d.revenue_direction||'?'}) | MoM ربح: ${formatPctForLang(d.net_profit_mom_pct, 1, lg)}
 
 ━ هوامش:
-إجمالي: ${fmtP(s.gross_margin_pct)} | صافي: ${fmtP(s.net_margin_pct)} | تشغيلي: ${fmtP(s.operating_margin_pct)}
-نسبة مصاريف: ${fmtP(s.expense_ratio)} | تداول: ${liq.current_ratio??'—'}x | WC: ${fmtN(liq.working_capital)}
-DSO: ${eff.dso_days??'—'}ي | DPO: ${eff.dpo_days??'—'}ي | CCC: ${eff.ccc_days??'—'}ي
+إجمالي: ${formatPctForLang(s.gross_margin_pct, 1, lg)} | صافي: ${formatPctForLang(s.net_margin_pct, 1, lg)} | تشغيلي: ${formatPctForLang(s.operating_margin_pct, 1, lg)}
+نسبة مصاريف: ${formatPctForLang(s.expense_ratio, 1, lg)} | تداول: ${liq.current_ratio!=null?formatMultipleForLang(liq.current_ratio, 2, lg):'—'} | WC: ${formatCompactForLang(liq.working_capital, lg)}
+DSO: ${eff.dso_days!=null?formatDays(eff.dso_days):'—'} | DPO: ${eff.dpo_days!=null?formatDays(eff.dpo_days):'—'} | CCC: ${eff.ccc_days!=null?formatDays(eff.ccc_days):'—'}
 
 ━ تدفق نقدي:
-OCF: ${fmtN(cf.operating_cashflow)} | FCF: ${fmtN(cf.free_cashflow)} | نقد: ${fmtN(cf.cash_balance)}
+OCF: ${formatCompactForLang(cf.operating_cashflow, lg)} | FCF: ${formatCompactForLang(cf.free_cashflow, lg)} | نقد: ${formatCompactForLang(cf.cash_balance, lg)}
 
 ━ الفروع (${br.branch_count||0}): أقوى=${br.strongest||'—'} | أضعف=${br.weakest||'—'}
 ${brLines}
@@ -228,10 +225,10 @@ function KpiStrip({ ctx, lang, tr }) {
   const d=ctx.dashboard||{}, s=ctx.statements||{}, cf=ctx.cashflow||{}, br=ctx.branches||{}
 
   const kpis = [
-    { l:tr('revenue'),     v:fmtN(d.revenue_latest), c:'var(--accent)',  sub:`${tr('cmp_mom_short')} ${fmtP(d.revenue_mom_pct)}` },
-    { l:tr('net_profit'),  v:fmtN(d.np_latest),      c:(d.np_latest||0)>=0?'var(--green)':'var(--red)', sub:fmtP(s.net_margin_pct) },
-    { l:tr('net_margin'),  v:fmtP(s.net_margin_pct), c:'var(--blue)',    sub:fmtP(s.expense_ratio)+' '+tr('expense_ratio_short') },
-    { l:tr('cashflow_operating'), v:fmtN(cf.operating_cashflow), c:'var(--violet)', sub:null },
+    { l:tr('revenue'),     v:formatCompactForLang(d.revenue_latest, lang), c:'var(--accent)',  sub:`${tr('cmp_mom_short')} ${formatPctForLang(d.revenue_mom_pct, 1, lang)}` },
+    { l:tr('net_profit'),  v:formatCompactForLang(d.np_latest, lang),      c:(d.np_latest||0)>=0?'var(--green)':'var(--red)', sub:formatPctForLang(s.net_margin_pct, 1, lang) },
+    { l:tr('net_margin'),  v:formatPctForLang(s.net_margin_pct, 1, lang), c:'var(--blue)',    sub:`${formatPctForLang(s.expense_ratio, 1, lang)} ${tr('expense_ratio_short')}` },
+    { l:tr('cashflow_operating'), v:formatCompactForLang(cf.operating_cashflow, lang), c:'var(--violet)', sub:null },
     { l:tr('best_branch'), v:br.strongest||'—',      c:'var(--green)',   sub:null },
     { l:tr('worst_branch'),v:br.weakest||'—',        c:'var(--red)',     sub:null },
   ]
@@ -417,15 +414,16 @@ export default function CfoAI() {
       const rp=j.decisions?.priority||'?', vs=j.validation?.status||'PASS'
       const dec=(j.decisions?.decisions||[])[0], hasLoss=(j.branches?.branches||[]).some(b=>b.is_loss)
       const wk=j.branches?.weakest
+      const marginStr = nm != null && Number.isFinite(Number(nm)) ? formatPctForLang(Number(nm), 1, lang) : '?'
 
       const welcome = lang==='ar'
-        ? `مرحباً 👋 أنا مستشارك المالي لـ **${co}**.\n\nالفترة **${j.period||'—'}** · النافذة ${window_} · هامش صافي **${nm?.toFixed(1)??'?'}%** · خطر **${rp}**\n\n${vs!=='PASS'?`⚠ سلامة البيانات: **${vs}**\n\n`:''}${dec?`أولى التوصيات: **${dec.action_type}** — ${dec.rationale}\n\n`:''}${hasLoss?`⚠ فرع خاسر: **${wk}**\n\n`:''}اسألني عن أي شيء مالي.`
-        : `Hello 👋 I'm your AI CFO Advisor for **${co}**.\n\nPeriod **${j.period||'—'}** · Window ${window_} · Net Margin **${nm?.toFixed(1)??'?'}%** · Risk **${rp}**\n\n${vs!=='PASS'?`⚠ Data validation: **${vs}**\n\n`:''}${dec?`Top recommendation: **${dec.action_type}** — ${dec.rationale}\n\n`:''}Ask me anything about the financials.`
+        ? `مرحباً 👋 أنا مستشارك المالي لـ **${co}**.\n\nالفترة **${j.period||'—'}** · النافذة ${window_} · هامش صافي **${marginStr}** · خطر **${rp}**\n\n${vs!=='PASS'?`⚠ سلامة البيانات: **${vs}**\n\n`:''}${dec?`أولى التوصيات: **${dec.action_type}** — ${dec.rationale}\n\n`:''}${hasLoss?`⚠ فرع خاسر: **${wk}**\n\n`:''}اسألني عن أي شيء مالي.`
+        : `Hello 👋 I'm your AI CFO Advisor for **${co}**.\n\nPeriod **${j.period||'—'}** · Window ${window_} · Net Margin **${marginStr}** · Risk **${rp}**\n\n${vs!=='PASS'?`⚠ Data validation: **${vs}**\n\n`:''}${dec?`Top recommendation: **${dec.action_type}** — ${dec.rationale}\n\n`:''}Ask me anything about the financials.`
 
       setMessages([{ role:'assistant', content:welcome, suggestions:getSuggestions('executive_summary', tr) }])
     } catch(e) { console.error('CfoAI ctx:', e) }
     finally { setLoadingCtx(false) }
-  }, [selectedId, lang, window_, toQueryString])
+  }, [selectedId, lang, window_, toQueryString, tr])
 
   useEffect(() => { loadCtx() }, [loadCtx])
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior:'smooth' }) }, [messages])

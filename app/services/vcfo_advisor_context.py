@@ -23,6 +23,23 @@ def _safe(fn, default=None):
         return default
 
 
+def _merge_advisor_causal_items(flat: list | None) -> list:
+    """Dedup by causal item id; input order preserved (CFO domain → narrative → AI heuristic)."""
+    seen: set[str] = set()
+    out: list = []
+    for it in flat or []:
+        if not isinstance(it, dict):
+            continue
+        uid = str(it.get("id") or "")
+        if not uid:
+            uid = f"_:{len(seen)}"
+        if uid in seen:
+            continue
+        seen.add(uid)
+        out.append(it)
+    return out
+
+
 def build_advisor_context(
     company_id:   str,
     db,
@@ -161,13 +178,75 @@ def build_advisor_context(
         {"status": "UNKNOWN", "warnings": [], "errors": []}
     ) if windowed else {"status": "NO_DATA"}
 
-    # ── AI CFO decisions ──────────────────────────────────────────────────────
+    # ── Shared CFO domain decisions + phase43 narrative causal (Wave 2B) ───────
+    causal_items_merged: list = []
+    _lang_ai = lang if lang in ("en", "ar", "tr") else lang
+    _lang_cfo = _lang_ai if _lang_ai in ("en", "ar", "tr") else "en"
+
+    if windowed and analysis:
+        def _pack_cfo_domain():
+            from app.services.period_aggregation import build_annual_layer
+            from app.services.fin_intelligence import build_intelligence
+            from app.services.alerts_engine import build_alerts
+            from app.services.cfo_decision_engine import build_cfo_decisions
+
+            annual = build_annual_layer(windowed)
+            intel = build_intelligence(analysis, annual, company.currency or "")
+            alerts = build_alerts(intel, lang=_lang_cfo).get("alerts", [])
+            return build_cfo_decisions(
+                intel,
+                alerts,
+                lang=_lang_cfo,
+                n_periods=len(periods) if periods else 3,
+                analysis=analysis,
+                branch_context=None,
+            )
+
+        dec_pack = _safe(_pack_cfo_domain, {})
+        causal_items_merged.extend(dec_pack.get("causal_items") or [])
+
+        def _narrative_causal():
+            from app.services.root_cause_engine import build_root_causes
+            from app.services.anomaly_engine import detect_anomalies
+            from app.services.narrative_builder import build_narratives
+
+            exp_ratio = round(exp / rev * 100, 2) if rev else None
+            cogs_ratio = round(cogs / rev * 100, 2) if rev else None
+            _p43_metrics = {
+                "net_margin_pct": nm,
+                "total_cost_ratio_pct": er,
+                "cogs_ratio_pct": cogs_ratio,
+                "expense_ratio": exp_ratio,
+            }
+
+            def _lv_s(series):
+                return next((x for x in reversed(series or []) if x is not None), None)
+
+            _tr = analysis.get("trends") or {}
+            _p43_trends = {
+                "revenue_mom": _lv_s(_tr.get("revenue", {}).get("mom_pct", [])),
+                "net_profit_mom": _lv_s(_tr.get("net_profit", {}).get("mom_pct", [])),
+                "opex_mom_pct": _lv_s(_tr.get("expenses", {}).get("mom_pct", [])),
+                "cogs_ratio_mom": _lv_s(_tr.get("cogs", {}).get("mom_pct", [])),
+                "net_margin_mom": _lv_s(_tr.get("net_margin", {}).get("mom_pct", [])),
+            }
+            rc = build_root_causes(_p43_metrics, _p43_trends, lang=_lang_cfo)
+            anom = detect_anomalies(_p43_metrics, _p43_trends, lang=_lang_cfo)
+            narr = build_narratives(rc, anom, lang=_lang_cfo)
+            return list(getattr(narr, "causal_items", []) or [])
+
+        causal_items_merged.extend(_safe(_narrative_causal, []))
+
+    # ── AI CFO heuristic decisions (legacy rationale + causal row) ────────────
     from app.services.ai_cfo_engine import build_company_decision
     snapshot = {"revenue": w_rev, "net_profit": w_np, "net_margin_pct": nm, "expense_ratio": er}
     cfo_decisions_ctx = _safe(
         lambda: build_company_decision(company.name, analysis, snapshot, period),
-        {"decisions": [], "risk_score": 50, "priority": "UNKNOWN"}
-    ) if analysis else {}
+        {"decisions": [], "causal_items": [], "risk_score": 50, "priority": "UNKNOWN"},
+    ) if analysis else {"decisions": [], "causal_items": [], "risk_score": 50, "priority": "UNKNOWN"}
+
+    causal_items_merged.extend(cfo_decisions_ctx.get("causal_items") or [])
+    causal_items_final = _merge_advisor_causal_items(causal_items_merged)
 
     # ── Branch context ────────────────────────────────────────────────────────
     branch_ctx: dict = {}
@@ -282,6 +361,7 @@ def build_advisor_context(
         "branches":   branch_ctx,
         "validation": validation_ctx,
         "decisions":  cfo_decisions_ctx,
+        "causal_items": causal_items_final,
 
         # ── Spec-mandated key aliases ─────────────────────────────────────────
         # "executive" = decisions + analysis (same data, different label)

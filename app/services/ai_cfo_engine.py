@@ -25,7 +25,17 @@ Risk score (0-100):
   100 = maximum risk (losses, high expense, declining revenue)
 """
 from __future__ import annotations
-from typing import Optional
+from typing import Any, Optional
+
+# Wave 2B: template keys for causal realization (no English prose on this path)
+_AI_CFO_TOPIC: dict[str, str] = {
+    "COST_REDUCTION": "cost",
+    "SCALE_UP": "growth",
+    "OPTIMIZE": "efficiency",
+    "RESTRUCTURE": "risk",
+    "CLOSE": "risk",
+    "MONITOR": "efficiency",
+}
 
 # ── Threshold constants — single source of truth ─────────────────────────────
 
@@ -151,6 +161,65 @@ def _priority_label(risk_score: int) -> str:
     elif risk_score >= 35:
         return "MEDIUM"
     return "LOW"
+
+
+def _priority_to_severity(priority: str) -> str:
+    p = (priority or "LOW").upper()
+    if p == "HIGH":
+        return "high"
+    if p == "MEDIUM":
+        return "medium"
+    return "low"
+
+
+def _causal_item_for_ai_decision(decision: dict) -> dict[str, Any]:
+    """Structured causal row for advisor/board (no realization here)."""
+    action_type = str(decision.get("action_type") or "OPTIMIZE")
+    topic = _AI_CFO_TOPIC.get(action_type, "efficiency")
+    fin = decision.get("financials") or {}
+    nm = fin.get("net_margin_pct")
+    er = fin.get("expense_ratio")
+    mom = fin.get("revenue_mom_pct")
+    rev = fin.get("revenue")
+    is_loss = bool(fin.get("is_loss"))
+    params: dict[str, Any] = {
+        "action_type": action_type,
+        "risk_score": decision.get("risk_score"),
+        "priority": decision.get("priority"),
+        "net_margin_pct": nm,
+        "expense_ratio": er,
+        "revenue_mom_pct": mom,
+        "revenue": rev,
+        "is_loss": is_loss,
+    }
+    params = {k: v for k, v in sorted(params.items()) if v is not None}
+    tid = f"ai_cfo.decision.{action_type}"
+    ent = str(decision.get("entity") or "entity").replace(" ", "_")[:48]
+    et = str(decision.get("entity_type") or "company")
+    per = str(decision.get("period") or "")
+    cid = f"ai_cfo:{et}:{ent}:{per}:{action_type}"
+    sm = {k: v for k, v in {
+        "net_margin_pct": nm,
+        "expense_ratio": er,
+        "revenue_mom_pct": mom,
+        "revenue": rev,
+        "risk_score": decision.get("risk_score"),
+    }.items() if v is not None}
+    sev = _priority_to_severity(str(decision.get("priority") or "LOW"))
+    return {
+        "id": cid,
+        "topic": topic,
+        "severity": sev,
+        "source": "ai_cfo_heuristic",
+        "change": {"key": f"{tid}.change", "params": dict(params)},
+        "cause": {"key": f"{tid}.cause", "params": dict(params)},
+        "action": {"key": f"{tid}.action", "params": dict(params)},
+        "evidence": {
+            "source_metrics": sm,
+            "template_ids": [tid],
+            "merged_from": [action_type],
+        },
+    }
 
 
 def _choose_action_type(
@@ -358,6 +427,7 @@ def build_company_decision(
 
     return {
         "decisions":  [decision],
+        "causal_items": [_causal_item_for_ai_decision(decision)],
         "risk_score": decision["risk_score"],
         "priority":   decision["priority"],
     }
@@ -410,9 +480,11 @@ def build_branch_decisions(
 
     # Sort by risk_score descending — highest risk first
     decisions.sort(key=lambda d: -d["risk_score"])
+    branch_causal = [_causal_item_for_ai_decision(d) for d in decisions]
 
     return {
         "decisions":        decisions,
+        "causal_items":     branch_causal,
         "branch_count":     len(decisions),
         "high_risk_count":  len(high_risk),
         "high_risk_branches": high_risk,
@@ -461,9 +533,13 @@ def build_cfo_decision_pack(
         if company_pack["decisions"] else "MONITOR"
     )
 
+    merged_causal = list(company_pack.get("causal_items") or [])
+    merged_causal.extend(branch_pack.get("causal_items") or [])
+
     return {
         "company":  company_pack,
         "branches": branch_pack,
+        "causal_items": merged_causal,
         "summary": {
             "overall_risk_score": overall_risk,
             "overall_priority":   overall_priority,

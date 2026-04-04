@@ -10,8 +10,14 @@ Input sources:
   executive: output of GET /api/v1/companies/{company_id}/executive
 
 Output: structured board report dict with 7 sections.
+
+Wave 2B: summary / outlook / highlights use realize_ref (board.* i18n) and, when
+present, realize_causal_items output — avoiding mixed-language concatenation of
+raw narrative strings when a causal path exists.
 """
 from __future__ import annotations
+
+from app.services.causal_realize import realize_causal_items, realize_ref
 
 
 def _g(d: dict, *keys, default=None):
@@ -49,66 +55,122 @@ def _fmt_pct(v) -> str:
         return "—"
 
 
+# ── Wave 2B: causal merge + realization helpers ──────────────────────────────
+
+
+def _board_merge_causal_items(analysis: dict, extra: list | None) -> list[dict]:
+    """Dedup by item id; analysis list first, then optional caller-supplied items."""
+    merged: list[dict] = []
+    seen: set[str] = set()
+    for it in list(analysis.get("causal_items") or []) + list(extra or []):
+        if not isinstance(it, dict):
+            continue
+        uid = str(it.get("id") or "") or f"_:{len(seen)}"
+        if uid in seen:
+            continue
+        seen.add(uid)
+        merged.append(it)
+    return merged
+
+
+def _realization_usable(text: str) -> bool:
+    if not (text or "").strip():
+        return False
+    t = text.strip()
+    return not (
+        t.startswith("[missing:")
+        or t.startswith("[invalid_lang:")
+        or t.startswith("[format_error:")
+    )
+
+
+def _board_health_label(label: str, realize_lang: str) -> str:
+    slug = str(label or "stable").lower().replace(" ", "_")
+    r = realize_ref({"key": f"board.health_label.{slug}", "params": {}}, realize_lang)
+    if _realization_usable(r):
+        return r
+    return realize_ref(
+        {"key": "board.health_label.unknown", "params": {"label": str(label or "")}},
+        realize_lang,
+    )
+
+
 # ── Summary builder ────────────────────────────────────────────────────────────
 
 
-_HEALTH_LABEL_AR = {
-    "strong": "قوي", "good": "جيد", "stable": "مستقر",
-    "weak": "ضعيف", "critical": "حرج"
-}
-_HEALTH_LABEL_TR = {
-    "strong": "güçlü", "good": "iyi", "stable": "istikrarlı",
-    "weak": "zayıf", "critical": "kritik"
-}
-
-
-def _build_summary(analysis: dict, executive: dict, lang: str) -> str:
+def _build_summary(
+    analysis: dict,
+    executive: dict,
+    realize_lang: str,
+    realized_causal: list[dict],
+) -> str:
     """
     2–4 sentence executive summary: health + top issue + top opportunity.
-    Fully language-aware. No calculation — text drawn from existing signals.
+    Health and wrappers use realize_ref (board.*). Issues/opportunities prefer
+    realized causal text when usable; otherwise legacy executive strings via i18n
+    wrappers (#legacy_mixed_source risk when executive copy locale ≠ request).
     """
-    ar = lang == "ar"; tr_ = lang == "tr"
-
     # Health
-    health  = _g(executive, "health") or {}
-    score   = health.get("score") or 0
-    label   = health.get("label") or ("strong" if score >= 80 else "stable")
-    nm      = _g(executive, "quick_metrics", "net_margin_pct")
+    health = _g(executive, "health") or {}
+    score = health.get("score") or 0
+    label = health.get("label") or ("strong" if score >= 80 else "stable")
+    nm = _g(executive, "quick_metrics", "net_margin_pct")
     rev_mom = _g(executive, "quick_metrics", "revenue_mom_pct")
 
-    # Top priority
-    pris   = executive.get("top_priorities") or []
-    top_p  = pris[0].get("summary", "") if pris else ""
+    health_lbl = _board_health_label(str(label), realize_lang)
+    nm_s = _fmt_pct(nm)
+    if rev_mom is not None and rev_mom > 0:
+        health_sent = realize_ref(
+            {
+                "key": "board.summary.health_with_mom",
+                "params": {"health_label": health_lbl, "nm": nm_s, "rev_mom": _fmt_pct(rev_mom)},
+            },
+            realize_lang,
+        )
+    else:
+        health_sent = realize_ref(
+            {"key": "board.summary.health_no_mom", "params": {"health_label": health_lbl, "nm": nm_s}},
+            realize_lang,
+        )
 
-    # Top opportunity
-    opps  = executive.get("opportunities") or []
+    pris = executive.get("top_priorities") or []
+    top_p = pris[0].get("summary", "") if pris else ""
+    opps = executive.get("opportunities") or []
     top_o = opps[0].get("description", "") if opps else ""
 
-    if ar:
-        health_sent = (
-            f"يُصنَّف الوضع المالي للشركة على أنه «{_HEALTH_LABEL_AR.get(label, label)}» بنسبة ربح صافٍ {_fmt_pct(nm)} "
-            f"{'وإيرادات في ارتفاع ' + _fmt_pct(rev_mom) + ' شهرياً' if rev_mom and rev_mom > 0 else ''}."
+    issue_sent = ""
+    for it in realized_causal:
+        if str(it.get("severity", "")).lower() not in ("high", "medium"):
+            continue
+        ct = it.get("change_text") or ""
+        if _realization_usable(ct):
+            issue_sent = ct
+            break
+    if not issue_sent.strip() and top_p:
+        # LEGACY: executive summary may not match realize_lang
+        issue_sent = realize_ref(
+            {"key": "board.summary.issue_executive", "params": {"summary": top_p}},
+            realize_lang,
         )
-        issue_sent  = f"أبرز القضية الحالية: {top_p}" if top_p else ""
-        opp_sent    = f"وفي المقابل، {top_o}" if top_o else ""
-    elif tr_:
-        health_sent = (
-            f"Şirketin mali durumu «{_HEALTH_LABEL_TR.get(label, label)}» olarak sınıflandırılıyor; "
-            f"net marj {_fmt_pct(nm)}"
-            f"{', aylık ' + _fmt_pct(rev_mom) + ' gelir büyümesi ile' if rev_mom and rev_mom > 0 else ''}."
-        )
-        issue_sent  = f"Öne çıkan konu: {top_p}" if top_p else ""
-        opp_sent    = f"Öte yandan, {top_o}" if top_o else ""
-    else:
-        health_sent = (
-            f"The company's financial position is classified as «{label}» with a net margin of "
-            f"{_fmt_pct(nm)}"
-            f"{' and revenue growing ' + _fmt_pct(rev_mom) + ' MoM' if rev_mom and rev_mom > 0 else ''}."
-        )
-        issue_sent  = f"The primary issue requiring attention: {top_p}" if top_p else ""
-        opp_sent    = f"On the positive side, {top_o}" if top_o else ""
 
-    parts = [s for s in [health_sent, issue_sent, opp_sent] if s.strip()]
+    opp_sent = ""
+    for it in realized_causal:
+        sev = str(it.get("severity", "")).lower()
+        topic = str(it.get("topic", "")).lower()
+        if sev != "low" and topic != "growth":
+            continue
+        ct = it.get("change_text") or ""
+        if _realization_usable(ct):
+            opp_sent = ct
+            break
+    if not opp_sent.strip() and top_o:
+        # LEGACY: opportunity description locale may not match request
+        opp_sent = realize_ref(
+            {"key": "board.summary.opportunity_executive", "params": {"description": top_o}},
+            realize_lang,
+        )
+
+    parts = [s for s in [health_sent, issue_sent, opp_sent] if (s or "").strip()]
     return " ".join(parts)
 
 
@@ -253,58 +315,63 @@ def _build_snapshot(analysis: dict, executive: dict) -> dict:
 
 # ── Outlook builder ────────────────────────────────────────────────────────────
 
-def _build_outlook(analysis: dict, lang: str) -> str:
+def _build_outlook(
+    analysis: dict,
+    realize_lang: str,
+    realized_causal: list[dict],
+    *,
+    had_raw_causal: bool,
+) -> str:
     """
-    Short forward-looking narrative from trends + forecast insight.
-    No financial calculation.
+    Forward-looking narrative: base branch via realize_ref (board.outlook.*).
+    When causal_items were supplied, prefer a realized change_text for revenue /
+    margin / cost topics instead of appending raw narrative what_happened (mixed-language risk).
+    LEGACY: if no causal_items input, retain prior behavior using narrative prose for fc_insight.
     """
-    ar = lang == "ar"; tr_ = lang == "tr"
-
-    trends    = analysis.get("trends") or {}
+    trends = analysis.get("trends") or {}
     rev_trend = (trends.get("revenue") or {})
-    np_trend  = (trends.get("net_profit") or {})
-    rev_dir   = rev_trend.get("direction", "stable")
-    np_dir    = np_trend.get("direction", "stable")
-    np_loss   = np_trend.get("loss_flag", False)
+    np_trend = (trends.get("net_profit") or {})
+    rev_dir = rev_trend.get("direction", "stable")
+    np_dir = np_trend.get("direction", "stable")
+    np_loss = np_trend.get("loss_flag", False)
 
-    # Try to get forecast insight from narratives or trends
-    narratives = analysis.get("narratives") or []
-    fc_insight = ""
-    for n in narratives:
-        if n.get("domain") in ("revenue", "profit") and n.get("what_happened"):
-            fc_insight = n.get("what_happened", "")
+    if np_loss:
+        outlook_key = "board.outlook.np_loss"
+    elif rev_dir == "improving" and np_dir == "improving":
+        outlook_key = "board.outlook.rev_np_improving"
+    elif rev_dir == "improving":
+        outlook_key = "board.outlook.rev_improving"
+    else:
+        outlook_key = "board.outlook.stable_focus"
+
+    outlook = realize_ref({"key": outlook_key, "params": {}}, realize_lang)
+
+    extra = ""
+    topics_outlook = {"revenue", "margin", "cost"}
+    for it in realized_causal:
+        if str(it.get("topic", "")).lower() not in topics_outlook:
+            continue
+        ct = it.get("change_text") or ""
+        if _realization_usable(ct):
+            extra = ct
             break
 
-    if ar:
-        if np_loss:
-            outlook = "المؤشرات تُشير إلى استمرار الضغط على الربحية؛ التدفق النقدي يستدعي مراقبة مستمرة."
-        elif rev_dir == "improving" and np_dir == "improving":
-            outlook = "الزخم الإيجابي في الإيرادات والأرباح يُشير إلى استمرار التحسن إذا حافظت الشركة على انضباطها في التكاليف."
-        elif rev_dir == "improving":
-            outlook = "الإيرادات في نمو، لكن الأرباح تحتاج إلى مراقبة دقيقة لضمان ترجمة النمو إلى ربحية فعلية."
-        else:
-            outlook = "المؤشرات المالية مستقرة؛ التركيز على كفاءة التكاليف وجودة النمو هو الأولوية للفترة القادمة."
-    elif tr_:
-        if np_loss:
-            outlook = "Göstergeler kârlılık üzerindeki baskının devam ettiğine işaret ediyor; nakit akışı sürekli izlem gerektiriyor."
-        elif rev_dir == "improving" and np_dir == "improving":
-            outlook = "Gelir ve kârdaki olumlu ivme, şirketin maliyet disiplinini koruması halinde iyileşmenin süreceğine işaret ediyor."
-        elif rev_dir == "improving":
-            outlook = "Gelir büyüyor ancak büyümenin gerçek kâra dönüşmesi için kâr marjlarının yakından izlenmesi gerekiyor."
-        else:
-            outlook = "Mali göstergeler istikrarlı; önümüzdeki dönem için maliyet verimliliği ve büyüme kalitesi öncelikli odak alanları."
-    else:
-        if np_loss:
-            outlook = "Indicators point to continued profitability pressure; cash flow requires close monitoring."
-        elif rev_dir == "improving" and np_dir == "improving":
-            outlook = "Positive momentum in both revenue and profit suggests continued improvement, provided cost discipline is maintained."
-        elif rev_dir == "improving":
-            outlook = "Revenue is growing, but profit margins need close monitoring to ensure growth translates into actual profitability."
-        else:
-            outlook = "Financial indicators are stable; cost efficiency and growth quality are the priority focus areas for the coming period."
+    if extra:
+        if len(extra) < 120:
+            return f"{outlook} {extra}".strip()
+        return outlook
 
-    if fc_insight and fc_insight != outlook:
-        return f"{outlook} {fc_insight}" if len(fc_insight) < 120 else outlook
+    # LEGACY: only when no causal_items were merged into this report path
+    if not had_raw_causal:
+        narratives = analysis.get("narratives") or []
+        fc_insight = ""
+        for n in narratives:
+            if n.get("domain") in ("revenue", "profit") and n.get("what_happened"):
+                fc_insight = n.get("what_happened", "")
+                break
+        if fc_insight and fc_insight != outlook:
+            return f"{outlook} {fc_insight}" if len(fc_insight) < 120 else outlook
+
     return outlook
 
 
@@ -329,55 +396,87 @@ def _pp(v) -> str:
         return "—"
 
 
-def _build_highlights(analysis: dict, executive: dict, lang: str) -> list[dict]:
+def _build_highlights(
+    analysis: dict,
+    executive: dict,
+    realize_lang: str,
+    realized_causal: list[dict],
+) -> list[dict]:
     """
-    3–6 factual highlights with explicit metric references.
-    No new calculation; uses snapshot + trends + priorities.
+    3–6 factual highlights: metric lines via realize_ref (board.highlight.*), plus
+    up to two usable realized causal change lines (single realization path for those).
+    LEGACY: top priority line still uses raw executive summary (locale may differ).
     """
-    ar = lang == "ar"; tr_ = lang == "tr"
     snap = _build_snapshot(analysis, executive)
     trends = analysis.get("trends") or {}
     rev = (trends.get("revenue") or {})
     np_ = (trends.get("net_profit") or {})
     rev_dir = rev.get("direction", "stable")
-    np_dir  = np_.get("direction", "stable")
+    np_dir = np_.get("direction", "stable")
     rev_mom = snap.get("revenue_mom_pct")
-    np_mom  = snap.get("net_profit_mom_pct")
+    np_mom = snap.get("net_profit_mom_pct")
 
     items: list[dict] = []
 
     nm = snap.get("net_margin_pct")
     if nm is not None:
-        msg = (f"Net margin is {_fmt_pct(nm)}." if not ar and not tr_
-               else (f"هامش الربح الصافي {_fmt_pct(nm)}." if ar
-                     else f"Net marj {_fmt_pct(nm)}."))
+        msg = realize_ref(
+            {"key": "board.highlight.net_margin", "params": {"nm": _fmt_pct(nm)}},
+            realize_lang,
+        )
         items.append({"type": "profitability_snapshot", "message": msg, "metrics": ["net_margin_pct"]})
 
     if rev_mom is not None:
-        msg = (f"Revenue momentum: {_fmt_pct(rev_mom)} MoM." if not ar and not tr_
-               else (f"زخم الإيرادات: {_fmt_pct(rev_mom)} شهرياً." if ar
-                     else f"Gelir momentumu: aylık {_fmt_pct(rev_mom)}."))
+        msg = realize_ref(
+            {"key": "board.highlight.rev_momentum", "params": {"rev_mom": _fmt_pct(rev_mom)}},
+            realize_lang,
+        )
         items.append({"type": "revenue_momentum", "message": msg, "metrics": ["revenue_mom_pct"]})
 
     if np_mom is not None:
-        msg = (f"Net profit momentum: {_fmt_pct(np_mom)} MoM." if not ar and not tr_
-               else (f"زخم صافي الربح: {_fmt_pct(np_mom)} شهرياً." if ar
-                     else f"Net kâr momentumu: aylık {_fmt_pct(np_mom)}."))
+        msg = realize_ref(
+            {"key": "board.highlight.np_momentum", "params": {"np_mom": _fmt_pct(np_mom)}},
+            realize_lang,
+        )
         items.append({"type": "profit_momentum", "message": msg, "metrics": ["net_profit_mom_pct"]})
 
     if rev_dir in ("improving", "declining") or np_dir in ("improving", "declining"):
-        msg = (f"Trend direction: revenue {rev_dir}, net profit {np_dir}." if not ar and not tr_
-               else (f"اتجاه الاتجاهات: الإيرادات {rev_dir}، وصافي الربح {np_dir}." if ar
-                     else f"Eğilim yönü: gelir {rev_dir}, net kâr {np_dir}."))
+        msg = realize_ref(
+            {
+                "key": "board.highlight.trend_direction",
+                "params": {"rev_dir": str(rev_dir), "np_dir": str(np_dir)},
+            },
+            realize_lang,
+        )
         items.append({"type": "trend_direction", "message": msg, "metrics": ["revenue_series", "net_profit_series"]})
+
+    n_causal_hl = 0
+    for it in realized_causal:
+        if n_causal_hl >= 2:
+            break
+        ct = it.get("change_text") or ""
+        if not _realization_usable(ct):
+            continue
+        ev = it.get("evidence") if isinstance(it.get("evidence"), dict) else {}
+        sm = ev.get("source_metrics") if isinstance(ev.get("source_metrics"), dict) else {}
+        mkeys = list(sm.keys())[:8]
+        items.append({
+            "type": "causal",
+            "source": it.get("source"),
+            "message": ct,
+            "metrics": mkeys,
+        })
+        n_causal_hl += 1
 
     pris = (executive.get("top_priorities") or [])
     if pris:
         p0 = pris[0]
         if p0.get("summary"):
-            msg = (f"Top priority: {p0.get('summary')}" if not ar and not tr_
-                   else (f"الأولوية الأولى: {p0.get('summary')}" if ar
-                         else f"Öncelik: {p0.get('summary')}"))
+            # LEGACY: {summary} text may not match realize_lang
+            msg = realize_ref(
+                {"key": "board.highlight.top_priority", "params": {"summary": p0.get("summary", "")}},
+                realize_lang,
+            )
             items.append({"type": "top_priority", "message": msg, "metrics": []})
 
     return items[:6]
@@ -473,6 +572,7 @@ def build_board_report(
     deep_intelligence: dict | None = None,
     phase43_root_causes: list | None = None,
     cfo_decisions: list | None = None,
+    causal_items: list | None = None,
 ) -> dict:
     """
     Assemble a CFO board report from analysis + executive outputs.
@@ -484,9 +584,15 @@ def build_board_report(
         lang:      "en" | "ar" | "tr"
 
     Returns:
-        structured board report dict
+        structured board report dict (same top-level keys as before; optional causal_items input
+        merges with analysis[\"causal_items\"] for Wave 2B realization in summary/outlook/highlights).
+
     """
     safe_lang = lang if lang in ("en", "ar", "tr") else "en"
+    realize_lang = (lang or "").strip().lower()
+
+    merged_causal = _board_merge_causal_items(analysis, causal_items)
+    realized_causal = realize_causal_items(merged_causal, realize_lang)
 
     company_id   = analysis.get("company_id") or executive.get("company_id", "")
     company_name = analysis.get("company_name") or executive.get("company_name", "")
@@ -525,14 +631,19 @@ def build_board_report(
             "method": health.get("score_method", "rule_based"),
         },
 
-        "summary":       _build_summary(analysis, executive, safe_lang),
+        "summary":       _build_summary(analysis, executive, realize_lang, realized_causal),
         "risks":         _build_risks(analysis, executive),
         "opportunities": _build_opportunities(executive, analysis),
         "priorities":    _build_priorities(executive),
         "snapshot":      _build_snapshot(analysis, executive),
-        "outlook":       _build_outlook(analysis, safe_lang),
+        "outlook":       _build_outlook(
+            analysis,
+            realize_lang,
+            realized_causal,
+            had_raw_causal=bool(merged_causal),
+        ),
         # Additive board-grade sections
-        "highlights":     _build_highlights(analysis, executive, safe_lang),
+        "highlights":     _build_highlights(analysis, executive, realize_lang, realized_causal),
         "major_risks":    _build_major_risks(analysis, executive, safe_lang),
         "cost_drivers":   _build_cost_drivers(analysis, executive, safe_lang),
         "recommendations": _build_recommendations(analysis, executive, safe_lang),

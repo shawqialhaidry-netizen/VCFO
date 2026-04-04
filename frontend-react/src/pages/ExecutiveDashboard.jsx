@@ -11,7 +11,14 @@ import { useLang }        from '../context/LangContext.jsx'
 import { useCompany }     from '../context/CompanyContext.jsx'
 import { usePeriodScope } from '../context/PeriodScopeContext.jsx'
 import { kpiContextLabel, kpiLabel } from '../utils/kpiContext.js'
-import { formatCompactForLang, formatFullForLang } from '../utils/numberFormat.js'
+import {
+  formatCompactForLang,
+  formatFullForLang,
+  formatPctForLang,
+  formatSignedPctForLang,
+  formatMultipleForLang,
+  formatDays,
+} from '../utils/numberFormat.js'
 import { buildAnalysisQuery } from '../utils/buildAnalysisQuery.js'
 import { buildExecutiveNarrative } from '../utils/buildExecutiveNarrative.js'
 import ExecutiveNarrativeStrip from '../components/ExecutiveNarrativeStrip.jsx'
@@ -36,9 +43,6 @@ const stC  = {excellent:'#34d399', good:'#00d4aa', warning:'#fbbf24', risk:'#f87
 const dClr = {liquidity:T.blue, profitability:T.green, efficiency:T.violet, leverage:T.amber, growth:T.accent}
 const dIco = {liquidity:'💧', profitability:'📈', efficiency:'⚡', leverage:'🏋', growth:'🚀'}
 const uClr = {high:T.red, medium:T.amber, low:T.blue}
-// fmtM → formatCompact (from numberFormat.js)
-const fmtP = v => v==null?'—':`${Number(v).toFixed(1)}%`
-
 // ── Pill badge ────────────────────────────────────────────────────────────────
 const Pill = ({label, color}) => (
   <span style={{fontSize:9,fontWeight:800,padding:'2px 9px',borderRadius:20,
@@ -157,7 +161,14 @@ function ContextPanel({ type, payload, extra, tr, lang, onClose, onNavigate, imp
       <div style={{display:'flex',gap:6,flexWrap:'wrap',marginBottom:22}}>
         <Pill label={strictT(tr, lang, `urgency_${payload.urgency}`)} color={uClr[payload.urgency]||T.text3}/>
         {payload.impact_level && <Pill label={strictT(tr, lang, `impact_${payload.impact_level}`)} color={uClr[payload.impact_level]||T.text3}/>}
-        <Pill label={`${payload.confidence||'—'}%`} color={T.text3}/>
+        <Pill
+          label={
+            payload.confidence != null && Number.isFinite(Number(payload.confidence))
+              ? formatPctForLang(Number(payload.confidence), 0, lang)
+              : '—'
+          }
+          color={T.text3}
+        />
       </div>
 
       <Sec label={strictT(tr, lang, 'exec_why')} color={T.red}>
@@ -195,7 +206,12 @@ function ContextPanel({ type, payload, extra, tr, lang, onClose, onNavigate, imp
         const impKey = payload?.key||payload?.domain
         const imp = impacts[impKey]?.impact || impacts[payload?.domain]?.impact
         if (!imp||imp.type==='qualitative'||imp.value==null) return null
-        const fmtV = v => v==null?'—':v>=1e6?`+${(v/1e6).toFixed(1)}M`:v>=1e3?`+${(v/1e3).toFixed(0)}K`:`+${v.toFixed(0)}`
+        const fmtImpactQuant = (v) => {
+          if (v == null || !Number.isFinite(Number(v))) return '—'
+          const n = Number(v)
+          if (n < 0) return formatCompactForLang(n, lang)
+          return `+${formatCompactForLang(n, lang)}`
+        }
         return (
           <div style={{background:`${T.green}08`,border:`1px solid ${T.green}25`,borderRadius:11,padding:'14px 16px',marginBottom:16}}>
             <div style={{display:'flex',alignItems:'center',gap:7,marginBottom:10}}>
@@ -205,11 +221,11 @@ function ContextPanel({ type, payload, extra, tr, lang, onClose, onNavigate, imp
               </span>
             </div>
             <div style={{fontFamily:'monospace',fontSize:24,fontWeight:800,color:T.green,direction:'ltr',marginBottom:4}}>
-              {fmtV(imp.value)}
+              {fmtImpactQuant(imp.value)}
             </div>
             {imp.range?.low!=null&&imp.range?.high!=null&&(
               <div style={{fontSize:10,color:T.text2,marginBottom:8,fontFamily:'monospace'}}>
-                {fmtV(imp.range.low)} – {fmtV(imp.range.high)} {strictT(tr, lang, 'impact_range_label')}
+                {fmtImpactQuant(imp.range.low)} – {fmtImpactQuant(imp.range.high)} {strictT(tr, lang, 'impact_range_label')}
               </div>
             )}
             <p style={{fontSize:11,color:T.text2,lineHeight:1.6,margin:'0 0 10px', ...CLAMP_FADE_MASK_SHORT}}>
@@ -217,7 +233,9 @@ function ContextPanel({ type, payload, extra, tr, lang, onClose, onNavigate, imp
             </p>
             <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
               <span style={{fontSize:9,color:T.green,background:`${T.green}15`,padding:'2px 8px',borderRadius:20,fontWeight:700,border:`1px solid ${T.green}30`}}>
-                {strictT(tr, lang, 'fc_confidence')}: {imp.confidence}%
+                {imp.confidence != null && Number.isFinite(Number(imp.confidence))
+                  ? `${strictT(tr, lang, 'fc_confidence')}: ${formatPctForLang(Number(imp.confidence), 0, lang)}`
+                  : `${strictT(tr, lang, 'fc_confidence')}: —`}
               </span>
               {imp.assumption ? (
                 <span style={{ fontSize: 10, color: T.text2, fontStyle: 'italic' }}>
@@ -255,8 +273,8 @@ function ContextPanel({ type, payload, extra, tr, lang, onClose, onNavigate, imp
       </div>
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:20}}>
         {[
-          {lbl:strictT(tr, lang, 'exec_trend'), val:payload.mom!=null?`${payload.mom>0?'+':''}${payload.mom?.toFixed(1)}% ${strictT(tr, lang, 'mom_label')}`:'—', clr:payload.mom>0?T.green:payload.mom<0?T.red:T.text2},
-          {lbl:strictT(tr, lang, 'yoy_label'), val:payload.yoy!=null?`${payload.yoy>0?'+':''}${payload.yoy?.toFixed(1)}%`:'—',     clr:payload.yoy>0?T.green:payload.yoy<0?T.red:T.text2},
+          {lbl:strictT(tr, lang, 'exec_trend'), val:payload.mom!=null?`${payload.mom>0?'+':''}${formatPctForLang(Math.abs(payload.mom), 1, lang)} ${strictT(tr, lang, 'mom_label')}`:'—', clr:payload.mom>0?T.green:payload.mom<0?T.red:T.text2},
+          {lbl:strictT(tr, lang, 'yoy_label'), val:payload.yoy!=null?`${payload.yoy>0?'+':''}${formatPctForLang(Math.abs(payload.yoy), 1, lang)}`:'—',     clr:payload.yoy>0?T.green:payload.yoy<0?T.red:T.text2},
         ].map(({lbl,val,clr}) => (
           <div key={lbl} style={{background:T.card,borderRadius:8,padding:'12px 14px',border:`1px solid ${T.border}`}}>
             <div style={{fontSize:9,color:T.text3,textTransform:'uppercase',letterSpacing:'.06em',marginBottom:4}}>{lbl}</div>
@@ -350,8 +368,15 @@ function ContextPanel({ type, payload, extra, tr, lang, onClose, onNavigate, imp
                       {strictT(tr, lang, `ratio_${k}`)}
                     </div>
                     <div style={{fontFamily:'monospace',fontSize:13,fontWeight:700,color:rc}}>
-                      {r?.value!=null?r.value:'—'}
-                      <span style={{fontSize:9,color:T.text3,marginLeft:3}}>{r?.unit||''}</span>
+                      {(() => {
+                        if (r?.value == null) return '—'
+                        const u = String(r.unit || '')
+                        if (u === '%') return formatPctForLang(r.value, 1, lang)
+                        if (u === 'x') return formatMultipleForLang(r.value, 2, lang)
+                        if (u === 'days') return formatDays(r.value)
+                        const c0 = formatCompactForLang(r.value, lang)
+                        return u && u !== 'currency' ? `${c0} ${u}` : c0
+                      })()}
                     </div>
                   </div>
                 )
@@ -537,10 +562,14 @@ function ActionStrip({ decisions, tr, lang, onSelect, causes, impacts={} }) {
                     background:`${uc}15`,border:`1px solid ${uc}30`,borderRadius:20,
                     padding:'2px 8px',marginBottom:6,width:'fit-content'}}>
                     <span style={{fontSize:11,fontWeight:800,color:uc,fontFamily:'monospace'}}>
-                      {imp.unit==='%'?`${imp.value>0?'+':''}${imp.value.toFixed(1)}%`
-                       :(imp.value>=1e6?`+${(imp.value/1e6).toFixed(1)}M`
-                        :imp.value>=1e3?`+${(imp.value/1e3).toFixed(0)}K`
-                        :`+${imp.value.toFixed(0)}`)}
+                      {imp.unit === '%'
+                        ? formatSignedPctForLang(Number(imp.value), 1, lang)
+                        : (() => {
+                            const n = Number(imp.value)
+                            if (!Number.isFinite(n)) return '—'
+                            if (n < 0) return formatCompactForLang(n, lang)
+                            return `+${formatCompactForLang(n, lang)}`
+                          })()}
                     </span>
                     <span style={{fontSize:9,color:uc,opacity:.8}}>
                       {imp.type==='cash'?strictT(tr, lang, 'impact_type_cash')
@@ -610,7 +639,7 @@ function ExecutiveKpiRow({ kpis, cashflow, main, tr, lang, onSelect, alerts, ctx
     },
     {
       key: 'net_margin',
-      value: fmtP(kpis.net_margin?.value),
+      value: formatPctForLang(kpis.net_margin?.value, 1, lang),
       full: null,
       mom: kpis.net_margin?.mom_pct,
       yoy: null,
@@ -689,7 +718,7 @@ function ExecutiveKpiRow({ kpis, cashflow, main, tr, lang, onSelect, alerts, ctx
                     }}
                   >
                     {c.mom > 0 ? '+' : ''}
-                    {c.mom?.toFixed(1)}% {st('mom_label')}
+                    {formatPctForLang(Math.abs(c.mom), 1, lang)} {st('mom_label')}
                   </span>
                 )}
                 {c.yoy != null && (
@@ -698,7 +727,7 @@ function ExecutiveKpiRow({ kpis, cashflow, main, tr, lang, onSelect, alerts, ctx
                     style={{ fontFamily: 'monospace', fontSize: 10, color: c.yoy > 0 ? T.green : c.yoy < 0 ? T.red : T.text2 }}
                   >
                     {c.yoy > 0 ? '+' : ''}
-                    {c.yoy?.toFixed(1)}% {st('yoy_label')}
+                    {formatPctForLang(Math.abs(c.yoy), 1, lang)} {st('yoy_label')}
                   </span>
                 )}
               </div>
@@ -893,10 +922,11 @@ function KeyInsightsStrip({ stmtInsights, decisions, fcData, lang, tr }) {
         const bRev = fcData?.scenarios?.base?.revenue?.[0]
         const bNp  = fcData?.scenarios?.base?.net_profit?.[0]
         const risk = fcData?.summary?.risk_level
-        const fK   = v => v==null?'\u2014':Math.abs(v)>=1e6?`${v<0?'-':''}${(Math.abs(v)/1e6).toFixed(1)}M`:Math.abs(v)>=1e3?`${v<0?'-':''}${(Math.abs(v)/1e3).toFixed(0)}K`:`${v.toFixed(0)}`
         const pts = []
-        if (bRev?.point) pts.push(`${strictT(tr, lang, 'revenue')} ${fK(bRev.point)}`)
-        if (bNp?.point) pts.push(`${strictT(tr, lang, 'net_profit')} ${fK(bNp.point)}`)
+        if (bRev?.point != null && Number.isFinite(Number(bRev.point)))
+          pts.push(`${strictT(tr, lang, 'revenue')} ${formatCompactForLang(bRev.point, lang)}`)
+        if (bNp?.point != null && Number.isFinite(Number(bNp.point)))
+          pts.push(`${strictT(tr, lang, 'net_profit')} ${formatCompactForLang(bNp.point, lang)}`)
         if (!pts.length) return null
         const rk = risk != null ? String(risk).toLowerCase() : ''
         const rWord =
@@ -915,7 +945,9 @@ function KeyInsightsStrip({ stmtInsights, decisions, fcData, lang, tr }) {
             background:'rgba(0,212,170,0.05)',borderLeft:'2px solid var(--accent)'}}>
             <span style={{fontSize:9,fontFamily:'var(--font-mono)',color:'var(--accent)',opacity:.8}}>
               {'\ud83d\udcc8'} {strictT(tr, lang, 'cmd_secondary_tile_forecast')}: {pts.join(' · ')}
-              {bRev?.confidence!=null&&` (${bRev.confidence}%)`}
+              {bRev?.confidence != null && Number.isFinite(Number(bRev.confidence))
+                ? ` (${formatPctForLang(Number(bRev.confidence), 0, lang)})`
+                : ''}
               {rWord ? (
                 <span style={{ marginLeft: 6, color: rClr }}>
                   {' '}

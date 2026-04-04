@@ -29,6 +29,7 @@ import {
   formatCompactForLang,
   formatFullForLang,
   formatPctForLang,
+  formatSignedPctForLang,
   formatMultipleForLang,
   formatDays,
 } from '../utils/numberFormat.js'
@@ -42,7 +43,6 @@ function auth() {
 }
 
 // ── Formatters ────────────────────────────────────────────────────────────────
-const fmtD = (v) => (v == null ? '—' : `${Math.round(v)}d`)
 const clr   = v => v==null?'var(--text-secondary)':v>0?'var(--green)':v<0?'var(--red)':'var(--text-secondary)'
 const arr   = v => v==null?'':v>0?'▲':v<0?'▼':'─'
 const stC   = {excellent:'var(--green)',good:'var(--accent)',warning:'var(--amber)',risk:'var(--red)',neutral:'var(--text-secondary)'}
@@ -50,14 +50,20 @@ const urgC  = {high:'var(--red)',medium:'var(--amber)',low:'var(--blue)'}
 const domC  = {liquidity:'var(--blue)',profitability:'var(--green)',efficiency:'var(--violet)',leverage:'var(--amber)',growth:'var(--accent)',cross_domain:'#e879f9'}
 
 // ── Phase 6.4: forecast text helper (shared logic) ───────────────────────────
-function kpiForecast(type, fcData, tr, fmtFn) {
+function kpiForecast(type, fcData, tr, fmtFn, lang) {
   if (!fcData?.available) return null
-  const next = (fcData?.scenarios?.base?.[type] || [])[0]
+  const series = fcData?.scenarios?.base?.[type] || []
+  const next = series[0]
   if (!next?.point) return null
-  const val  = fmtFn ? fmtFn(next.point) : String(Math.round(next.point))
-  const dir  = next.mom_applied > 0 ? '↑' : next.mom_applied < 0 ? '↓' : '→'
-  const conf = next.confidence != null ? tr('stmt_kpi_forecast_conf', { confidence: next.confidence }) : ''
-  return dir + ' ' + val + conf
+  const val = fmtFn ? fmtFn(next.point) : formatFullForLang(next.point, lang)
+  const dir = next.mom_applied != null
+    ? (next.mom_applied > 0 ? '↑' : next.mom_applied < 0 ? '↓' : '→')
+    : ''
+  const conf = next.confidence != null
+    ? tr('stmt_kpi_forecast_conf', { confidence: formatPctForLang(next.confidence, 0, lang) })
+    : ''
+  const body = [dir, val].filter(Boolean).join(' ')
+  return `${body}${conf}`
 }
 
 // ── Micro components ──────────────────────────────────────────────────────────
@@ -168,7 +174,7 @@ function MetricCard({label,value,fullValue,mom,spark,color,explain,insight,cause
           color:clr(mom),
           padding:'1px 6px',borderRadius:9,background:`${clr(mom)}14`,
         }}>
-          {arr(mom)} {Math.abs(mom).toFixed(1)}% {momWord}
+          {arr(mom)} {formatPctForLang(Math.abs(mom), 1, lang)} {momWord}
         </span>
       )}
       {spark&&<div style={{marginTop:8,opacity:hov?1:.65,transition:'opacity .2s'}}>
@@ -296,7 +302,7 @@ function DecCard({dec,tr,lang,impacts,onOpen}) {
         <div style={{display:'inline-flex',alignItems:'center',gap:4,
           background:`${uc}12`,border:`1px solid ${uc}25`,borderRadius:20,padding:'2px 9px'}}>
           <span style={{fontSize:11,fontWeight:800,color:uc,fontFamily:'monospace'}}>
-            +{imp.value>=1e6?`${(imp.value/1e6).toFixed(1)}M`:imp.value>=1e3?`${(imp.value/1e3).toFixed(0)}K`:imp.value.toFixed(0)}
+            +{formatCompactForLang(imp.value, lang)}
           </span>
           <span style={{fontSize:9,color:uc,opacity:.8}}>{imp.type==='cash'?tr('impact_type_cash'):tr('impact_type_margin')}</span>
         </div>
@@ -384,7 +390,9 @@ function DecisionPanel({dec,impacts,tr,lang,onClose}) {
           <div style={{display:'flex',gap:6,flexWrap:'wrap',marginBottom:20}}>
             <Badge label={tr(`urgency_${dec.urgency}`)} color={uc}/>
             {dec.impact_level&&<Badge label={tr(`impact_${dec.impact_level}`)} color={uc}/>}
-            <Badge label={`${dec.confidence||'—'}%`} color='var(--text-secondary)'/>
+            <Badge label={dec.confidence != null && Number.isFinite(Number(dec.confidence))
+              ? formatPctForLang(Number(dec.confidence), 0, lang)
+              : '—'} color='var(--text-secondary)'/>
           </div>
           <Sec label={tr('exec_why')} color='var(--red)'>
             <p style={{fontSize:12,color:'var(--text-secondary)',lineHeight:1.75,margin:0}}>
@@ -409,15 +417,17 @@ function DecisionPanel({dec,impacts,tr,lang,onClose}) {
             <Sec label={tr('impact_expected_label')} color='var(--green)'>
               <div style={{background:'rgba(52,211,153,.06)',borderRadius:9,padding:'12px 14px',border:'1px solid rgba(52,211,153,.2)'}}>
                 <div style={{fontFamily:'var(--font-mono)',fontSize:22,fontWeight:800,color:'var(--green)',direction:'ltr',marginBottom:4}}>
-                  +{imp.value>=1e6?`${(imp.value/1e6).toFixed(1)}M`:imp.value>=1e3?`${(imp.value/1e3).toFixed(0)}K`:imp.value.toFixed(0)}
+                  +{formatCompactForLang(imp.value, lang)}
                 </div>
-                {imp.range?.low&&<div style={{fontSize:10,color:'var(--text-secondary)',marginBottom:6,fontFamily:'var(--font-mono)'}}>
-                  {imp.range.low>=1e3?`${(imp.range.low/1e3).toFixed(0)}K`:imp.range.low} – {imp.range.high>=1e3?`${(imp.range.high/1e3).toFixed(0)}K`:imp.range.high} {tr('impact_range_label')}
+                {imp.range?.low!=null&&imp.range?.high!=null&&<div style={{fontSize:10,color:'var(--text-secondary)',marginBottom:6,fontFamily:'var(--font-mono)'}}>
+                  {formatCompactForLang(imp.range.low, lang)} – {formatCompactForLang(imp.range.high, lang)} {tr('impact_range_label')}
                 </div>}
                 <p style={{fontSize:11,color:'var(--text-secondary)',lineHeight:1.65,margin:'0 0 8px'}}>
                   <CmdServerText lang={lang} tr={tr}>{imp.description}</CmdServerText>
                 </p>
-                <Badge label={`${tr('fc_confidence')}: ${imp.confidence}%`} color='var(--green)'/>
+                <Badge label={imp.confidence != null && Number.isFinite(Number(imp.confidence))
+                  ? `${tr('fc_confidence')}: ${formatPctForLang(Number(imp.confidence), 0, lang)}`
+                  : `${tr('fc_confidence')}: —`} color='var(--green)'/>
               </div>
             </Sec>
           )}
@@ -476,7 +486,7 @@ function deriveOpportunities(decs, causes, impacts, trends, ratios, tr, lang) {
     opps.push({ domain:'growth',
       title: tr('opp_revenue_momentum'),
       reason: ytdRev>0
-        ? tr('opp_revenue_momentum_reason_yoy', { pct: ytdRev?.toFixed(1) })
+        ? tr('opp_revenue_momentum_reason_yoy', { pct: formatPctForLang(ytdRev, 1, lang) })
         : tr('opp_revenue_momentum_reason_trend'),
       impact_value: null, decision: gDec||null })
   }
@@ -487,11 +497,10 @@ function deriveOpportunities(decs, causes, impacts, trends, ratios, tr, lang) {
     const dec = decs.find(d=>d.key===item.decision_key||d.domain===item.domain)
     if (!dec) return
     const v = item.impact.value
-    const fv = v>=1e6?`${(v/1e6).toFixed(1)}M`:v>=1e3?`${(v/1e3).toFixed(0)}K`:`${v.toFixed(0)}`
     opps.push({ domain:item.domain||dec.domain,
       title: tr(`dec_short_${dec.domain}`),
       reason: item.impact.description,
-      impact_value: `+${fv}`, decision: dec })
+      impact_value: `+${formatCompactForLang(v, lang)}`, decision: dec })
   })
   if (opps.length<3) {
     const allR = {...(ratios.profitability||{}),...(ratios.liquidity||{})}
@@ -551,13 +560,11 @@ export default function Analysis({ routeDefaultTab = null } = {}) {
       if (v == null || (typeof v === 'number' && !Number.isFinite(v))) return '—'
       if (k.includes('margin') || k.includes('_pct')) return formatPctForLang(v, 1, lang)
       if (k.includes('ratio') || k.includes('turnover')) return formatMultipleForLang(v, 2, lang)
-      if (k.includes('days')) return fmtD(v)
+      if (k.includes('days')) return formatDays(v)
       return formatCompactForLang(v, lang)
     },
     [lang],
   )
-  const fmtP = useCallback((v) => formatPctForLang(v, 1, lang), [lang])
-  const fmtX = useCallback((v) => formatMultipleForLang(v, 2, lang), [lang])
   const ctxLabel = () => kpiContextLabel({ window: 'ALL', ps: ps||{}, latestPeriod: data?.meta?.periods?.slice(-1)[0] || '', lang, tr })
   const { selectedId, selectedCompany } = useCompany()
   const { params: ps, toQueryString: scopeQS, setResolved, isIncompleteCustom, window: win } = usePeriodScope()
@@ -719,11 +726,11 @@ export default function Analysis({ routeDefaultTab = null } = {}) {
   const kpiExplain = {
     revenue:    kpis.revenue?.mom_pct!=null
       ? (kpis.revenue.mom_pct>0
-        ? tr('kpi_rev_up_vs_last_month',   { pct: kpis.revenue.mom_pct.toFixed(1) })
-        : tr('kpi_rev_down_vs_last_month', { pct: Math.abs(kpis.revenue.mom_pct).toFixed(1) }))
+        ? tr('kpi_rev_up_vs_last_month',   { pct: formatPctForLang(kpis.revenue.mom_pct, 1, lang) })
+        : tr('kpi_rev_down_vs_last_month', { pct: formatPctForLang(Math.abs(kpis.revenue.mom_pct), 1, lang) }))
       : null,
     net_profit: prof.net_margin_pct?.value!=null
-      ? tr('kpi_net_margin_of_revenue_to_profit', { pct: fmtP(prof.net_margin_pct.value) })
+      ? tr('kpi_net_margin_of_revenue_to_profit', { pct: formatPctForLang(prof.net_margin_pct.value, 1, lang) })
       : null,
     margin: prof.net_margin_pct?.status
       ? tr(`kpi_margin_status_${prof.net_margin_pct.status}`)
@@ -870,7 +877,7 @@ export default function Analysis({ routeDefaultTab = null } = {}) {
                 : null
             })()}
             cause={(()=>{const dec=(d?.decisions||[]).find(x=>x.domain==='growth');return dec?.reason?dec.reason.split('. ')[0].slice(0,60):null})()}
-            forecast={kpiForecast('revenue', fcData, tr, (v) => formatCompactForLang(v, lang))}/>
+            forecast={kpiForecast('revenue', fcData, tr, (v) => formatCompactForLang(v, lang), lang)}/>
           <MetricCard label={kpiLabel(tr('fc_net_profit'), ctxLabel(), tr)} value={formatCompactForLang(kpis.net_profit?.value, lang)} fullValue={formatFullForLang(kpis.net_profit?.value, lang)}
             lang={lang} tr={tr} momWord={tr('mom_label')}
             mom={kpis.net_profit?.mom_pct} spark={series.net_profit?.slice(-10)} color='var(--green)' explain={kpiExplain.net_profit}
@@ -880,10 +887,10 @@ export default function Analysis({ routeDefaultTab = null } = {}) {
             })()}
             cause={(() => {
               const gm = ratios?.profitability?.gross_margin_pct
-              return gm?.value != null ? tr('dash_gross_margin_line', { value: gm.value.toFixed(1) }) : null
+              return gm?.value != null ? tr('dash_gross_margin_line', { value: formatPctForLang(gm.value, 1, lang) }) : null
             })()}
-            forecast={kpiForecast('net_profit', fcData, tr, (v) => formatCompactForLang(v, lang))}/>
-          <MetricCard label={tr('net_margin')} value={fmtP(kpis.net_margin?.value)}
+            forecast={kpiForecast('net_profit', fcData, tr, (v) => formatCompactForLang(v, lang), lang)}/>
+          <MetricCard label={tr('net_margin')} value={formatPctForLang(kpis.net_margin?.value, 1, lang)}
             lang={lang} tr={tr} momWord={tr('mom_label')}
             mom={kpis.net_margin?.mom_pct} color='var(--violet)' explain={kpiExplain.margin}
             insight={(()=>{const ins=(d?.statements?.insights||[]).find(i=>i.key==='strong_gross_margin');return ins?ins.message.split('. ')[0]:null})()}
@@ -950,14 +957,14 @@ export default function Analysis({ routeDefaultTab = null } = {}) {
                 sub={tr('exec_breakdown_sub')}/>
               {Object.keys(liq).length>0&&<>
                 <div style={{fontSize:10,fontWeight:700,color:'var(--text-secondary)',marginBottom:6,textTransform:'uppercase',letterSpacing:'.06em'}}>{tr('liquidity')}</div>
-                {liq.current_ratio&&<RatioRow label={tr('current_ratio')} value={fmtX(liq.current_ratio.value)} status={liq.current_ratio.status}
+                {liq.current_ratio&&<RatioRow label={tr('current_ratio')} value={formatMultipleForLang(liq.current_ratio.value, 2, lang)} status={liq.current_ratio.status}
                   explain={liq.current_ratio.value>=1.5 ? tr('liq_sufficient') : tr('liq_needs_improvement')}/>}
-                {liq.quick_ratio&&<RatioRow label={tr('quick_ratio')} value={fmtX(liq.quick_ratio.value)} status={liq.quick_ratio.status}/>}
+                {liq.quick_ratio&&<RatioRow label={tr('quick_ratio')} value={formatMultipleForLang(liq.quick_ratio.value, 2, lang)} status={liq.quick_ratio.status}/>}
               </>}
               {Object.keys(prof).length>0&&<>
                 <div style={{fontSize:10,fontWeight:700,color:'var(--text-secondary)',marginTop:10,marginBottom:6,textTransform:'uppercase',letterSpacing:'.06em'}}>{tr('profitability')}</div>
-                {prof.net_margin_pct&&<RatioRow label={tr('net_margin')} value={fmtP(prof.net_margin_pct.value)} status={prof.net_margin_pct.status}/>}
-                {prof.gross_margin_pct&&<RatioRow label={tr('gross_margin')} value={fmtP(prof.gross_margin_pct.value)} status={prof.gross_margin_pct.status}/>}
+                {prof.net_margin_pct&&<RatioRow label={tr('net_margin')} value={formatPctForLang(prof.net_margin_pct.value, 1, lang)} status={prof.net_margin_pct.status}/>}
+                {prof.gross_margin_pct&&<RatioRow label={tr('gross_margin')} value={formatPctForLang(prof.gross_margin_pct.value, 1, lang)} status={prof.gross_margin_pct.status}/>}
               </>}
             </Card>
             <Card>
@@ -969,13 +976,7 @@ export default function Analysis({ routeDefaultTab = null } = {}) {
               </div>
               {cashflow.operating_cashflow_mom!=null&&(
                 <div style={{fontSize:11,color:clr(cashflow.operating_cashflow_mom),marginBottom:8}}>
-                  {cashflow.operating_cashflow_mom > 0 ? '+' : ''}
-                  {Number(cashflow.operating_cashflow_mom).toFixed(1)}
-                  {String(lang || '')
-                    .toLowerCase()
-                    .startsWith('ar')
-                    ? '٪ '
-                    : '% '}
+                  {formatSignedPctForLang(Number(cashflow.operating_cashflow_mom), 1, lang)}{' '}
                   {tr('mom_short')}
                 </div>
               )}
@@ -1134,7 +1135,7 @@ export default function Analysis({ routeDefaultTab = null } = {}) {
                       {tr('net_margin')}
                     </div>
                     <div style={{ fontFamily: 'var(--font-mono)', fontSize: 16, fontWeight: 800, direction: 'ltr' }}>
-                      {kpis.net_margin?.value != null ? fmtP(kpis.net_margin.value) : '—'}
+                      {kpis.net_margin?.value != null ? formatPctForLang(kpis.net_margin.value, 1, lang) : '—'}
                     </div>
                   </div>
                 </div>

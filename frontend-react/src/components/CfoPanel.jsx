@@ -10,22 +10,18 @@ import { useLang }    from '../context/LangContext.jsx'
 import { useCompany } from '../context/CompanyContext.jsx'
 import { usePeriodScope } from '../context/PeriodScopeContext.jsx'
 import { buildAnalysisQuery } from '../utils/buildAnalysisQuery.js'
+import {
+  formatCompactForLang,
+  formatPctForLang,
+  formatMultipleForLang,
+  formatDays,
+} from '../utils/numberFormat.js'
 
 const API = '/api/v1'
 function auth() {
   try { const t=JSON.parse(localStorage.getItem('vcfo_auth')||'{}').token; return t?{Authorization:`Bearer ${t}`}:{} }
   catch { return {} }
 }
-
-// ── Formatters (no calculation — display only) ────────────────────────────────
-const fmtM = v => {
-  if (v == null) return '—'
-  const a = Math.abs(v), s = v < 0 ? '-' : ''
-  if (a >= 1e6) return `${s}${(a/1e6).toFixed(1)}M`
-  if (a >= 1e3) return `${s}${(a/1e3).toFixed(0)}K`
-  return `${s}${a.toFixed(0)}`
-}
-const fmtP = v => v == null ? '—' : `${Number(v).toFixed(1)}%`
 
 // ── Question → Domain mapping ─────────────────────────────────────────────────
 // Maps keywords to backend domain keys. No calculation, pure lookup.
@@ -45,7 +41,6 @@ function isVague(text, lang) {
 
 function detectDomain(text, lang, lastDomain) {
   const txt = text.toLowerCase()
-  const trFn = tr
   const ar = lang === 'ar'
 
   // Explicit vague patterns — always use memory if available
@@ -77,8 +72,7 @@ function detectDomain(text, lang, lastDomain) {
 }
 
 // ── Response builder — reads from fetched data, no calculation ────────────────
-function buildResponse(question, domain, d, fcData, lang) {
-  const ar        = lang === 'ar'
+function buildResponse(question, domain, d, fcData, lang, tr) {
   const decs      = d?.decisions    || []
   const causes    = d?.root_causes  || []
   const intel     = d?.intelligence || {}
@@ -107,16 +101,16 @@ function buildResponse(question, domain, d, fcData, lang) {
     const tier = health!=null ? (health>=80?'excellent':health>=60?'good':health>=40?'warning':'risk') : null
     sections.push({
       icon: '📊',
-      label: t('cfo_panel_current_status'),
+      label: tr('cfo_panel_current_status'),
       text: health != null
-        ? `${t('health_score')} ${health}/100 — ${t(`health_tier_${tier}`)}`
-        : t('insufficient_data')
+        ? `${tr('health_score')} ${health}/100 — ${tr(`health_tier_${tier}`)}`
+        : tr('insufficient_data')
     })
     const topDecs = decs.slice(0, 3)
     if (topDecs.length) {
       sections.push({
         icon: '🎯',
-        label: t('cfo_panel_action_priorities'),
+        label: tr('cfo_panel_action_priorities'),
         items: topDecs.map((dec, i) => ({
           num: i + 1,
           title: dec.title,
@@ -132,14 +126,14 @@ function buildResponse(question, domain, d, fcData, lang) {
     const gm  = ratios?.profitability?.gross_margin_pct
     sections.push({
       icon: '💰',
-      label: t('profitability'),
+      label: tr('profitability'),
       text: nm?.value != null
-        ? `${t('net_margin')} ${fmtP(nm.value)} — ${t(`kpi_margin_status_${nm.status}`)}`
-        : t('margin_data_unavailable')
+        ? `${tr('net_margin')} ${formatPctForLang(nm.value, 1, lang)} — ${tr(`kpi_margin_status_${nm.status}`)}`
+        : tr('margin_data_unavailable')
     })
-    if (dec?.reason) sections.push({ icon: '🔍', label: t('cause'), text: first(dec.reason) })
-    if (dec?.action) sections.push({ icon: '⚡', label: t('action'), text: firstStep(dec.action) })
-    if (dec?.expected_effect) sections.push({ icon: '✨', label: t('expected_impact'), text: first(dec.expected_effect) })
+    if (dec?.reason) sections.push({ icon: '🔍', label: tr('cause'), text: first(dec.reason) })
+    if (dec?.action) sections.push({ icon: '⚡', label: tr('action'), text: firstStep(dec.action) })
+    if (dec?.expected_effect) sections.push({ icon: '✨', label: tr('expected_impact'), text: first(dec.expected_effect) })
 
   } else if (domain === 'cashflow' || domain === 'liquidity') {
     const decLiq  = getDec('liquidity')
@@ -149,14 +143,14 @@ function buildResponse(question, domain, d, fcData, lang) {
     const cfIns   = stmtIns.find(i => i.key === 'cashflow_positive')
     sections.push({
       icon: '💧',
-      label: t('liquidity'),
+      label: tr('liquidity'),
       text: cr?.value != null
-        ? `${t('current_ratio')} ${cr.value.toFixed(2)}x — ${t(`ratio_status_${cr.status}`)}`
-        : (cfIns ? first(cfIns.message) : t('liquidity_data_unavailable'))
+        ? `${tr('current_ratio')} ${formatMultipleForLang(cr.value, 2, lang)} — ${tr(`ratio_status_${cr.status}`)}`
+        : (cfIns ? first(cfIns.message) : tr('liquidity_data_unavailable'))
     })
-    if (decLiq?.reason) sections.push({ icon: '🔍', label: t('cause'), text: first(decLiq.reason) })
-    if (decEff?.reason && domain === 'cashflow') sections.push({ icon: '📋', label: t('cashflow_operating'), text: first(decEff.reason) })
-    if (decLiq?.action) sections.push({ icon: '⚡', label: t('action'), text: firstStep(decLiq.action) })
+    if (decLiq?.reason) sections.push({ icon: '🔍', label: tr('cause'), text: first(decLiq.reason) })
+    if (decEff?.reason && domain === 'cashflow') sections.push({ icon: '📋', label: tr('cashflow_operating'), text: first(decEff.reason) })
+    if (decLiq?.action) sections.push({ icon: '⚡', label: tr('action'), text: firstStep(decLiq.action) })
 
   } else if (domain === 'efficiency') {
     const dec = getDec('efficiency')
@@ -164,41 +158,41 @@ function buildResponse(question, domain, d, fcData, lang) {
     const dsoV = Object.entries(eff).find(([k]) => k.includes('dso'))?.[1]
     sections.push({
       icon: '⚙️',
-      label: t('efficiency'),
+      label: tr('efficiency'),
       text: dsoV?.value != null
-        ? t('dso_days_line', { days: Math.round(dsoV.value) })
-        : t('efficiency_data_unavailable')
+        ? tr('dso_days_line', { days: formatDays(dsoV.value) })
+        : tr('efficiency_data_unavailable')
     })
-    if (dec?.reason) sections.push({ icon: '🔍', label: t('cause'), text: first(dec.reason) })
-    if (dec?.action) sections.push({ icon: '⚡', label: t('action'), text: firstStep(dec.action) })
-    if (dec?.expected_effect) sections.push({ icon: '✨', label: t('effect'), text: first(dec.expected_effect) })
+    if (dec?.reason) sections.push({ icon: '🔍', label: tr('cause'), text: first(dec.reason) })
+    if (dec?.action) sections.push({ icon: '⚡', label: tr('action'), text: firstStep(dec.action) })
+    if (dec?.expected_effect) sections.push({ icon: '✨', label: tr('effect'), text: first(dec.expected_effect) })
 
   } else if (domain === 'leverage') {
     const dr    = ratios?.leverage?.debt_ratio_pct
     const topAl = alerts.find(a => a.severity === 'high') || alerts[0]
     sections.push({
       icon: '⚠️',
-      label: t('risks'),
+      label: tr('risks'),
       text: dr?.value != null
-        ? `${t('debt_ratio_pct')} ${fmtP(dr.value)} — ${t(`debt_status_${dr.status||'neutral'}`)}`
-        : t('risk_data_unavailable')
+        ? `${tr('debt_ratio_pct')} ${formatPctForLang(dr.value, 1, lang)} — ${tr(`debt_status_${dr.status||'neutral'}`)}`
+        : tr('risk_data_unavailable')
     })
-    if (topAl) sections.push({ icon: '🚨', label: t('alert'), text: topAl.message || topAl.title })
+    if (topAl) sections.push({ icon: '🚨', label: tr('alert'), text: topAl.message || topAl.title })
     const dec = getDec('leverage') || getDec('liquidity')
-    if (dec?.action) sections.push({ icon: '⚡', label: t('action'), text: firstStep(dec.action) })
+    if (dec?.action) sections.push({ icon: '⚡', label: tr('action'), text: firstStep(dec.action) })
 
   } else if (domain === 'growth') {
     const dec   = getDec('growth')
     const revT  = trends?.revenue?.direction
     sections.push({
       icon: '📈',
-      label: t('growth'),
+      label: tr('growth'),
       text: revT
-        ? `${t('revenue_trend')}: ${revT==='up'?t('trend_up'):revT==='down'?t('trend_down'):t('trend_stable')}`
-        : t('revenue_trend_unavailable')
+        ? `${tr('revenue_trend')}: ${revT==='up'?tr('trend_up'):revT==='down'?tr('trend_down'):tr('trend_stable')}`
+        : tr('revenue_trend_unavailable')
     })
-    if (dec?.reason) sections.push({ icon: '🔍', label: t('cause'), text: first(dec.reason) })
-    if (dec?.action) sections.push({ icon: '⚡', label: t('action'), text: firstStep(dec.action) })
+    if (dec?.reason) sections.push({ icon: '🔍', label: tr('cause'), text: first(dec.reason) })
+    if (dec?.action) sections.push({ icon: '⚡', label: tr('action'), text: firstStep(dec.action) })
   }
 
   // Forecast section — always appended if available
@@ -207,14 +201,16 @@ function buildResponse(question, domain, d, fcData, lang) {
     const bNp  = fcData?.scenarios?.base?.net_profit?.[0]
     const riskLevel = fcData?.summary?.risk_level
     const fcParts = []
-    if (bRev?.point) fcParts.push(`${t('revenue')} ${fmtM(bRev.point)}`)
-    if (bNp?.point)  fcParts.push(`${t('net_profit')} ${fmtM(bNp.point)}`)
+    if (bRev?.point) fcParts.push(`${tr('revenue')} ${formatCompactForLang(bRev.point, lang)}`)
+    if (bNp?.point)  fcParts.push(`${tr('net_profit')} ${formatCompactForLang(bNp.point, lang)}`)
     if (fcParts.length) {
-      const conf = bRev?.confidence ? ` (${bRev.confidence}%)` : ''
-      const risk = riskLevel ? ` · ${t('forecast_risk')}: ${riskLevel}` : ''
+      const conf = bRev?.confidence != null
+        ? ` (${formatPctForLang(bRev.confidence, 0, lang)})`
+        : ''
+      const risk = riskLevel ? ` · ${tr('forecast_risk')}: ${riskLevel}` : ''
       sections.push({
         icon: '🔮',
-        label: t('forecast_next_period'),
+        label: tr('forecast_next_period'),
         text: fcParts.join(' · ') + conf + risk,
         accent: true
       })
@@ -308,7 +304,7 @@ export default function CfoPanel({ open, onClose }) {
     const domain = detectDomain(question, lang, lastDomainRef.current)
     // Persist non-all domains for conversation memory
     if (domain !== 'all') lastDomainRef.current = domain
-    const sections = d ? buildResponse(question, domain, d, fcData, lang) : null
+    const sections = d ? buildResponse(question, domain, d, fcData, lang, tr) : null
     // Context label shown when domain came from memory
     const fromMemory = isVague(question, lang) && lastDomainRef.current && lastDomainRef.current !== 'all'
     setMsgs(prev => [

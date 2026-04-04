@@ -13,7 +13,11 @@ import { useAuth }        from '../context/AuthContext.jsx'
 import { useCompany }     from '../context/CompanyContext.jsx'
 import { usePeriodScope } from '../context/PeriodScopeContext.jsx'
 import { kpiContextLabel } from '../utils/kpiContext.js'
-import { formatCompactForLang, formatFullForLang } from '../utils/numberFormat.js'
+import {
+  formatCompactForLang,
+  formatFullForLang,
+  formatPctForLang,
+} from '../utils/numberFormat.js'
 import { buildAnalysisQuery } from '../utils/buildAnalysisQuery.js'
 import { buildExecutiveNarrative } from '../utils/buildExecutiveNarrative.js'
 import { analysisPathFromPanelType, pathForDrillAnalysisTab } from '../utils/analysisRoutes.js'
@@ -59,8 +63,6 @@ const stC  = {excellent:'#34d399', good:'#00d4aa', warning:'#fbbf24', risk:'#f87
 const dClr = {liquidity:T.blue, profitability:T.green, efficiency:T.violet, leverage:T.amber, growth:T.accent}
 const dIco = {liquidity:'💧', profitability:'📈', efficiency:'⚡', leverage:'🏋', growth:'🚀'}
 const uClr = {high:T.red, medium:T.amber, low:T.blue}
-const fmtP = v => (v == null || !Number.isFinite(Number(v)) ? '' : `${Number(v).toFixed(1)}%`)
-
 function firstRecommendedLine(action) {
   if (!action || typeof action !== 'string') return ''
   const t = action.trim()
@@ -125,7 +127,7 @@ function KpiMainNumber({ raw, mode, isHero, compact, na, signedTone, lang }) {
   const v = useCountUp(n, { durationMs: 520, enabled: ok })
   let toneClass = 'cmd-kpi-val-neu'
   if (signedTone && ok) toneClass = n >= 0 ? 'cmd-kpi-val-pos' : 'cmd-kpi-val-neg'
-  const text = !ok ? na : mode === 'percent' ? `${Number(v).toFixed(1)}%` : formatCompactForLang(v, lang)
+  const text = !ok ? na : mode === 'percent' ? formatPctForLang(Number(v), 1, lang) : formatCompactForLang(v, lang)
   return (
     <div
       className={`cmd-kpi-val cmd-data-num ${toneClass}`}
@@ -154,10 +156,8 @@ function PrimaryDecisionHero({ resolution, impacts, tr, lang, causes, allDecisio
   const fmtQuantImpact = (v) => {
     if (v == null || !Number.isFinite(Number(v))) return '—'
     const n = Number(v)
-    const a = Math.abs(n)
-    const body =
-      a >= 1e6 ? `${(a / 1e6).toFixed(1)}M` : a >= 1e3 ? `${(a / 1e3).toFixed(0)}K` : `${a.toFixed(0)}`
-    return n < 0 ? `−${body}` : `+${body}`
+    if (n < 0) return formatCompactForLang(n, lang)
+    return `+${formatCompactForLang(n, lang)}`
   }
 
   if (resolution.kind === 'expense') {
@@ -641,7 +641,13 @@ function ContextPanel({ type, payload, extra, tr, lang, onClose, onNavigate, imp
         {payload.impact_level ? (
           <Pill label={strictT(tr, lang, `impact_${payload.impact_level}`)} critical={payload.impact_level === 'high'} />
         ) : null}
-        <Pill label={`${payload.confidence||'—'}%`} />
+        <Pill
+          label={
+            payload.confidence != null && Number.isFinite(Number(payload.confidence))
+              ? formatPctForLang(Number(payload.confidence), 0, lang)
+              : '—'
+          }
+        />
       </div>
 
       <DrillIntelligenceBlock
@@ -695,7 +701,12 @@ function ContextPanel({ type, payload, extra, tr, lang, onClose, onNavigate, imp
         const impKey = payload?.key||payload?.domain
         const imp = impacts[impKey]?.impact || impacts[payload?.domain]?.impact
         if (!imp||imp.type==='qualitative'||imp.value==null) return null
-        const fmtV = v => v==null?'—':v>=1e6?`+${(v/1e6).toFixed(1)}M`:v>=1e3?`+${(v/1e3).toFixed(0)}K`:`+${v.toFixed(0)}`
+        const fmtImpactQuant = (v) => {
+          if (v == null || !Number.isFinite(Number(v))) return '—'
+          const n = Number(v)
+          if (n < 0) return formatCompactForLang(n, lang)
+          return `+${formatCompactForLang(n, lang)}`
+        }
         return (
           <div style={{background:`${T.green}08`,border:`1px solid ${T.green}25`,borderRadius:11,padding:'14px 16px',marginBottom:16}}>
             <div style={{display:'flex',alignItems:'center',gap:7,marginBottom:10}}>
@@ -705,11 +716,11 @@ function ContextPanel({ type, payload, extra, tr, lang, onClose, onNavigate, imp
               </span>
             </div>
             <div style={{fontFamily:'monospace',fontSize:24,fontWeight:800,color:T.green,direction:'ltr',marginBottom:4}}>
-              {fmtV(imp.value)}
+              {fmtImpactQuant(imp.value)}
             </div>
             {imp.range?.low!=null&&imp.range?.high!=null&&(
               <div style={{fontSize:10,color:T.text2,marginBottom:8,fontFamily:'monospace'}}>
-                {fmtV(imp.range.low)} – {fmtV(imp.range.high)} {strictT(tr, lang, 'impact_range_label')}
+                {fmtImpactQuant(imp.range.low)} – {fmtImpactQuant(imp.range.high)} {strictT(tr, lang, 'impact_range_label')}
               </div>
             )}
             <p style={{fontSize:11,color:T.text2,lineHeight:1.6,margin:'0 0 10px', ...CLAMP_FADE_MASK_SHORT}}>
@@ -719,7 +730,9 @@ function ContextPanel({ type, payload, extra, tr, lang, onClose, onNavigate, imp
             </p>
             <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
               <span style={{fontSize:9,color:T.green,background:`${T.green}15`,padding:'2px 8px',borderRadius:20,fontWeight:700,border:`1px solid ${T.green}30`}}>
-                {strictT(tr, lang, 'fc_confidence')}: {imp.confidence}%
+                {imp.confidence != null && Number.isFinite(Number(imp.confidence))
+                  ? `${strictT(tr, lang, 'fc_confidence')}: ${formatPctForLang(Number(imp.confidence), 0, lang)}`
+                  : `${strictT(tr, lang, 'fc_confidence')}: —`}
               </span>
               {imp.assumption ? (
                 <span style={{ fontSize: 10, color: T.text2, fontStyle: 'italic' }}>
@@ -769,7 +782,7 @@ function ContextPanel({ type, payload, extra, tr, lang, onClose, onNavigate, imp
       topBr?.branch_name != null && topBr.expense_pct_of_revenue != null
         ? strictTParams(tr, lang, 'drill_intel_branch_expense_line', {
             name: String(topBr.branch_name),
-            pct: Number(topBr.expense_pct_of_revenue).toFixed(1),
+            pct: formatPctForLang(Number(topBr.expense_pct_of_revenue), 1, lang),
           })
         : null
 
@@ -779,7 +792,7 @@ function ContextPanel({ type, payload, extra, tr, lang, onClose, onNavigate, imp
       nmRaw !== '' &&
       !Number.isNaN(Number(nmRaw)) &&
       Number.isFinite(Number(nmRaw))
-    const headlinePct = nmOk ? `${Number(nmRaw).toFixed(1)}%` : null
+    const headlinePct = nmOk ? formatPctForLang(Number(nmRaw), 1, lang) : null
     const headlineColor =
       nmOk && Number(nmRaw) < 0 ? T.red : nmOk && Number(nmRaw) > 0 ? T.green : T.text1
 
@@ -938,13 +951,16 @@ function ContextPanel({ type, payload, extra, tr, lang, onClose, onNavigate, imp
               lbl: strictT(tr, lang, 'exec_trend'),
               val:
                 payload.mom != null
-                  ? `${payload.mom > 0 ? '+' : ''}${payload.mom?.toFixed(1)}% ${strictT(tr, lang, 'mom_label')}`
+                  ? `${payload.mom > 0 ? '+' : ''}${formatPctForLang(Math.abs(payload.mom), 1, lang)} ${strictT(tr, lang, 'mom_label')}`
                   : '—',
               clr: payload.mom > 0 ? T.green : payload.mom < 0 ? T.red : T.text2,
             },
             {
               lbl: strictT(tr, lang, 'yoy_label'),
-              val: payload.yoy != null ? `${payload.yoy > 0 ? '+' : ''}${payload.yoy?.toFixed(1)}%` : '—',
+              val:
+                payload.yoy != null
+                  ? `${payload.yoy > 0 ? '+' : ''}${formatPctForLang(Math.abs(payload.yoy), 1, lang)}`
+                  : '—',
               clr: payload.yoy > 0 ? T.green : payload.yoy < 0 ? T.red : T.text2,
             },
           ].map(({ lbl, val, clr }) => (
@@ -1375,13 +1391,13 @@ function ExecutiveKpiRow({
           {c.mom!=null && (
             <span className="cmd-kpi-mom-pill cmd-data-num" style={{fontFamily:'var(--font-mono)',fontSize:12,fontWeight:700,color:mc,
               padding:'2px 8px',borderRadius:10,background:'rgba(148,163,184,0.14)'}}>
-              {c.mom>0?'+':''}{c.mom?.toFixed(1)}% {strictT(tr, lang, 'mom_label')}
+              {c.mom>0?'+':''}{formatPctForLang(Math.abs(c.mom), 1, lang)} {strictT(tr, lang, 'mom_label')}
             </span>
           )}
           {c.yoy!=null && (
             <span className="cmd-kpi-mom-pill cmd-data-num" style={{fontFamily:'monospace',fontSize:12,
               color:c.yoy>0?T.green:c.yoy<0?T.red:T.text2}}>
-              {c.yoy>0?'+':''}{c.yoy?.toFixed(1)}% {strictT(tr, lang, 'yoy_label')}
+              {c.yoy>0?'+':''}{formatPctForLang(Math.abs(c.yoy), 1, lang)} {strictT(tr, lang, 'yoy_label')}
             </span>
           )}
         </div>
@@ -1645,14 +1661,22 @@ function ForecastNow({ fcData, tr, lang, secondary = false }) {
           <div style={{fontFamily:'monospace',fontSize:secondary?14:15,fontWeight:800,color:T.accent,direction:'ltr'}}>
             {bRev?.point!=null?formatCompactForLang(bRev.point,lang):'—'}
           </div>
-          {bRev?.confidence!=null&&<div style={{fontSize:8,color:T.text3,marginTop:2}}>{strictT(tr, lang, 'fc_confidence')}: {bRev.confidence}%</div>}
+          {bRev?.confidence!=null&&Number.isFinite(Number(bRev.confidence))&&(
+            <div style={{fontSize:8,color:T.text3,marginTop:2}}>
+              {strictT(tr, lang, 'fc_confidence')}: {formatPctForLang(Number(bRev.confidence), 0, lang)}
+            </div>
+          )}
         </div>
         <div style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:8,padding:secondary?'6px 8px':'8px 10px'}}>
           <div style={{fontSize:8,color:T.text3,textTransform:'uppercase',letterSpacing:'.08em',marginBottom:2}}>{strictT(tr, lang, 'net_profit')}</div>
           <div style={{fontFamily:'monospace',fontSize:secondary?14:15,fontWeight:800,color:bNp?.point!=null&&Number(bNp.point)<0?T.red:T.green,direction:'ltr'}}>
             {bNp?.point!=null?formatCompactForLang(bNp.point,lang):'—'}
           </div>
-          {bNp?.confidence!=null&&<div style={{fontSize:8,color:T.text3,marginTop:2}}>{strictT(tr, lang, 'fc_confidence')}: {bNp.confidence}%</div>}
+          {bNp?.confidence!=null&&Number.isFinite(Number(bNp.confidence))&&(
+            <div style={{fontSize:8,color:T.text3,marginTop:2}}>
+              {strictT(tr, lang, 'fc_confidence')}: {formatPctForLang(Number(bNp.confidence), 0, lang)}
+            </div>
+          )}
         </div>
       </div>
     </div>

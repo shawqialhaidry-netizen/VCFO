@@ -18,7 +18,7 @@ Rules:
   - Pure function — no DB, no HTTP
 """
 from __future__ import annotations
-from typing import Optional
+from typing import Any, Optional
 
 _REC_SEVERITY_ORDER = {"high": 3, "medium": 2, "low": 1}
 
@@ -570,8 +570,12 @@ def _score_domain(domain: str, ratios: dict, trends: dict,
 # ──────────────────────────────────────────────────────────────────────────────
 
 def _select_decision(domain: str, ratios: dict, trends: dict,
-                     health_score: int, lang: str) -> Optional[dict]:
-    """Pick the most appropriate decision key for a domain and build the card."""
+                     health_score: int, lang: str) -> Optional[tuple[dict, dict[str, Any]]]:
+    """Pick the most appropriate decision key for a domain and build the card.
+
+    Returns ``(card, template_params)`` where ``template_params`` are the same
+    keyword arguments passed into decision templates (for causal realization).
+    """
 
     cr  = _get(ratios, "liquidity",     "current_ratio",    "value")
     wc  = _get(ratios, "liquidity",     "working_capital",  "value")
@@ -665,11 +669,12 @@ def _select_decision(domain: str, ratios: dict, trends: dict,
         return None
 
     txt = _t(key, lang, **kwargs)
-    return {
+    card = {
         "key":    key,
         "domain": domain,
         **txt,
     }
+    return card, dict(kwargs)
 
 
 def _urgency(domain_score: int) -> str:
@@ -772,6 +777,91 @@ def _confidence(domain_score: int, health: int, n_periods: int) -> int:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+#  Wave 2B — causal_items (parallel to decisions; no realization here)
+# ──────────────────────────────────────────────────────────────────────────────
+
+_DECISION_CAUSAL_PREFIX = "decision.causal"
+
+_TOPIC_BY_DOMAIN: dict[str, str] = {
+    "liquidity": "liquidity",
+    "profitability": "margin",
+    "efficiency": "efficiency",
+    "leverage": "leverage",
+    "growth": "growth",
+}
+
+
+def _topic_for_decision_domain(domain: str) -> str:
+    return _TOPIC_BY_DOMAIN.get(domain, domain)
+
+
+def _causal_severity_from_urgency_impact(urgency: str, impact_level: str) -> str:
+    """Worst of urgency and impact_level (both high|medium|low)."""
+    order = {"high": 0, "medium": 1, "low": 2}
+    u = order.get(str(urgency or "medium").lower(), 1)
+    i = order.get(str(impact_level or "medium").lower(), 1)
+    worst = min(u, i)
+    return {0: "high", 1: "medium", 2: "low"}[worst]
+
+
+def _source_metrics_list_to_dict(rows: list) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        m = row.get("metric")
+        if m is not None:
+            out[str(m)] = row.get("value")
+    return out
+
+
+def _causal_params_for_decision(
+    template_params: dict[str, Any],
+    domain: str,
+    priority_rank: int,
+    source_metrics_rows: list,
+) -> dict[str, Any]:
+    """Flat params: template slots first, then extra metrics (no overwrite)."""
+    params: dict[str, Any] = dict(template_params)
+    sm = _source_metrics_list_to_dict(source_metrics_rows)
+    for k in sorted(sm.keys()):
+        if k not in params:
+            params[k] = sm[k]
+    params["domain"] = domain
+    params["decision_priority_rank"] = priority_rank
+    return params
+
+
+def _causal_item_for_decision(card: dict, template_params: dict[str, Any]) -> dict:
+    tk = str(card.get("key") or "")
+    domain = str(card.get("domain") or "")
+    rank = int(card.get("priority") or 0)
+    cid = f"decision:{domain}:{tk}:{rank}"
+    sm_rows = card.get("source_metrics") or []
+    params = _causal_params_for_decision(template_params, domain, rank, sm_rows)
+    sev = _causal_severity_from_urgency_impact(
+        str(card.get("urgency") or ""),
+        str(card.get("impact_level") or ""),
+    )
+    merged_from = [tk] if tk else []
+    template_ids = [f"cfo_decision.{tk}"] if tk else []
+    return {
+        "id": cid,
+        "topic": _topic_for_decision_domain(domain),
+        "change": {"key": f"{_DECISION_CAUSAL_PREFIX}.{tk}.change", "params": params},
+        "cause": {"key": f"{_DECISION_CAUSAL_PREFIX}.{tk}.cause", "params": params},
+        "action": {"key": f"{_DECISION_CAUSAL_PREFIX}.{tk}.action", "params": params},
+        "severity": sev,
+        "source": "decision",
+        "evidence": {
+            "source_metrics": _source_metrics_list_to_dict(sm_rows),
+            "template_ids": template_ids,
+            "merged_from": merged_from,
+        },
+    }
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 #  Public API
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -797,6 +887,7 @@ def build_cfo_decisions(
     Returns:
         {
           "decisions": [...],
+          "causal_items": [...],  # Wave 2B: parallel causal rows (same order as decisions)
           "recommendations": [{ "recommendation", "reason", "priority" }, ...],
           "domain_scores": { ... },
         }
@@ -832,11 +923,13 @@ def build_cfo_decisions(
     weighted.sort(key=lambda x: -x[0])
 
     # ── Build decision cards for top domains ───────────────────────────────────
-    decisions = []
+    decisions: list[dict] = []
+    causal_items: list[dict] = []
     for eff_score, domain in weighted[:top_n]:
-        card = _select_decision(domain, ratios, trends, health, lang)
-        if card is None:
+        selected = _select_decision(domain, ratios, trends, health, lang)
+        if selected is None:
             continue
+        card, template_params = selected
         raw = raw_scores[domain]
         card["priority"]        = len(decisions) + 1
         card["urgency"]         = _urgency(raw)
@@ -860,6 +953,7 @@ def build_cfo_decisions(
             "linked_alerts": [x.get("alert_id") for x in card["linked_causes"]],
         }
         decisions.append(card)
+        causal_items.append(_causal_item_for_decision(card, template_params))
 
     top_focus = decisions[0]["domain"] if decisions else ""
 
@@ -875,6 +969,7 @@ def build_cfo_decisions(
 
     return {
         "decisions":         decisions,
+        "causal_items":      causal_items,
         "recommendations":   recommendations,
         "domain_scores":     raw_scores,
         "summary": {

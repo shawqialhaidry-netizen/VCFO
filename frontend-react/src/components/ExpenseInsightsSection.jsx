@@ -84,7 +84,7 @@ export default function ExpenseInsightsSection({
     grow?.name != null
       ? `${String(grow.name)} · ${
           grow.pct_change != null
-            ? `${grow.pct_change > 0 ? '+' : ''}${formatPctForLang(grow.pct_change, 1, lang)} ${st(tr, lang, 'mom_label')}`
+            ? `${formatSignedPctForLang(Number(grow.pct_change), 1, lang)} ${st(tr, lang, 'mom_label')}`
             : formatCompactForLang(grow.absolute_change || 0, lang)
         }`
       : null
