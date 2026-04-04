@@ -1,30 +1,24 @@
 /**
- * Statements.jsx — UPGRADE 2
- * Complete financial review: Statements + Analysis + Comparisons in one screen.
+ * Statements.jsx — Phase 3: formal statement reading path
+ * Statement (structured variance table) → Interpretation (deltas + bridge + story) → Margin & supporting.
  *
- * Data source: /executive endpoint (single source of truth)
- * - d.statements        → IS, BS, CF values + series
- * - d.kpi_block         → MoM, YoY, series for comparisons
- * - d.intelligence      → ratios, trends, health
- * - d.decisions         → linked decisions
- * - d.cashflow          → OCF quality + reliability
- * - meta.pipeline_validation → data quality
+ * Data: /executive — structured_income_statement_*, structured_profit_bridge, structured_profit_story;
+ * legacy d.statements for BS/CF tabs and fallback IS rows.
  */
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useLang }        from '../context/LangContext.jsx'
-import { strictT } from '../utils/strictI18n.js'
 import CmdServerText from '../components/CmdServerText.jsx'
-import StructuredFinancialLayers from '../components/StructuredFinancialLayers.jsx'
+import StructuredFinancialLayers, {
+  formatStructuredProfitStoryForPrompt,
+} from '../components/StructuredFinancialLayers.jsx'
 import { useCompany }     from '../context/CompanyContext.jsx'
 import { usePeriodScope } from '../context/PeriodScopeContext.jsx'
 import { buildAnalysisQuery } from '../utils/buildAnalysisQuery.js'
 
-import { hasFlag, safeIncludes } from '../utils/dataGuards.js'
-import { kpiContextLabel, kpiLabel } from '../utils/kpiContext.js'
+import { safeIncludes } from '../utils/dataGuards.js'
 import {
   formatCompactForLang,
-  formatFullForLang,
   formatPctForLang,
   formatMultipleForLang,
   formatDays,
@@ -39,11 +33,11 @@ function auth() {
 // ── Formatters ────────────────────────────────────────────────────────────────
 const fmtD  = (v,base) => { if(v==null||base==null||base===0)return null; return v-base }
 const fmtDp = (v,base) => { if(v==null||base==null||base===0)return null; return ((v-base)/Math.abs(base))*100 }
-const arr   = v => v==null?'':v>0?'▲':v<0?'▼':'─'
 const clrV  = v => v==null?'var(--text-secondary)':v>0?'var(--green)':v<0?'var(--red)':'var(--text-secondary)'
 const clrVi = (v,inv) => inv?clrV(-v):clrV(v)  // inverted for costs
 const urgC  = {high:'var(--red)',medium:'var(--amber)',low:'var(--blue)',info:'var(--green)'}
 const domC  = {liquidity:'var(--blue)',profitability:'var(--green)',efficiency:'var(--violet)',leverage:'var(--amber)',growth:'var(--accent)'}
+const stC   = {excellent:'var(--green)',good:'var(--accent)',warning:'var(--amber)',risk:'var(--red)',neutral:'var(--text-secondary)'}
 
 function statementsSeverityLabel(tr, sev) {
   const s = String(sev || 'info').toLowerCase()
@@ -61,90 +55,6 @@ function statementsDomainLabel(tr, dom) {
   }
   const k = map[dom]
   return k ? tr(k) : dom
-}
-
-// Phase 6.1: read insight text for a statement line — no calculation
-function stmtInsight(key, d, tr) {
-  const trends  = d?.intelligence?.trends  || {}
-  const ratios  = d?.intelligence?.ratios  || {}
-  const ins     = d?.statements?.insights  || []
-  const findIns = k => ins.find(i => i.key === k)
-  const ratioStatusKey = (st) => {
-    if (st === 'good') return 'stmt_kpi_ratio_status_good'
-    if (st === 'warning') return 'stmt_kpi_ratio_status_warning'
-    if (st === 'risk') return 'stmt_kpi_ratio_status_risk'
-    return null
-  }
-  switch (key) {
-    case 'revenue': {
-      const dir = trends?.revenue?.direction
-      if (dir !== 'up' && dir !== 'down' && dir !== 'stable') return null
-      return tr(`stmt_kpi_revenue_trend_${dir}`)
-    }
-    case 'net_profit': {
-      const st = ratios?.profitability?.net_margin_pct?.status
-      const k = ratioStatusKey(st)
-      return k ? tr(k) : null
-    }
-    case 'cashflow': {
-      const ins2 = findIns('cashflow_positive')
-      if (!ins2?.message) return null
-      const parts = ins2.message.split('. ')
-      return parts[0] || ins2.message
-    }
-    case 'working_capital': {
-      const st = ratios?.liquidity?.working_capital?.status
-      const k = ratioStatusKey(st)
-      return k ? tr(k) : null
-    }
-    default: return null
-  }
-}
-
-// Phase 6.2: cause text for statement lines — reads decisions/root_causes only
-function stmtCause(key, d, tr, lang) {
-  const decs    = d?.decisions   || []
-  const causes  = d?.root_causes || []
-  const cf      = d?.cashflow    || {}
-  const ratios  = d?.intelligence?.ratios || {}
-  const decR = (domain) => {
-    const x = decs.find((v) => v.domain === domain)
-    const t = String(x?.causal_realized?.change_text || x?.causal_realized?.cause_text || '').trim()
-    return t ? t.split('. ')[0] || t : null
-  }
-  const rcT     = domain => { const c=causes.find(v=>v.domain===domain||v.domain==='cross_domain'); return c?.title||null }
-  const clip    = s => (s && s.length > 60 ? s.slice(0, 57) : s)
-  switch(key) {
-    case 'revenue':        return clip(rcT('growth')      || decR('growth'))
-    case 'net_profit': {
-      const nm = ratios?.profitability?.net_margin_pct
-      if (nm?.value == null) return null
-      const sk = nm.status === 'good' ? 'stmt_kpi_net_margin_cause_good'
-        : nm.status === 'warning' ? 'stmt_kpi_net_margin_cause_warning'
-          : 'stmt_kpi_net_margin_cause_risk'
-      return tr(sk, { value: formatPctForLang(nm.value, 1, lang) })
-    }
-    case 'cashflow':       return hasFlag(cf?.flags,'single_period') ? tr('stmt_kpi_cf_single_period') : null
-    case 'working_capital':return clip(rcT('liquidity')   || decR('liquidity'))
-    default: return null
-  }
-}
-
-// Phase 6.4: forecast text helper — reads fcData.scenarios.base.[key][0]
-function stmtForecast(key, fcData, tr, fmtFn, lang) {
-  if (!fcData?.available) return null
-  const series = fcData?.scenarios?.base?.[key] || []
-  const next = series[0]
-  if (!next?.point) return null
-  const val = fmtFn ? fmtFn(next.point) : formatFullForLang(next.point, lang)
-  const dir = next.mom_applied != null
-    ? (next.mom_applied > 0 ? '↑' : next.mom_applied < 0 ? '↓' : '→')
-    : ''
-  const conf = next.confidence != null
-    ? tr('stmt_kpi_forecast_conf', { confidence: formatPctForLang(next.confidence, 0, lang) })
-    : ''
-  const body = [dir, val].filter(Boolean).join(' ')
-  return `${body}${conf}`
 }
 
 // ── Shared badge ──────────────────────────────────────────────────────────────
@@ -237,84 +147,6 @@ function CmpHeader({lang,priorLabel,tr}) {
           {h}
         </span>
       ))}
-    </div>
-  )
-}
-
-// ── Summary KPI card ──────────────────────────────────────────────────────────
-function KpiCard({label,value,fullValue,mom,yoy,color,sub,badge,onClick,insight,cause,forecast,momWord,yoyWord,lang,tr}) {
-  const [hov,setHov] = useState(false)
-  return (
-    <div onClick={onClick}
-      onMouseEnter={()=>setHov(true)}
-      onMouseLeave={()=>setHov(false)}
-      style={{
-        background: hov ? `linear-gradient(160deg, rgba(255,255,255,0.03), var(--bg-panel))` : 'var(--bg-panel)',
-        borderWidth: '2px 1px 1px 1px',
-        borderStyle: 'solid',
-        borderColor: `${color} ${hov ? color+'50' : 'var(--border)'} ${hov ? color+'50' : 'var(--border)'} ${hov ? color+'50' : 'var(--border)'}`,
-        borderRadius:13,padding:'13px 15px',
-        cursor:onClick?'pointer':'default',
-        transition:'all 0.2s cubic-bezier(0.4,0,0.2,1)',
-        transform: hov && onClick ? 'translateY(-2px)' : 'none',
-        boxShadow: hov
-          ? `0 10px 28px rgba(0,0,0,0.45), 0 0 0 1px ${color}18`
-          : '0 2px 8px rgba(0,0,0,0.2)',
-      }}>
-      <div style={{fontSize:9,color:'var(--text-muted)',textTransform:'uppercase',
-        letterSpacing:'.07em',fontWeight:700,marginBottom:6,display:'flex',alignItems:'center',gap:6}}>
-        {label}
-        {badge&&<Badge label={badge} color='var(--amber)'/>}
-      </div>
-      <div style={{
-        fontFamily:'var(--font-display)',fontSize:22,fontWeight:800,
-        color:'#ffffff',marginBottom:5,direction:'ltr',lineHeight:1,
-        letterSpacing:'-0.02em',
-        textShadow: hov ? `0 0 20px ${color}40` : 'none',
-        transition:'text-shadow 0.2s',
-      }}>{value}</div>
-      {fullValue&&<div style={{fontFamily:'var(--font-mono)',fontSize:9,color:'var(--text-muted)',marginBottom:3,letterSpacing:'.02em',direction:'ltr'}}>{fullValue}</div>}
-      <div style={{display:'flex',alignItems:'center',gap:6,flexWrap:'wrap'}}>
-        {mom!=null&&<span style={{
-          fontFamily:'var(--font-mono)',fontSize:10,fontWeight:700,
-          color:clrV(mom),
-          padding:'1px 5px',borderRadius:8,
-          background:`${clrV(mom)}14`,
-        }}>
-          {arr(mom)} {formatPctForLang(Math.abs(mom), 1, lang)} {momWord}
-        </span>}
-        {yoy!=null&&<span style={{fontFamily:'var(--font-mono)',fontSize:9,color:clrV(yoy),opacity:.8}}>
-          {arr(yoy)} {formatPctForLang(Math.abs(yoy), 1, lang)} {yoyWord}
-        </span>}
-        {sub&&<span style={{fontSize:10,color:'var(--text-muted)'}}>{sub}</span>}
-      </div>
-      {/* Phase 6.1: insight line */}
-      {insight&&<div style={{fontSize:10,color:'var(--text-muted)',marginTop:6,
-        lineHeight:1.4,opacity:.8,overflow:'hidden',textOverflow:'clip',whiteSpace:'nowrap'}}
-        title={insight}>
-        💡{' '}
-        {lang && tr ? (
-          <CmdServerText lang={lang} tr={tr} style={{ display: 'inline' }}>{insight}</CmdServerText>
-        ) : insight}
-      </div>}
-      {/* Phase 6.2: cause line */}
-      {cause&&<div style={{fontSize:9,color:'var(--text-dim)',marginTop:2,
-        lineHeight:1.3,opacity:.65,overflow:'hidden',textOverflow:'clip',whiteSpace:'nowrap'}}
-        title={cause}>
-        ↳{' '}
-        {lang && tr ? (
-          <CmdServerText lang={lang} tr={tr} style={{ display: 'inline' }}>{cause}</CmdServerText>
-        ) : cause}
-      </div>}
-      {/* Phase 6.4: forecast line */}
-      {forecast&&<div style={{fontSize:9,color:'var(--accent)',marginTop:3,
-        lineHeight:1.3,opacity:.7,overflow:'hidden',textOverflow:'clip',whiteSpace:'nowrap',
-        fontFamily:'var(--font-mono)'}} title={forecast}>
-        📈{' '}
-        {lang && tr ? (
-          <CmdServerText lang={lang} tr={tr} style={{ display: 'inline', fontFamily: 'var(--font-mono)' }}>{forecast}</CmdServerText>
-        ) : forecast}
-      </div>}
     </div>
   )
 }
@@ -480,19 +312,9 @@ export default function Statements() {
   const [loading, setLoading] = useState(false)
   const [consolidate, setConsolidate] = useState(false)
   const [err,     setErr]     = useState(null)
-  const [fcData,  setFcData]  = useState(null)
   const [tab,     setTab]     = useState('income')
   const [panel,   setPanel]   = useState(null)
   const [cmpMode, setCmpMode] = useState('mom') // mom | yoy | prior_ytd
-
-  const ctxLabel = () =>
-    kpiContextLabel({
-      window: win,
-      ps: ps || {},
-      latestPeriod: data?.meta?.periods?.slice(-1)[0] || '',
-      lang,
-      tr,
-    })
 
   useEffect(()=>{ if(location.state?.focus) setTab(location.state.focus) },[location.state])
 
@@ -510,14 +332,6 @@ export default function Statements() {
       setResolved(json.meta?.scope||null)
     } catch(e){setErr(e.message)}
     finally{setLoading(false)}
-    // Phase 6.4: forecast — read-only, silent fail
-    try {
-      const qs2 = buildAnalysisQuery(scopeQS, { lang, window: win, consolidate })
-      if(qs2 !== null) {
-        const fr = await fetch(`${API}/analysis/${selectedId}/forecast?${qs2}`,{headers:auth()})
-        if(fr.ok){ const fj=await fr.json(); if(fj?.data) setFcData(fj.data) }
-      }
-    } catch(_){}
   },[selectedId,lang,consolidate,win,scopeQS,setResolved,isIncompleteCustom])
 
   useEffect(()=>{ load() },[selectedId,load])
@@ -528,11 +342,9 @@ export default function Statements() {
   const is_     = stmts.income_statement || {}
   const bs_     = stmts.balance_sheet    || {}
   const cf_     = stmts.cashflow         || {}
-  const smry    = stmts.summary          || {}
   const ser     = stmts.series           || {}
   const insights= stmts.insights         || []
   const decs    = d.decisions            || []
-  const kpis    = d.kpi_block?.kpis      || {}
   const series  = d.kpi_block?.series    || {}
   const intel   = d.intelligence         || {}
   const ratios  = intel.ratios           || {}
@@ -557,14 +369,25 @@ export default function Statements() {
   // Comparison label for header
   const priorLabel = tr(`cmp_${cmpMode}`)
 
-  // MoM values from kpi_block
-  const momRev = kpis.revenue?.mom_pct
-  const momNp  = kpis.net_profit?.mom_pct
-  const yoyRev = kpis.revenue?.yoy_pct
-  const yoyNp  = kpis.net_profit?.yoy_pct
-
   // Health color
   const healthC = health!=null?(health>=80?'var(--green)':health>=60?'var(--amber)':'var(--red)'):'var(--text-secondary)'
+
+  const bizStatus = String(intel.status || 'neutral').toLowerCase()
+  const bizStateColor = stC[bizStatus] || stC.neutral
+
+  const headerSummaryLine = useMemo(() => {
+    if (!data) return ''
+    const parts = formatStructuredProfitStoryForPrompt(d?.structured_profit_story, tr)
+      .split('\n')
+      .map((s) => s.trim())
+      .filter(Boolean)
+    return parts[0] || tr('stmt_header_summary_fallback')
+  }, [data, d, tr])
+
+  const hasStructuredVariance =
+    d.structured_income_statement_variance &&
+    typeof d.structured_income_statement_variance === 'object' &&
+    Object.keys(d.structured_income_statement_variance).length > 0
 
   const cfFlagClr = cf_.reliability==='good'?'var(--green)':cf_.reliability==='warning'?'var(--amber)':'var(--red)'
 
@@ -589,7 +412,12 @@ export default function Statements() {
   return (
     <div className="" style={{padding:'16px 24px',display:'flex',flexDirection:'column',
       gap:12,minHeight:'calc(100vh - 62px)',background:'var(--bg-void)'}}>
-      <style>{`@keyframes slideIn{from{transform:translateX(100%);opacity:0}to{transform:translateX(0);opacity:1}}@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+      <style>{`
+        @keyframes slideIn{from{transform:translateX(100%);opacity:0}to{transform:translateX(0);opacity:1}}
+        @keyframes spin{to{transform:rotate(360deg)}}
+        .stmt-supporting-details > summary,.stmt-priority-details > summary{list-style:none;cursor:pointer}
+        .stmt-supporting-details > summary::-webkit-details-marker,.stmt-priority-details > summary::-webkit-details-marker{display:none}
+      `}</style>
 
       {/* ── Header ──────────────────────────────────────────────────────── */}
       <div style={{display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
@@ -598,7 +426,7 @@ export default function Statements() {
             {tr('stmt_page_title')}
           </h1>
           <p style={{fontSize:11,color:'var(--text-secondary)',margin:'3px 0 0'}}>
-            {selectedCompany?.name} · {period}
+            {tr('stmt_page_subtitle')}
           </p>
         </div>
         {/* Comparison mode selector */}
@@ -678,134 +506,61 @@ export default function Statements() {
 
       {loading&&!data&&(
         <div style={{display:'flex',flexDirection:'column',gap:12,paddingTop:8}}>
-          <div style={{display:'grid',gridTemplateColumns:'repeat(5,1fr)',gap:8}}>
-            {[1,2,3,4,5].map(i=>(
-              <div key={i} style={{background:'var(--bg-panel)',borderRadius:13,padding:'16px',borderTop:'2px solid var(--border)'}}>
-                <div className="skeleton skeleton-text" style={{width:'60%',marginBottom:10}}/>
-                <div className="skeleton skeleton-num" style={{marginBottom:8}}/>
-                <div className="skeleton skeleton-text" style={{width:'40%'}}/>
-              </div>
-            ))}
+          <div style={{background:'var(--bg-panel)',borderRadius:13,padding:16,minHeight:88,borderTop:'2px solid var(--border)'}}>
+            <div className="skeleton skeleton-text" style={{width:'35%',marginBottom:10}}/>
+            <div className="skeleton" style={{height:14,width:'92%',borderRadius:4}}/>
           </div>
-          <div style={{display:'grid',gridTemplateColumns:'1fr 300px',gap:14}}>
-            <div style={{background:'var(--bg-panel)',borderRadius:13,padding:'20px'}}>
-              <div className="skeleton skeleton-text" style={{width:'30%',marginBottom:16}}/>
-              {[1,2,3,4,5].map(i=><div key={i} className="skeleton skeleton-text" style={{marginBottom:10}}/>)}
-            </div>
-            <div style={{display:'flex',flexDirection:'column',gap:10}}>
-              {[1,2].map(i=>(
-                <div key={i} style={{background:'var(--bg-panel)',borderRadius:13,padding:'16px'}}>
-                  <div className="skeleton skeleton-text" style={{width:'50%',marginBottom:10}}/>
-                  <div className="skeleton skeleton-chart" style={{height:80}}/>
-                </div>
-              ))}
-            </div>
+          <div style={{background:'var(--bg-panel)',borderRadius:13,padding:20,minHeight:200}}>
+            <div className="skeleton skeleton-text" style={{width:'28%',marginBottom:16}}/>
+            {[1,2,3,4,5,6].map(i=><div key={i} className="skeleton skeleton-text" style={{marginBottom:10}}/>)}
           </div>
         </div>
       )}
 
-      {/* ── Data quality banner ──────────────────────────────────────── */}
+      {data&&stmts.available&&(
+        <Card style={{
+          borderTop:`2px solid ${healthC}`,padding:'14px 18px',marginBottom:0,
+        }}>
+          <div style={{display:'flex',flexWrap:'wrap',alignItems:'flex-start',gap:16}}>
+            <div style={{flex:'1 1 220px',minWidth:0}}>
+              <div style={{
+                fontSize:10,fontWeight:800,color:'var(--text-secondary)',textTransform:'uppercase',letterSpacing:'.08em',
+              }}>
+                {TABS.find(t=>t.k===tab)?.label} · {period}
+              </div>
+              <div style={{fontSize:15,fontWeight:800,color:'#fff',marginTop:4}}>{selectedCompany?.name}</div>
+              <p style={{fontSize:12,color:'var(--text-secondary)',margin:'8px 0 0',lineHeight:1.5}}>
+                <CmdServerText lang={lang} tr={tr}>{headerSummaryLine}</CmdServerText>
+              </p>
+            </div>
+            <div style={{display:'flex',alignItems:'center',gap:16,flexShrink:0,flexWrap:'wrap'}}>
+              <div style={{textAlign:'center',minWidth:72}}>
+                <div style={{fontSize:9,color:'var(--text-secondary)',textTransform:'uppercase',letterSpacing:'.06em',fontWeight:700}}>
+                  {tr('health_score')}
+                </div>
+                <div style={{fontFamily:'var(--font-mono)',fontSize:24,fontWeight:800,color:healthC,direction:'ltr',lineHeight:1.2}}>
+                  {health!=null?health:'—'}
+                </div>
+                <div style={{fontSize:9,color:healthC,fontWeight:600}}>
+                  {health!=null?tr(`health_tier_${health>=80?'excellent':health>=60?'good':health>=40?'warning':'risk'}`):'—'}
+                </div>
+              </div>
+              <div style={{paddingLeft:14,borderLeft:'1px solid var(--border)',minWidth:100}}>
+                <div style={{fontSize:9,color:'var(--text-secondary)',textTransform:'uppercase',letterSpacing:'.06em',fontWeight:700}}>
+                  {tr('stmt_business_state')}
+                </div>
+                <div style={{fontSize:12,fontWeight:700,color:bizStateColor,marginTop:4}}>
+                  {tr(`status_${bizStatus}_simple`)}
+                </div>
+              </div>
+            </div>
+          </div>
+        </Card>
+      )}
+
       {data&&<DataQualityBanner validation={validation} lang={l} tr={tr}/>}
 
       {data&&stmts.available&&(<>
-
-        {/* ── TOP SUMMARY ROW (UPGRADE 2) ─────────────────────────── */}
-        <div style={{display:'grid',gridTemplateColumns:'repeat(5,1fr)',gap:8}}>
-          <KpiCard label={tr('fc_revenue')}
-            value={formatCompactForLang(smry.revenue, lang)}
-            fullValue={formatFullForLang(smry.revenue, lang)}
-            lang={lang}
-            tr={tr}
-            momWord={strictT(tr, lang, 'mom_label')}
-            yoyWord={strictT(tr, lang, 'yoy_label')}
-            mom={cmpMode==='mom'?momRev:null}
-            yoy={cmpMode==='yoy'?yoyRev:null}
-            color='var(--accent)'
-            insight={stmtInsight('revenue',data?.data,tr)}
-            cause={stmtCause('revenue',data?.data,tr,lang)}
-            forecast={stmtForecast('revenue', fcData, tr, (v) => formatCompactForLang(v, lang), lang)}
-            onClick={()=>setTab('income')}/>
-          <KpiCard label={tr('fc_net_profit')}
-            value={formatCompactForLang(smry.net_profit, lang)}
-            fullValue={formatFullForLang(smry.net_profit, lang)}
-            lang={lang}
-            tr={tr}
-            momWord={strictT(tr, lang, 'mom_label')}
-            yoyWord={strictT(tr, lang, 'yoy_label')}
-            mom={cmpMode==='mom'?momNp:null}
-            yoy={cmpMode==='yoy'?yoyNp:null}
-            color={smry.net_profit>=0?'var(--green)':'var(--red)'}
-            sub={smry.net_margin_pct != null ? formatPctForLang(smry.net_margin_pct, 1, lang) : null}
-            insight={stmtInsight('net_profit',data?.data,tr)}
-            cause={stmtCause('net_profit',data?.data,tr,lang)}
-            forecast={stmtForecast('net_profit', fcData, tr, (v) => formatCompactForLang(v, lang), lang)}
-            onClick={()=>setTab('income')}/>
-          <KpiCard label={tr('cashflow_operating')}
-            value={formatCompactForLang(smry.operating_cashflow, lang)}
-            fullValue={formatFullForLang(smry.operating_cashflow, lang)}
-            lang={lang}
-            tr={tr}
-            momWord={strictT(tr, lang, 'mom_label')}
-            yoyWord={strictT(tr, lang, 'yoy_label')}
-            mom={cmpMode==='mom'?cf_.operating_cashflow_mom:null}
-            color={cfFlagClr}
-            badge={cfEstimated?tr('label_estimated_short'):null}
-            insight={stmtInsight('cashflow',data?.data,tr)}
-            cause={stmtCause('cashflow',data?.data,tr,lang)}
-            onClick={()=>setTab('cashflow')}/>
-          <KpiCard label={tr('working_capital')}
-            value={formatCompactForLang(smry.working_capital, lang)}
-            fullValue={formatFullForLang(smry.working_capital, lang)}
-            lang={lang}
-            tr={tr}
-            momWord={strictT(tr, lang, 'mom_label')}
-            yoyWord={strictT(tr, lang, 'yoy_label')}
-            color={smry.working_capital>=0?'var(--green)':'var(--red)'}
-            sub={smry.working_capital<0?tr('wc_negative'):null}
-            insight={stmtInsight('working_capital',data?.data,tr)}
-            cause={stmtCause('working_capital',data?.data,tr,lang)}
-            onClick={()=>setPanel(insights.find(x=>x.key==='negative_working_capital')||null)}/>
-          {/* Health card */}
-          <div style={{background:'var(--bg-panel)',border:'1px solid var(--border)',
-            borderTop:`2px solid ${healthC}`,borderRadius:11,padding:'13px 15px',
-            display:'flex',flexDirection:'column',justifyContent:'center',alignItems:'center',gap:4}}>
-            <div style={{fontSize:9,color:'var(--text-secondary)',textTransform:'uppercase',
-              letterSpacing:'.06em',fontWeight:700,marginBottom:4}}>
-              {tr('health_score')}
-            </div>
-            <div style={{fontFamily:'var(--font-mono)',fontSize:26,fontWeight:900,
-              color:healthC,direction:'ltr'}}>
-              {health!=null?health:'—'}
-            </div>
-            <div style={{fontSize:9,color:healthC,fontWeight:600}}>
-              {health!=null?tr(`health_tier_${health>=80?'excellent':health>=60?'good':health>=40?'warning':'risk'}`):'—'}
-            </div>
-            {(validation?.has_errors||validation?.has_info)&&(
-              <div style={{fontSize:9,color:'var(--amber)',marginTop:2}}>⚠ {tr('data_issues')}</div>
-            )}
-          </div>
-        </div>
-
-        {/* High-severity alert strip */}
-        {insights.filter(x=>x.severity==='high').length>0&&(
-          <div style={{padding:'9px 14px',background:'rgba(248,113,113,.07)',
-            border:'1px solid rgba(248,113,113,.25)',borderRadius:9,
-            display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
-            <span style={{fontSize:12,fontWeight:700,color:'var(--red)',flexShrink:0}}>🚨</span>
-            {insights.filter(x=>x.severity==='high').slice(0,3).map((ins,i)=>(
-              <button key={i} onClick={()=>setPanel(ins)}
-                style={{fontSize:10,color:'var(--red)',background:'rgba(248,113,113,.1)',
-                  padding:'3px 10px',borderRadius:20,border:'1px solid rgba(248,113,113,.22)',
-                  cursor:'pointer',maxWidth:220,overflow:'hidden',textAlign:'start'}}>
-                <CmdServerText lang={lang} tr={tr} title={ins.message}
-                  style={{display:'inline-block',maxWidth:'100%',overflow:'hidden',textOverflow:'clip',whiteSpace:'nowrap',verticalAlign:'bottom'}}>
-                  {ins.message}
-                </CmdServerText>
-                {' →'}
-              </button>
-            ))}
-          </div>
-        )}
 
         {/* ── Tabs ─────────────────────────────────────────────────── */}
         <div style={{display:'flex',gap:4,background:'var(--bg-elevated)',
@@ -828,77 +583,101 @@ export default function Statements() {
         ════════════════════════════════════════════════════════════ */}
         {tab==='income'&&(
           <div style={{display:'flex',flexDirection:'column',gap:14}}>
-            <StructuredFinancialLayers data={d} tr={tr} lang={lang} variant="statements" />
-            <div style={{display:'grid',gridTemplateColumns:'1fr 300px',gap:14}}>
-            <Card>
-              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:12}}>
-                <SectionHead label={tr('stmt_section_is')} color='var(--accent)' sub={period}/>
-                <div style={{display:'flex',gap:6,alignItems:'center'}}>
+            {hasStructuredVariance ? (
+              <StructuredFinancialLayers data={d} tr={tr} lang={lang} variant="statements_formal_variance" />
+            ) : (
+              <Card>
+                <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:12}}>
+                  <SectionHead label={tr('stmt_section_is')} color='var(--accent)' sub={period}/>
                   <Spark data={series.revenue?.slice(-8)} color='var(--accent)'/>
                 </div>
-              </div>
-              <CmpHeader lang={l} priorLabel={priorLabel} tr={tr}/>
-              <CmpRow lang={lang} label={tr('fc_revenue')}
-                cur={is_.revenue} prior={prior.revenue}
-                bold color='var(--accent)'
-                onClick={()=>setPanel(insights.find(x=>x.domain==='growth')||null)}/>
-              <CmpRow lang={lang} label={tr('cogs')}
-                cur={is_.cogs} prior={null} invertColor/>
-              <CmpRow lang={lang} label={tr('stmt_bridge_gross')}
-                cur={is_.gross_profit} prior={null}
-                bold color='var(--green)'/>
-              <CmpRow lang={lang} label={tr('stmt_bridge_opex')}
-                cur={is_.operating_expenses} prior={null} invertColor/>
-              <CmpRow lang={lang} label={tr('stmt_bridge_op')}
-                cur={is_.operating_profit} prior={null} bold/>
-              {is_.tax!=null&&<CmpRow lang={lang} label={tr('stmt_bridge_tax')}
-                cur={is_.tax} prior={null} invertColor/>}
-              <CmpRow lang={lang} label={tr('fc_net_profit')}
-                cur={is_.net_profit} prior={prior.net_profit}
-                bold color={is_.net_profit>=0?'var(--green)':'var(--red)'}
-                onClick={()=>setPanel(insights.find(x=>x.key==='low_net_margin')||null)}/>
-            </Card>
-
-            {/* Right panel: margins + ratios + insights */}
-            <div style={{display:'flex',flexDirection:'column',gap:10}}>
-              <Card>
-                <SectionHead label={tr('margins')} color='var(--green)'/>
-                {[
-                  {l:tr('gross_margin'),v:is_.gross_margin_pct,
-                   c:is_.gross_margin_pct>=30?'var(--green)':is_.gross_margin_pct>=15?'var(--amber)':'var(--red)'},
-                  {l:tr('net_margin'),v:is_.net_margin_pct,
-                   c:is_.net_margin_pct>=10?'var(--green)':is_.net_margin_pct>=5?'var(--amber)':'var(--red)'},
-                  {l:tr('operating_margin'),
-                   v:is_.operating_profit&&is_.revenue?(is_.operating_profit/is_.revenue*100):null,
-                   c:'var(--accent)'},
-                ].map(({l:lbl,v,c})=>(
-                  <div key={lbl} style={{display:'flex',justifyContent:'space-between',
-                    padding:'7px 0',borderBottom:'1px solid var(--border)'}}>
-                    <span style={{fontSize:11,color:'var(--text-secondary)'}}>{lbl}</span>
-                    <span style={{fontFamily:'var(--font-mono)',fontSize:13,fontWeight:700,color:c}}>
-                      {formatPctForLang(v, 1, lang)}
-                    </span>
-                  </div>
-                ))}
+                <CmpHeader lang={l} priorLabel={priorLabel} tr={tr}/>
+                <CmpRow lang={lang} label={tr('fc_revenue')}
+                  cur={is_.revenue} prior={prior.revenue}
+                  bold color='var(--accent)'
+                  onClick={()=>setPanel(insights.find(x=>x.domain==='growth')||null)}/>
+                <CmpRow lang={lang} label={tr('cogs')}
+                  cur={is_.cogs} prior={null} invertColor/>
+                <CmpRow lang={lang} label={tr('stmt_bridge_gross')}
+                  cur={is_.gross_profit} prior={null}
+                  bold color='var(--green)'/>
+                <CmpRow lang={lang} label={tr('stmt_bridge_opex')}
+                  cur={is_.operating_expenses} prior={null} invertColor/>
+                <CmpRow lang={lang} label={tr('stmt_bridge_op')}
+                  cur={is_.operating_profit} prior={null} bold/>
+                {is_.tax!=null&&<CmpRow lang={lang} label={tr('stmt_bridge_tax')}
+                  cur={is_.tax} prior={null} invertColor/>}
+                <CmpRow lang={lang} label={tr('fc_net_profit')}
+                  cur={is_.net_profit} prior={prior.net_profit}
+                  bold color={is_.net_profit>=0?'var(--green)':'var(--red)'}
+                  onClick={()=>setPanel(insights.find(x=>x.key==='low_net_margin')||null)}/>
               </Card>
-
-              {/* Profitability ratios from intelligence */}
-              {ratios.profitability&&<Card>
-                <SectionHead label={tr('profitability')} color='var(--violet)'/>
-                {[
-                  [tr('net_margin'), ratios.profitability?.net_margin_pct?.value, ratios.profitability?.net_margin_pct?.status, '%'],
-                  [tr('gross_margin'), ratios.profitability?.gross_margin_pct?.value, ratios.profitability?.gross_margin_pct?.status, '%'],
-                ].map(([label,v,st,unit])=>(
-                  <RatioRow key={label} label={label} value={v} status={st} unit={unit} lang={lang}/>
-                ))}
-              </Card>}
-
-              {/* Linked insights — profitability */}
-              {insights.filter(x=>x.domain==='profitability'||x.domain==='growth').slice(0,2).map((ins,i)=>(
-                <InsightCard key={i} ins={ins} onClick={()=>setPanel(ins)} lang={l} tr={tr}/>
-              ))}
+            )}
+            <StructuredFinancialLayers data={d} tr={tr} lang={lang} variant="statements_interpretation" />
+            <StructuredFinancialLayers data={d} tr={tr} lang={lang} variant="statements_margin_section" />
+            <div style={{display:'flex',flexWrap:'wrap',alignItems:'center',gap:10}}>
+              <span style={{fontSize:10,fontWeight:800,color:'var(--text-secondary)',textTransform:'uppercase',letterSpacing:'.06em'}}>
+                {tr('stmt_related_views')}
+              </span>
+              <button type="button" onClick={()=>setTab('cashflow')}
+                style={{padding:'6px 12px',borderRadius:8,border:'1px solid var(--border)',
+                  background:'var(--bg-elevated)',color:'#aab4c3',fontSize:11,fontWeight:600,cursor:'pointer'}}>
+                {tr('cashflow_operating')} →
+              </button>
+              <button type="button" onClick={()=>setTab('balance')}
+                style={{padding:'6px 12px',borderRadius:8,border:'1px solid var(--border)',
+                  background:'var(--bg-elevated)',color:'#aab4c3',fontSize:11,fontWeight:600,cursor:'pointer'}}>
+                {tr('stmt_section_bs')} →
+              </button>
+              <button type="button" onClick={()=>navigate('/analysis',{state:{focus:'overview'}})}
+                style={{padding:'6px 12px',borderRadius:8,border:'1px solid var(--border)',
+                  background:'var(--bg-elevated)',color:'#aab4c3',fontSize:11,fontWeight:600,cursor:'pointer'}}>
+                {tr('nav_drill_analysis')} →
+              </button>
             </div>
-            </div>
+            <details className="stmt-supporting-details" style={{
+              borderRadius:12,border:'1px solid var(--border)',padding:'10px 14px',background:'rgba(255,255,255,0.02)',
+            }}>
+              <summary style={{fontSize:12,fontWeight:800,color:'var(--text-secondary)',cursor:'pointer',listStyle:'none'}}>
+                {tr('stmt_supporting_detail')}
+              </summary>
+              <div style={{marginTop:12,display:'grid',gridTemplateColumns:'1fr 300px',gap:14}}>
+                <Card>
+                  <SectionHead label={tr('margins')} color='var(--green)'/>
+                  {[
+                    {l:tr('gross_margin'),v:is_.gross_margin_pct,
+                     c:is_.gross_margin_pct>=30?'var(--green)':is_.gross_margin_pct>=15?'var(--amber)':'var(--red)'},
+                    {l:tr('net_margin'),v:is_.net_margin_pct,
+                     c:is_.net_margin_pct>=10?'var(--green)':is_.net_margin_pct>=5?'var(--amber)':'var(--red)'},
+                    {l:tr('operating_margin'),
+                     v:is_.operating_profit&&is_.revenue?(is_.operating_profit/is_.revenue*100):null,
+                     c:'var(--accent)'},
+                  ].map(({l:lbl,v,c})=>(
+                    <div key={lbl} style={{display:'flex',justifyContent:'space-between',
+                      padding:'7px 0',borderBottom:'1px solid var(--border)'}}>
+                      <span style={{fontSize:11,color:'var(--text-secondary)'}}>{lbl}</span>
+                      <span style={{fontFamily:'var(--font-mono)',fontSize:13,fontWeight:700,color:c}}>
+                        {formatPctForLang(v, 1, lang)}
+                      </span>
+                    </div>
+                  ))}
+                </Card>
+                <div style={{display:'flex',flexDirection:'column',gap:10}}>
+                  {ratios.profitability&&<Card>
+                    <SectionHead label={tr('profitability')} color='var(--violet)'/>
+                    {[
+                      [tr('net_margin'), ratios.profitability?.net_margin_pct?.value, ratios.profitability?.net_margin_pct?.status, '%'],
+                      [tr('gross_margin'), ratios.profitability?.gross_margin_pct?.value, ratios.profitability?.gross_margin_pct?.status, '%'],
+                    ].map(([label,v,st,unit])=>(
+                      <RatioRow key={label} label={label} value={v} status={st} unit={unit} lang={lang}/>
+                    ))}
+                  </Card>}
+                  {insights.filter(x=>x.domain==='profitability'||x.domain==='growth').slice(0,2).map((ins,i)=>(
+                    <InsightCard key={i} ins={ins} onClick={()=>setPanel(ins)} lang={l} tr={tr}/>
+                  ))}
+                </div>
+              </div>
+            </details>
           </div>
         )}
 
@@ -1166,6 +945,31 @@ export default function Statements() {
               <InsightCard key={i} ins={ins} onClick={()=>setPanel(ins)} lang={l} tr={tr}/>
             ))}
           </div>
+        )}
+
+        {insights.filter(x=>x.severity==='high').length>0&&(
+          <details className="stmt-priority-details" style={{
+            borderRadius:12,border:'1px solid rgba(248,113,113,.28)',padding:'10px 14px',
+            background:'rgba(248,113,113,.05)',marginTop:2,
+          }}>
+            <summary style={{fontSize:12,fontWeight:800,color:'var(--red)',cursor:'pointer',listStyle:'none'}}>
+              {tr('stmt_priority_signals')}
+            </summary>
+            <div style={{display:'flex',flexWrap:'wrap',gap:8,marginTop:10}}>
+              {insights.filter(x=>x.severity==='high').slice(0,5).map((ins,i)=>(
+                <button key={i} type="button" onClick={()=>setPanel(ins)}
+                  style={{fontSize:10,color:'var(--red)',background:'rgba(248,113,113,.1)',
+                    padding:'4px 10px',borderRadius:20,border:'1px solid rgba(248,113,113,.22)',
+                    cursor:'pointer',maxWidth:260,overflow:'hidden',textAlign:'start'}}>
+                  <CmdServerText lang={lang} tr={tr} title={ins.message}
+                    style={{display:'inline-block',maxWidth:'100%',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',verticalAlign:'bottom'}}>
+                    {ins.message}
+                  </CmdServerText>
+                  {' →'}
+                </button>
+              ))}
+            </div>
+          </details>
         )}
 
       </>)}

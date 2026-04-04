@@ -374,7 +374,7 @@ function ProfitStoryBlock({ story, tr, lang, compact }) {
  * @param {Record<string, unknown>} props.data — executive `data` or analysis dict with structured keys
  * @param {(k: string, p?: object) => string} props.tr
  * @param {string} props.lang
- * @param {'full' | 'command' | 'statements' | 'story_only' | 'board' | 'analysis_spine'} props.variant
+ * @param {'full' | 'command' | 'story_only' | 'board' | 'analysis_spine' | 'statements_formal_variance' | 'statements_interpretation' | 'statements_margin_section'} props.variant
  */
 export default function StructuredFinancialLayers({ data, tr, lang, variant = 'full' }) {
   if (!data || typeof data !== 'object') return null
@@ -564,25 +564,50 @@ export default function StructuredFinancialLayers({ data, tr, lang, variant = 'f
     return <ProfitStoryBlock story={story} tr={tr} lang={lang} compact={variant === 'board'} />
   }
 
-  if (variant === 'statements') {
-    const hasExtra =
-      (svar && Object.keys(svar).length) ||
-      (bridge && Object.keys(bridge).length) ||
-      story?.what_changed_key
-    if (!hasExtra) return null
+  if (variant === 'statements_formal_variance') {
+    if (!svar || typeof svar !== 'object' || !Object.keys(svar).length) return null
     return (
-      <div style={{ ...CARD_STYLE, marginBottom: 14, borderTop: '2px solid rgba(59,158,255,0.35)' }}>
-        <div style={{ ...H2, color: 'var(--blue)' }}>{tr('sfl_title_structured_context')}</div>
+      <div style={{ ...CARD_STYLE, marginBottom: 0, borderTop: '2px solid rgba(59,130,246,0.45)' }}>
+        <div style={{ ...H2, color: 'var(--blue)' }}>{tr('stmt_formal_is_title')}</div>
         {meta?.latest_period != null && meta?.previous_period != null && (
           <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: '0 0 12px' }}>
             {tr('sfl_period_compare', { from: meta.previous_period, to: meta.latest_period })}
           </p>
         )}
-        {svar ? <VarianceTable variance={svar} tr={tr} lang={lang} /> : null}
-        {smvar ? <MarginVarianceTable marginVar={smvar} tr={tr} lang={lang} /> : null}
-        {bridge ? (
+        <VarianceTable variance={svar} tr={tr} lang={lang} />
+      </div>
+    )
+  }
+
+  if (variant === 'statements_interpretation') {
+    const hasAny =
+      (svar && Object.keys(svar).length) ||
+      (bridge && typeof bridge === 'object' && Object.keys(bridge).length) ||
+      Boolean(story?.what_changed_key)
+    if (!hasAny) return null
+    return (
+      <div style={{ ...CARD_STYLE, marginBottom: 0, borderTop: '2px solid rgba(0,212,170,0.32)' }}>
+        <div style={{ ...H2, color: 'var(--accent)' }}>{tr('stmt_section_interpretation')}</div>
+        {svar && Object.keys(svar).length ? (
           <>
-            <div style={{ ...H2, marginTop: 14 }}>{tr('sfl_title_bridge')}</div>
+            <div
+              style={{
+                fontSize: 10,
+                fontWeight: 800,
+                color: 'var(--text-secondary)',
+                textTransform: 'uppercase',
+                letterSpacing: '.07em',
+                marginBottom: 8,
+              }}
+            >
+              {tr('stmt_interp_period_deltas')}
+            </div>
+            <VarianceSummaryList variance={svar} tr={tr} lang={lang} />
+          </>
+        ) : null}
+        {bridge && typeof bridge === 'object' && Object.keys(bridge).length ? (
+          <>
+            <div style={{ ...H2, marginTop: 14 }}>{tr('stmt_bridge_flow')}</div>
             <BridgeBlock bridge={bridge} tr={tr} lang={lang} />
           </>
         ) : null}
@@ -592,6 +617,16 @@ export default function StructuredFinancialLayers({ data, tr, lang, variant = 'f
             <ProfitStoryBlock story={story} tr={tr} lang={lang} compact />
           </>
         ) : null}
+      </div>
+    )
+  }
+
+  if (variant === 'statements_margin_section') {
+    if (!smvar || typeof smvar !== 'object' || !Object.keys(smvar).length) return null
+    return (
+      <div style={{ ...CARD_STYLE, marginBottom: 0, borderTop: '2px solid rgba(139,92,246,0.35)' }}>
+        <div style={{ ...H2, color: 'var(--violet)' }}>{tr('sfl_title_margin_var')}</div>
+        <MarginVarianceTable marginVar={smvar} tr={tr} lang={lang} showTitle={false} />
       </div>
     )
   }
