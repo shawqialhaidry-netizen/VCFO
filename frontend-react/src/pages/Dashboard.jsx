@@ -22,7 +22,15 @@ import { usePeriodScope } from '../context/PeriodScopeContext.jsx'
 import { buildAnalysisQuery } from '../utils/buildAnalysisQuery.js'
 
 import { hasFlag, safeIncludes } from '../utils/dataGuards.js'
-import { formatCompact, formatFull, formatDual, formatPct, formatMultiple, formatDays } from '../utils/numberFormat.js'
+import {
+  formatCompactForLang,
+  formatFullForLang,
+  formatPctForLang,
+  formatPpForLang,
+  formatMultipleForLang,
+  formatSignedPctForLang,
+  formatDays,
+} from '../utils/numberFormat.js'
 
 const API = '/api/v1'
 
@@ -138,12 +146,6 @@ function trDynamic(tr, text, maxLen) {
   return maxLen && result.length > maxLen ? result.slice(0, maxLen) : result
 }
 // ══════════════════════════════════════════════════════════════════════════════
-const EN = 'en-US'
-// fmtM → formatCompact (from numberFormat.js)
-const fmtP  = v => v == null ? '—' : new Intl.NumberFormat(EN, {maximumFractionDigits:1}).format(v) + '%'
-const fmtX  = v => v == null ? '—' : new Intl.NumberFormat(EN, {maximumFractionDigits:2}).format(v) + 'x'
-const fmtD  = v => v == null ? '—' : new Intl.NumberFormat(EN, {maximumFractionDigits:0}).format(v) + 'd'
-const fmtN  = v => v == null ? '—' : new Intl.NumberFormat(EN, {maximumFractionDigits:1}).format(v)
 const clr   = v => v==null?'#6b80a8':v>0?'#10d98a':v<0?'#ff4d6d':'#6b80a8'
 const arr   = v => v==null?'':v>0.3?'↑':v<-0.3?'↓':'→'
 const pSign = v => v==null?'':v>=0?'+':''
@@ -199,7 +201,7 @@ function kpiInsight(type, data, lang, tr) {
       const mom = kpis?.expenses?.mom_pct
       if (mom == null) return null
       const arrow = mom > 0 ? '↑' : '↓'
-      return `${arrow} ${Math.abs(mom).toFixed(1)}% ${tr('vs_prior_month')}`
+      return `${arrow} ${formatPctForLang(Math.abs(mom), 1, l)} ${tr('vs_prior_month')}`
     }
     case 'net_profit': {
       const st = ratios?.profitability?.net_margin_pct?.status
@@ -309,19 +311,22 @@ function KpiHoverTip({ visible, mom, type, tr }) {
 // ══════════════════════════════════════════════════════════════════════════════
 //  Drill-Down Modal
 // ══════════════════════════════════════════════════════════════════════════════
-function DrillModal({ kpiType, data, tr, onClose, ctxLabel }) {
+function DrillModal({ kpiType, data, tr, onClose, ctxLabel, lang }) {
   if (!kpiType) return null
   const d = data?.data || {}
   const series = d.kpi_block?.series || {}
   const periods = d.kpi_block?.periods || []
   const kpis = d.kpi_block?.kpis || {}
+  const fc = (v) =>
+    v == null || v === '' || !Number.isFinite(Number(v)) ? '—' : formatCompactForLang(Number(v), lang)
+  const fp = (v) => (v == null || !Number.isFinite(Number(v)) ? '—' : formatPctForLang(Number(v), 1, lang))
 
   const configs = {
-    revenue:   { key:kpiLabel(tr('kpi_total_revenue'),ctxLabel(), tr),  series:series.revenue,   color:C.accent,  fmt:formatCompact },
-    expenses:  { key:kpiLabel(tr('kpi_total_expenses'),ctxLabel(), tr), series:series.expenses,  color:C.red,     fmt:formatCompact },
-    net_profit:{ key:kpiLabel(tr('kpi_net_profit'),ctxLabel(), tr),     series:series.net_profit,color:C.green,   fmt:formatCompact },
-    net_margin:{ key:'kpi_net_margin',     series:series.net_margin, color:C.violet, fmt:fmtP },  // FIX-3.4: read from kpi_block, no frontend recalculation
-    cashflow:  { key:'cashflow_operating', series:d.cashflow?.series?.operating_cashflow, color:C.amber, fmt:formatCompact },
+    revenue:   { key:kpiLabel(tr('kpi_total_revenue'),ctxLabel(), tr),  series:series.revenue,   color:C.accent,  fmt:fc },
+    expenses:  { key:kpiLabel(tr('kpi_total_expenses'),ctxLabel(), tr), series:series.expenses,  color:C.red,     fmt:fc },
+    net_profit:{ key:kpiLabel(tr('kpi_net_profit'),ctxLabel(), tr),     series:series.net_profit,color:C.green,   fmt:fc },
+    net_margin:{ key:'kpi_net_margin',     series:series.net_margin, color:C.violet, fmt:fp },  // FIX-3.4: read from kpi_block, no frontend recalculation
+    cashflow:  { key:'cashflow_operating', series:d.cashflow?.series?.operating_cashflow, color:C.amber, fmt:fc },
   }
   const cfg = configs[kpiType]
   if (!cfg) return null
@@ -380,7 +385,11 @@ function DrillModal({ kpiType, data, tr, onClose, ctxLabel }) {
                       <td style={{padding:'7px 10px',color:isLast?cfg.color:C.text1,fontFamily:'monospace',fontWeight:isLast?700:400}}>{p}</td>
                       <td style={{padding:'7px 10px',textAlign:'right',color:C.text1,fontFamily:'monospace',fontWeight:600}}>{cfg.fmt(v)}</td>
                       <td style={{padding:'7px 10px',textAlign:'right',color:clr(pct)}}>
-                        {pct!=null?`${pSign(pct)}${fmtN(pct)}%`:'—'}
+                        {pct != null
+                          ? pct > 0
+                            ? `+${formatPctForLang(pct, 1, lang)}`
+                            : formatPctForLang(pct, 1, lang)
+                          : '—'}
                       </td>
                     </tr>
                   )
@@ -397,7 +406,7 @@ function DrillModal({ kpiType, data, tr, onClose, ctxLabel }) {
 // ══════════════════════════════════════════════════════════════════════════════
 //  Charts — always LTR, numbers always en-US
 // ══════════════════════════════════════════════════════════════════════════════
-function AreaChart({d1,d2,labels,c1=C.accent,c2=C.red,h=160,n1='',n2='',showBars=false}) {
+function AreaChart({ d1, d2, labels, c1 = C.accent, c2 = C.red, h = 160, n1 = '', n2 = '', showBars = false, lang = 'en' }) {
   const [tip,setTip]=useState(null); const ref=useRef(null)
   if (!d1||d1.length<2) return <div style={{height:h,display:'flex',alignItems:'center',justifyContent:'center',color:C.text2,fontSize:11}}>—</div>
   const all=[...d1.filter(Boolean),...(d2||[]).filter(Boolean)]
@@ -425,8 +434,8 @@ function AreaChart({d1,d2,labels,c1=C.accent,c2=C.red,h=160,n1='',n2='',showBars
     const r=ref.current?.getBoundingClientRect(); if(!r)return
     const sx=((e.clientX-r.left)/r.width)*W
     let bi=0,bd=1e9; d1.forEach((_,i)=>{const dd=Math.abs(toX(i)-sx);if(dd<bd){bd=dd;bi=i}})
-    const items=[{label:n1,value:formatCompact(d1[bi]),color:c1}]
-    if(d2) items.push({label:n2,value:formatCompact(d2[bi]),color:c2})
+    const items=[{label:n1,value:formatCompactForLang(d1[bi],lang),color:c1}]
+    if(d2) items.push({label:n2,value:formatCompactForLang(d2[bi],lang),color:c2})
     setTip({x:toX(bi)/W*r.width,y:toY(d1[bi]||0)/H*r.height,cw:r.width,ch:r.height,period:labels?.[bi]||`#${bi+1}`,items,idx:bi})
   }
   return (
@@ -439,7 +448,7 @@ function AreaChart({d1,d2,labels,c1=C.accent,c2=C.red,h=160,n1='',n2='',showBars
         {ticks.map((t,i)=>(
           <g key={i}>
             <line x1={PL} y1={toY(t)} x2={W-PR} y2={toY(t)} stroke="rgba(255,255,255,0.04)" strokeWidth="1"/>
-            <text x={PL-5} y={toY(t)+4} textAnchor="end" fontSize="10" fill={C.text2}>{t>=1000?`${(t/1000).toFixed(0)}k`:t.toFixed(0)}</text>
+            <text x={PL-5} y={toY(t)+4} textAnchor="end" fontSize="10" fill={C.text2}>{formatCompactForLang(t, lang)}</text>
           </g>
         ))}
         {showBars&&d1.map((v,i)=>{
@@ -468,7 +477,7 @@ function AreaChart({d1,d2,labels,c1=C.accent,c2=C.red,h=160,n1='',n2='',showBars
   )
 }
 
-function BarChart({data,labels,color=C.accent,h=110,name=''}) {
+function BarChart({ data, labels, color = C.accent, h = 110, name = '', lang = 'en' }) {
   const [tip,setTip]=useState(null); const [hov,setHov]=useState(null); const ref=useRef(null)
   if (!data||data.length<1) return null
   const W=600,H=h,PL=8,PR=8,PT=8,PB=22,wi=W-PL-PR,hi=H-PT-PB
@@ -482,7 +491,7 @@ function BarChart({data,labels,color=C.accent,h=110,name=''}) {
     const v=data[idx]; if(v==null){setTip(null);setHov(null);return}
     setHov(idx)
     setTip({x:(bx(idx)+bw/2)/W*r.width,y:(PT+hi-(Math.abs(v)/mx)*hi)/H*r.height,cw:r.width,ch:r.height,
-      period:labels?.[idx]||`#${idx+1}`,items:[{label:name,value:`${v>=0?'+':''}${fmtN(v)}%`,color:v>=0?C.green:C.red}]})
+      period:labels?.[idx]||`#${idx+1}`,items:[{label:name,value:formatSignedPctForLang(v, 1, lang),color:v>=0?C.green:C.red}]})
   }
   return (
     <div ref={ref} style={{position:'relative',direction:'ltr'}} onMouseMove={onMove} onMouseLeave={()=>{setTip(null);setHov(null)}}>
@@ -1076,7 +1085,7 @@ function TabNav({tabs,active,onChange}) {
 // ══════════════════════════════════════════════════════════════════════════════
 //  Variance Bridge
 // ══════════════════════════════════════════════════════════════════════════════
-function VarianceBridge({curr,prev,tr}) {
+function VarianceBridge({ curr, prev, tr, lang }) {
   if (!curr||!prev) return <div style={{color:C.text2,fontSize:12,textAlign:'center',padding:'20px 0'}}>{tr('var_insufficient')}</div>
   const rows=[
     {label:tr('kpi_total_revenue'),    curr:curr.revenue,     prev:prev.revenue,     color:C.accent},
@@ -1101,10 +1110,14 @@ function VarianceBridge({curr,prev,tr}) {
                 left:delta<0?`${100-barW}%`:0,background:isPos?C.green:C.red,opacity:.7,borderRadius:3}}/>
             </div>
             <span style={{fontSize:11,fontFamily:'monospace',color:isPos?C.green:C.red,fontWeight:700,textAlign:'right'}}>
-              {pSign(delta)}{formatCompact(delta)}
+              {pSign(delta)}{formatCompactForLang(delta, lang)}
             </span>
             <span style={{fontSize:10,color:isPos?C.green:C.red,textAlign:'right'}}>
-              {pct!=null?`${pSign(pct)}${fmtN(pct)}%`:'—'}
+              {pct != null
+                ? pct > 0
+                  ? `+${formatPctForLang(pct, 1, lang)}`
+                  : formatPctForLang(pct, 1, lang)
+                : '—'}
             </span>
           </div>
         )
@@ -1116,7 +1129,7 @@ function VarianceBridge({curr,prev,tr}) {
 // ══════════════════════════════════════════════════════════════════════════════
 //  Expense Breakdown
 // ══════════════════════════════════════════════════════════════════════════════
-function ExpenseBreakdown({items,total}) {
+function ExpenseBreakdown({ items, total, lang = 'en' }) {
   if (!items||!items.length) return <div style={{color:C.text2,fontSize:12,padding:'20px 0',textAlign:'center'}}>—</div>
   const colors=[C.violet,C.amber,C.blue,C.red,C.accent,C.green,'#ff9f43','#a29bfe']
   const top=items.slice(0,8)
@@ -1132,7 +1145,7 @@ function ExpenseBreakdown({items,total}) {
               <div style={{flex:1,minWidth:0}}>
                 <div style={{fontSize:11,color:C.text2,overflow:'hidden',textOverflow:'clip',whiteSpace:'nowrap'}}>{it.account_name}</div>
               </div>
-              <span style={{fontSize:11,fontWeight:700,color:C.text1,fontFamily:'monospace',direction:'ltr'}}>{formatCompact(Math.abs(it.amount))}</span>
+              <span style={{fontSize:11,fontWeight:700,color:C.text1,fontFamily:'monospace',direction:'ltr'}}>{formatCompactForLang(Math.abs(it.amount), lang)}</span>
               <span style={{fontSize:10,color:C.text2}}>{pct.toFixed(0)}%</span>
             </div>
           )
@@ -1173,10 +1186,10 @@ function BranchPanel({companyId,tr}) {
         {b.city&&<div style={{fontSize:10,color:C.text2}}>{b.city}</div>}
       </div>
       <div style={{textAlign:'right',flexShrink:0}}>
-        <div style={{fontSize:12,fontWeight:700,fontFamily:'monospace',color:C.accent,direction:'ltr'}}>{formatCompact(b.revenue)}</div>
-        {b.net_margin!=null&&<div style={{fontSize:9,color:clr(b.net_margin),fontFamily:'monospace',direction:'ltr'}}>{fmtP(b.net_margin)}</div>}
+        <div style={{fontSize:12,fontWeight:700,fontFamily:'monospace',color:C.accent,direction:'ltr'}}>{formatCompactForLang(b.revenue, lang)}</div>
+        {b.net_margin!=null&&<div style={{fontSize:9,color:clr(b.net_margin),fontFamily:'monospace',direction:'ltr'}}>{formatPctForLang(b.net_margin,1,lang)}</div>}
       </div>
-      {b.mom_revenue_pct!=null&&<span style={{fontSize:10,fontWeight:700,color:clr(b.mom_revenue_pct),minWidth:40,textAlign:'right',direction:'ltr'}}>{arr(b.mom_revenue_pct)}{Math.abs(b.mom_revenue_pct).toFixed(1)}%</span>}
+      {b.mom_revenue_pct!=null&&<span style={{fontSize:10,fontWeight:700,color:clr(b.mom_revenue_pct),minWidth:40,textAlign:'right',direction:'ltr'}}>{arr(b.mom_revenue_pct)}{b.mom_revenue_pct>0?`+${formatPctForLang(b.mom_revenue_pct,1,lang)}`:formatPctForLang(b.mom_revenue_pct,1,lang)}</span>}
     </div>
   ))
 }
@@ -1219,10 +1232,10 @@ function OverviewTab({data,tr,lang,onKpiClick}) {
         <Panel title={tr('chart_rev_vs_exp')}
           sub={`${p.length} ${tr('chart_months_label')} · ${data?.company_name||''}`}
           titleRight={<div style={{display:'flex',gap:12}}><Legend color={C.accent} label={tr('legend_revenue')}/><Legend color={C.red} label={tr('legend_expenses')}/></div>}>
-          <AreaChart d1={s.revenue} d2={s.expenses} labels={p} c1={C.accent} c2={C.red} h={180} n1={tr('legend_revenue')} n2={tr('legend_expenses')} showBars/>
+          <AreaChart lang={lang} d1={s.revenue} d2={s.expenses} labels={p} c1={C.accent} c2={C.red} h={180} n1={tr('legend_revenue')} n2={tr('legend_expenses')} showBars/>
         </Panel>
         <Panel title={tr('kpi_net_profit')}>
-          <AreaChart d1={s.net_profit} labels={p} c1={C.green} h={180} n1={tr('kpi_net_profit')}/>
+          <AreaChart lang={lang} d1={s.net_profit} labels={p} c1={C.green} h={180} n1={tr('kpi_net_profit')}/>
         </Panel>
       </div>
       {cf?.operating_cashflow!=null&&(
@@ -1235,13 +1248,13 @@ function OverviewTab({data,tr,lang,onKpiClick}) {
           return <Chip label={inner} color={qc}/>
         })()}>
           <div style={{display:'grid',gridTemplateColumns:'1fr 280px',gap:14}}>
-            <AreaChart d1={cf.series?.operating_cashflow} d2={cf.series?.net_profit} labels={cf.series?.periods} c1={C.accent} c2={C.violet} h={140} n1={tr('cashflow_ocf_label')} n2={tr('kpi_net_profit')}/>
+            <AreaChart lang={lang} d1={cf.series?.operating_cashflow} d2={cf.series?.net_profit} labels={cf.series?.periods} c1={C.accent} c2={C.violet} h={140} n1={tr('cashflow_ocf_label')} n2={tr('kpi_net_profit')}/>
             <div style={{display:'flex',flexDirection:'column',gap:8}}>
               {[
-                {lbl:tr('cashflow_operating'),val:formatCompact(cf.operating_cashflow),c:(cf.operating_cashflow||0)>=0?C.accent:C.red,sub:cf.operating_cashflow_mom!=null?`${arr(cf.operating_cashflow_mom)} ${Math.abs(cf.operating_cashflow_mom).toFixed(1)}% ${tr('mom_label')}`:null},
-                {lbl:tr('cashflow_free'),val:cf.free_cashflow!=null?formatCompact(cf.free_cashflow):'—',c:(cf.free_cashflow||0)>=0?C.green:C.red,sub:hasFlag(cf.flags,'capex_missing')?tr('cashflow_capex_unknown'):null},
-                {lbl:tr('cashflow_balance'),val:formatCompact(cf.cash_balance),c:C.blue,sub:tr('cashflow_available')},
-                {lbl:tr('cashflow_quality_title'),val:cf.quality?.cash_conversion_ratio!=null?`${fmtN(cf.quality.cash_conversion_ratio)}x`:'—',c:C.violet},
+                {lbl:tr('cashflow_operating'),val:formatCompactForLang(cf.operating_cashflow,lang),c:(cf.operating_cashflow||0)>=0?C.accent:C.red,sub:cf.operating_cashflow_mom!=null?`${arr(cf.operating_cashflow_mom)} ${cf.operating_cashflow_mom>0?`+${formatPctForLang(cf.operating_cashflow_mom,1,lang)}`:formatPctForLang(cf.operating_cashflow_mom,1,lang)} ${tr('mom_label')}`:null},
+                {lbl:tr('cashflow_free'),val:cf.free_cashflow!=null?formatCompactForLang(cf.free_cashflow,lang):'—',c:(cf.free_cashflow||0)>=0?C.green:C.red,sub:hasFlag(cf.flags,'capex_missing')?tr('cashflow_capex_unknown'):null},
+                {lbl:tr('cashflow_balance'),val:formatCompactForLang(cf.cash_balance,lang),c:C.blue,sub:tr('cashflow_available')},
+                {lbl:tr('cashflow_quality_title'),val:cf.quality?.cash_conversion_ratio!=null?formatMultipleForLang(cf.quality.cash_conversion_ratio,2,lang):'—',c:C.violet},
               ].map((x,i)=><MiniCard key={i} label={x.lbl} value={x.val} color={x.c} sub={x.sub}/>)}
             </div>
           </div>
@@ -1265,10 +1278,10 @@ function OverviewTab({data,tr,lang,onKpiClick}) {
             {[
               {lbl:tr('overview_periods'),val:meta.period_count??'—',c:C.accent},
               {lbl:tr('overview_latest'),val:p.at(-1)??'—',c:C.text1},
-              {lbl:tr('overview_op_margin'),val:fmtP(k.operating_margin?.value),c:C.green},
-              {lbl:tr('overview_quick_ratio'),val:liq.quick_ratio!=null?fmtX(liq.quick_ratio):'—',c:C.blue},
-              {lbl:tr('prof_ccc'),val:fmtD(data?.analysis?.latest?.efficiency?.ccc_days),c:C.violet},
-              {lbl:tr('kpi_ebitda_margin'),val:fmtP(d.advanced_metrics?.profitability?.ebitda_margin_pct),c:C.amber},
+              {lbl:tr('overview_op_margin'),val:formatPctForLang(k.operating_margin?.value,1,lang),c:C.green},
+              {lbl:tr('overview_quick_ratio'),val:liq.quick_ratio!=null?formatMultipleForLang(liq.quick_ratio,2,lang):'—',c:C.blue},
+              {lbl:tr('prof_ccc'),val:formatDays(data?.analysis?.latest?.efficiency?.ccc_days),c:C.violet},
+              {lbl:tr('kpi_ebitda_margin'),val:formatPctForLang(d.advanced_metrics?.profitability?.ebitda_margin_pct,1,lang),c:C.amber},
             ].map((r,i)=>(
               <div key={i} style={{background:BG.panel,border:`1px solid ${BG.border}`,borderRadius:8,padding:'9px 11px'}}>
                 <div style={{fontSize:10,color:C.text2,textTransform:'uppercase',letterSpacing:'.06em',marginBottom:4}}>{r.lbl}</div>
@@ -1288,7 +1301,7 @@ function OverviewTab({data,tr,lang,onKpiClick}) {
 // ══════════════════════════════════════════════════════════════════════════════
 //  TAB 2: Expense Analysis — with intelligence layer
 // ══════════════════════════════════════════════════════════════════════════════
-function ExpenseTab({data,tr}) {
+function ExpenseTab({ data, tr, lang }) {
   const d = data?.data || {}
   const bundle = d.statements || {}
   const latIS = bundle?.income_statement || null
@@ -1329,8 +1342,11 @@ function ExpenseTab({data,tr}) {
             {topRising&&(
               <div style={{fontSize:11,color:C.text2}}>
                 <span style={{fontWeight:600,color:C.text1}}>{topRising.account_name}</span>
-                {' '}{tr('exp_spike_pct')} <span style={{color:C.red,fontWeight:700,direction:'ltr',display:'inline-block'}}>{pSign(topRising.pct)}{fmtN(topRising.pct)}%</span>
-                {' '}({tr('exp_vs_rev_label')}: {fmtP(Math.abs(topRising.amount)/totalRev*100)})
+                {' '}{tr('exp_spike_pct')}{' '}
+                <span style={{color:C.red,fontWeight:700,direction:'ltr',display:'inline-block'}}>
+                  {formatSignedPctForLang(topRising.pct, 1, lang)}
+                </span>
+                {' '}({tr('exp_vs_rev_label')}: {formatPctForLang(Math.abs(topRising.amount)/totalRev*100,1,lang)})
               </div>
             )}
             {!topRising&&<div style={{fontSize:11,color:C.text2}}>{tr('exp_no_spike')}</div>}
@@ -1341,19 +1357,19 @@ function ExpenseTab({data,tr}) {
       {/* Cost structure summary */}
       <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:12}}>
         {[
-          {lbl:`${tr('exp_cogs_label')} %`,val:fmtP(cs.latest_cogs_pct),sub:`avg ${fmtP(cs.avg_cogs_pct)}`,c:C.amber,icon:'📦'},
-          {lbl:`${tr('exp_opex_label')} %`,val:fmtP(cs.latest_opex_pct),sub:`avg ${fmtP(cs.avg_opex_pct)}`,c:C.violet,icon:'⚙️'},
-          {lbl:tr('exp_total_load'),val:fmtP((cs.latest_cogs_pct||0)+(cs.latest_opex_pct||0)),sub:tr('exp_of_revenue'),c:((cs.latest_cogs_pct||0)+(cs.latest_opex_pct||0))>90?C.red:C.green,icon:'📊'},
-          {lbl:tr('exp_structure'),val:cs.cost_structure_type||'—',sub:`${tr('exp_cogs_label')}:${tr('exp_opex_label')} = ${fmtX(cs.cogs_to_opex_ratio)}`,c:C.accent,icon:'⚖️'},
+          {lbl:`${tr('exp_cogs_label')} %`,val:formatPctForLang(cs.latest_cogs_pct,1,lang),sub:`avg ${formatPctForLang(cs.avg_cogs_pct,1,lang)}`,c:C.amber,icon:'📦'},
+          {lbl:`${tr('exp_opex_label')} %`,val:formatPctForLang(cs.latest_opex_pct,1,lang),sub:`avg ${formatPctForLang(cs.avg_opex_pct,1,lang)}`,c:C.violet,icon:'⚙️'},
+          {lbl:tr('exp_total_load'),val:formatPctForLang((cs.latest_cogs_pct||0)+(cs.latest_opex_pct||0),1,lang),sub:tr('exp_of_revenue'),c:((cs.latest_cogs_pct||0)+(cs.latest_opex_pct||0))>90?C.red:C.green,icon:'📊'},
+          {lbl:tr('exp_structure'),val:cs.cost_structure_type||'—',sub:`${tr('exp_cogs_label')}:${tr('exp_opex_label')} = ${formatMultipleForLang(cs.cogs_to_opex_ratio,2,lang)}`,c:C.accent,icon:'⚖️'},
         ].map((x,i)=><MiniCard key={i} label={x.lbl} value={x.val} color={x.c} sub={x.sub} icon={x.icon}/>)}
       </div>
 
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:14}}>
-      <Panel title={tr('exp_breakdown')} sub={`${tr('exp_period_label')}: ${latIS.period||'—'} · ${formatCompact(totalExp)}`}>
-          <ExpenseBreakdown items={expItems} total={totalExp}/>
+      <Panel title={tr('exp_breakdown')} sub={`${tr('exp_period_label')}: ${latIS.period||'—'} · ${formatCompactForLang(totalExp, lang)}`}>
+          <ExpenseBreakdown items={expItems} total={totalExp} lang={lang}/>
         </Panel>
-        <Panel title={tr('exp_cogs_title')} sub={`${fmtP(cs.latest_cogs_pct)} ${tr('exp_of_revenue')} · ${formatCompact(totalCogs)}`}>
-          <ExpenseBreakdown items={cogsItems} total={totalCogs}/>
+        <Panel title={tr('exp_cogs_title')} sub={`${formatPctForLang(cs.latest_cogs_pct, 1, lang)} ${tr('exp_of_revenue')} · ${formatCompactForLang(totalCogs, lang)}`}>
+          <ExpenseBreakdown items={cogsItems} total={totalCogs} lang={lang}/>
         </Panel>
       </div>
 
@@ -1376,10 +1392,10 @@ function ExpenseTab({data,tr}) {
                 <div style={{background:BG.card,borderRadius:3,height:12,overflow:'hidden',position:'relative'}}>
                   <div style={{position:'absolute',left:0,top:0,height:'100%',width:`${barW}%`,background:isSpike?C.red:C.violet,opacity:.6,borderRadius:3}}/>
                 </div>
-                <span style={{fontSize:11,fontWeight:700,fontFamily:'monospace',color:C.text1,textAlign:'right'}}>{formatCompact(Math.abs(it.amount))}</span>
-                <span style={{fontSize:10,color:C.text2,textAlign:'right'}}>{totalRev?fmtP(Math.abs(it.amount)/totalRev*100):'—'}</span>
+                <span style={{fontSize:11,fontWeight:700,fontFamily:'monospace',color:C.text1,textAlign:'right'}}>{formatCompactForLang(Math.abs(it.amount), lang)}</span>
+                <span style={{fontSize:10,color:C.text2,textAlign:'right'}}>{totalRev?formatPctForLang(Math.abs(it.amount)/totalRev*100,1,lang):'—'}</span>
                 {delta!=null
-                  ?<span style={{fontSize:10,fontWeight:700,color:isUp?C.red:C.green,textAlign:'right'}}>{pSign(delta)}{formatCompact(delta)}</span>
+                  ?<span style={{fontSize:10,fontWeight:700,color:isUp?C.red:C.green,textAlign:'right'}}>{pSign(delta)}{formatCompactForLang(delta, lang)}</span>
                   :<span style={{fontSize:10,color:C.text2,textAlign:'right'}}>—</span>}
               </div>
             )
@@ -1394,7 +1410,7 @@ function ExpenseTab({data,tr}) {
 
       <Panel title={tr('exp_trend')} sub={`${tPerds.length} ${tr('gen_periods')}`}
         titleRight={<div style={{display:'flex',gap:12}}><Legend color={C.amber} label={tr('exp_opex_label')}/><Legend color={C.red} label={tr('exp_cogs_label')}/></div>}>
-        <AreaChart d1={trends.expenses_series} d2={trends.cogs_series} labels={tPerds} c1={C.amber} c2={C.red} h={160} n1={tr('exp_opex_label')} n2={tr('exp_cogs_label')}/>
+        <AreaChart lang={lang} d1={trends.expenses_series} d2={trends.cogs_series} labels={tPerds} c1={C.amber} c2={C.red} h={160} n1={tr('exp_opex_label')} n2={tr('exp_cogs_label')}/>
       </Panel>
     </div>
   )
@@ -1403,7 +1419,7 @@ function ExpenseTab({data,tr}) {
 // ══════════════════════════════════════════════════════════════════════════════
 //  TAB 3: Variance
 // ══════════════════════════════════════════════════════════════════════════════
-function VarianceTab({data,tr}) {
+function VarianceTab({ data, tr, lang }) {
   const d = data?.data || {}
   // Executive /analysis/{id}/executive returns data.statements as statement_engine bundle:
   // { income_statement, balance_sheet, cashflow, series, summary, insights } — not { period: stmt }.
@@ -1455,16 +1471,23 @@ function VarianceTab({data,tr}) {
       </div>
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:14}}>
         <Panel title={tr('var_bridge_title')} sub={`${latP||'—'} vs ${prevP||'—'}`}>
-          <VarianceBridge curr={curr} prev={prev} tr={tr}/>
+          <VarianceBridge curr={curr} prev={prev} tr={tr} lang={lang}/>
         </Panel>
-        <Panel title={tr('var_yoy_label')} sub={yoy?`${tr('var_yoy_revenue')}: ${pSign(d.intelligence?.trends?.revenue?.yoy_change)}${fmtN(d.intelligence?.trends?.revenue?.yoy_change)}%`:tr('var_yoy_upload_hint')}>
+        <Panel
+          title={tr('var_yoy_label')}
+          sub={
+            yoy
+              ? `${tr('var_yoy_revenue')}: ${formatSignedPctForLang(d.intelligence?.trends?.revenue?.yoy_change, 1, lang)}`
+              : tr('var_yoy_upload_hint')
+          }
+        >
           {yoy?(
             <div style={{display:'flex',flexDirection:'column',gap:8}}>
               {[{lbl:tr('var_yoy_revenue'),val:d.intelligence?.trends?.revenue?.yoy_change,c:C.accent},{lbl:tr('var_yoy_np'),val:d.intelligence?.trends?.net_profit?.yoy_change,c:C.green}].map((r,i)=>(
                 <div key={i} style={{background:BG.panel,borderRadius:9,padding:'12px 14px',border:`1px solid ${BG.border}`}}>
                   <div style={{fontSize:10,color:C.text2,marginBottom:4}}>{r.lbl}</div>
                   <div style={{fontFamily:'var(--font-display)',fontSize:22,fontWeight:800,color:clr(r.val),direction:'ltr'}}>
-                    {r.val!=null?`${pSign(r.val)}${fmtN(r.val)}%`:'—'}
+                    {r.val != null ? formatSignedPctForLang(r.val, 1, lang) : '—'}
                   </div>
                 </div>
               ))}
@@ -1479,10 +1502,10 @@ function VarianceTab({data,tr}) {
       </div>
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:14}}>
         <Panel title={tr('var_mom_revenue')} sub={tr('var_mom_growth')}>
-          <BarChart data={momSer.revenue} labels={kPerds} color={C.accent} h={120} name={tr('var_mom_revenue')}/>
+          <BarChart lang={lang} data={momSer.revenue} labels={kPerds} color={C.accent} h={120} name={tr('var_mom_revenue')}/>
         </Panel>
         <Panel title={tr('var_mom_np')} sub={tr('var_mom_growth')}>
-          <BarChart data={momSer.net_profit} labels={kPerds} color={C.green} h={120} name={tr('var_mom_np')}/>
+          <BarChart lang={lang} data={momSer.net_profit} labels={kPerds} color={C.green} h={120} name={tr('var_mom_np')}/>
         </Panel>
       </div>
       <Panel title={tr('var_rolling_summary')}>
@@ -1505,13 +1528,13 @@ function VarianceTab({data,tr}) {
                 return (
                   <tr key={p} style={{borderBottom:`1px solid ${BG.border2}`,background:last?`${C.accent}08`:'transparent'}}>
                     <td style={{padding:'7px 10px',color:last?C.accent:C.text2,fontFamily:'monospace',fontWeight:last?700:400}}>{p}</td>
-                    <td style={{padding:'7px 10px',textAlign:'right',color:C.text1,fontFamily:'monospace'}}>{formatCompact(rev)}</td>
-                    <td style={{padding:'7px 10px',textAlign:'right',color:C.amber,fontFamily:'monospace'}}>{formatCompact(cogs)}</td>
-                    <td style={{padding:'7px 10px',textAlign:'right',color:C.blue,fontFamily:'monospace',fontWeight:600}}>{formatCompact(gp)}</td>
-                    <td style={{padding:'7px 10px',textAlign:'right',color:clr(gm)}}>{fmtP(gm)}</td>
-                    <td style={{padding:'7px 10px',textAlign:'right',color:C.red,fontFamily:'monospace'}}>{formatCompact(exp)}</td>
-                    <td style={{padding:'7px 10px',textAlign:'right',color:clr(np),fontFamily:'monospace',fontWeight:600}}>{formatCompact(np)}</td>
-                    <td style={{padding:'7px 10px',textAlign:'right',color:clr(nm)}}>{fmtP(nm)}</td>
+                    <td style={{padding:'7px 10px',textAlign:'right',color:C.text1,fontFamily:'monospace'}}>{formatCompactForLang(rev, lang)}</td>
+                    <td style={{padding:'7px 10px',textAlign:'right',color:C.amber,fontFamily:'monospace'}}>{formatCompactForLang(cogs, lang)}</td>
+                    <td style={{padding:'7px 10px',textAlign:'right',color:C.blue,fontFamily:'monospace',fontWeight:600}}>{formatCompactForLang(gp, lang)}</td>
+                    <td style={{padding:'7px 10px',textAlign:'right',color:clr(gm)}}>{formatPctForLang(gm, 1, lang)}</td>
+                    <td style={{padding:'7px 10px',textAlign:'right',color:C.red,fontFamily:'monospace'}}>{formatCompactForLang(exp, lang)}</td>
+                    <td style={{padding:'7px 10px',textAlign:'right',color:clr(np),fontFamily:'monospace',fontWeight:600}}>{formatCompactForLang(np, lang)}</td>
+                    <td style={{padding:'7px 10px',textAlign:'right',color:clr(nm)}}>{formatPctForLang(nm, 1, lang)}</td>
                   </tr>
                 )
               })}
@@ -1526,7 +1549,7 @@ function VarianceTab({data,tr}) {
 // ══════════════════════════════════════════════════════════════════════════════
 //  TAB 4: Profitability — executive language
 // ══════════════════════════════════════════════════════════════════════════════
-function ProfitabilityTab({data,tr,ctxLabel}) {
+function ProfitabilityTab({ data, tr, ctxLabel, lang }) {
   const d = data?.data || {}
   const trends=d.intelligence?.trends||{}, periods=trends.periods||[]
   const adv=d.advanced_metrics?.profitability||{}
@@ -1543,7 +1566,7 @@ function ProfitabilityTab({data,tr,ctxLabel}) {
   const dolExecMsg = dol!=null
     ? (dol>3 ? tr('exec_dol_high') : dol>1.5 ? tr('exec_dol_medium') : tr('exec_dol_low'))
     : null
-  const dolDetail = dol!=null ? `${tr('exec_dol_explain')} ${fmtN(dol)}%` : null
+  const dolDetail = dol!=null ? `${tr('exec_dol_explain')} ${formatPctForLang(dol,1,lang)}` : null
 
   // Executive language for efficiency
   const dsoMsg=eff.dso_days!=null?(eff.dso_days>45?tr('exec_dso_high'):tr('exec_dso_normal')):null
@@ -1554,11 +1577,11 @@ function ProfitabilityTab({data,tr,ctxLabel}) {
     <div style={{display:'flex',flexDirection:'column',gap:16}}>
       <div style={{display:'grid',gridTemplateColumns:'repeat(5,1fr)',gap:12}}>
         {[
-          {lbl:kpiLabel(tr('prof_gross_margin'),ctxLabel(), tr),val:fmtP(latest.gross_margin_pct),avg:fmtP(adv.avg_gross_margin_pct),c:C.green,icon:'📈'},
-          {lbl:kpiLabel(tr('prof_op_margin'),ctxLabel(), tr),val:fmtP(latest.operating_margin_pct),avg:'—',c:C.violet,icon:'⚙️'},
-          {lbl:kpiLabel(tr('prof_net_margin'),ctxLabel(), tr),val:fmtP(latest.net_margin_pct),avg:fmtP(adv.avg_net_margin_pct),c:C.accent,icon:'💰'},
-          {lbl:tr('prof_ebitda_margin'),val:fmtP(adv.ebitda_margin_pct),avg:'—',c:C.amber,icon:'🏦'},
-          {lbl:tr('prof_incr_margin'),val:fmtP(adv.incremental_margin_pct),avg:'—',c:C.blue,icon:'📊'},
+          {lbl:kpiLabel(tr('prof_gross_margin'),ctxLabel(), tr),val:formatPctForLang(latest.gross_margin_pct,1,lang),avg:formatPctForLang(adv.avg_gross_margin_pct,1,lang),c:C.green,icon:'📈'},
+          {lbl:kpiLabel(tr('prof_op_margin'),ctxLabel(), tr),val:formatPctForLang(latest.operating_margin_pct,1,lang),avg:'—',c:C.violet,icon:'⚙️'},
+          {lbl:kpiLabel(tr('prof_net_margin'),ctxLabel(), tr),val:formatPctForLang(latest.net_margin_pct,1,lang),avg:formatPctForLang(adv.avg_net_margin_pct,1,lang),c:C.accent,icon:'💰'},
+          {lbl:tr('prof_ebitda_margin'),val:formatPctForLang(adv.ebitda_margin_pct,1,lang),avg:'—',c:C.amber,icon:'🏦'},
+          {lbl:tr('prof_incr_margin'),val:formatPctForLang(adv.incremental_margin_pct,1,lang),avg:'—',c:C.blue,icon:'📊'},
         ].map((x,i)=>(
           <div key={i} style={{background:BG.panel,borderWidth:'2px 1px 1px 1px',borderStyle:'solid',borderColor:`${x.c} ${BG.border} ${BG.border} ${BG.border}`,borderRadius:12,padding:'14px 16px'}}>
             <div style={{display:'flex',alignItems:'center',gap:5,marginBottom:6}}>
@@ -1572,23 +1595,23 @@ function ProfitabilityTab({data,tr,ctxLabel}) {
       </div>
       <Panel title={tr('prof_margin_trends')} sub={`${periods.length} ${tr('gen_periods')}`}
         titleRight={<div style={{display:'flex',gap:12}}><Legend color={C.green} label={tr('prof_gross_label')}/><Legend color={C.amber} label={tr('prof_net_label')}/></div>}>
-        <AreaChart d1={gmSeries} d2={nmSeries} labels={periods} c1={C.green} c2={C.amber} h={180} n1={tr('chart_gross_margin')} n2={tr('chart_net_margin')}/>
+        <AreaChart lang={lang} d1={gmSeries} d2={nmSeries} labels={periods} c1={C.green} c2={C.amber} h={180} n1={tr('chart_gross_margin')} n2={tr('chart_net_margin')}/>
       </Panel>
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:14}}>
         <Panel title={tr('prof_leverage_title')} sub={tr('prof_leverage_sub')}>
           <div style={{marginBottom:12}}>
             <div style={{fontFamily:'var(--font-display)',fontSize:36,fontWeight:800,color:dol!=null&&dol>3?C.amber:C.green,lineHeight:1,direction:'ltr'}}>
-              {dol!=null?`${fmtN(dol)}x`:'—'}
+              {dol!=null?formatMultipleForLang(dol,2,lang):'—'}
             </div>
             {dolExecMsg&&<div style={{fontSize:12,fontWeight:600,color:dol>3?C.amber:C.green,marginTop:8,lineHeight:1.4}}>{dolExecMsg}</div>}
             {dolDetail&&<div style={{fontSize:11,color:C.text2,marginTop:4,lineHeight:1.5}}>{dolDetail}</div>}
           </div>
           <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
             {[
-              {lbl:tr('prof_cm'),val:formatCompact(adv.contribution_margin),c:C.accent},
-              {lbl:tr('prof_cm_pct'),val:fmtP(adv.contribution_margin_pct),c:C.accent},
-              {lbl:tr('prof_ebitda'),val:formatCompact(adv.ebitda),c:C.amber},
-              {lbl:tr('prof_da_estimate'),val:formatCompact(adv.ebitda_da_estimate),c:C.text2},
+              {lbl:tr('prof_cm'),val:formatCompactForLang(adv.contribution_margin,lang),c:C.accent},
+              {lbl:tr('prof_cm_pct'),val:formatPctForLang(adv.contribution_margin_pct,1,lang),c:C.accent},
+              {lbl:tr('prof_ebitda'),val:formatCompactForLang(adv.ebitda,lang),c:C.amber},
+              {lbl:tr('prof_da_estimate'),val:formatCompactForLang(adv.ebitda_da_estimate,lang),c:C.text2},
             ].map((r,i)=>(
               <div key={i} style={{background:BG.card,borderRadius:7,padding:'8px 10px',border:`1px solid ${BG.border}`}}>
                 <div style={{fontSize:10,color:C.text2,marginBottom:3}}>{r.lbl}</div>
@@ -1603,14 +1626,14 @@ function ProfitabilityTab({data,tr,ctxLabel}) {
           {cccMsg&&<div style={{fontSize:11,color:eff.ccc_days>60?C.amber:C.green,marginBottom:12}}>{cccMsg}</div>}
           <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
             {[
-              {lbl:tr('prof_current_ratio'),val:liq.current_ratio!=null?fmtX(liq.current_ratio):'—',c:liq.current_ratio>=1?C.green:C.red},
-              {lbl:tr('prof_quick_ratio'),val:liq.quick_ratio!=null?fmtX(liq.quick_ratio):'—',c:(liq.quick_ratio||0)>=0.8?C.green:C.red},
-              {lbl:tr('prof_dso'),val:fmtD(eff.dso_days),c:eff.dso_days!=null&&eff.dso_days>45?C.amber:C.green},
-              {lbl:tr('prof_dpo'),val:fmtD(eff.dpo_days),c:C.blue},
-              {lbl:tr('prof_dio'),val:fmtD(eff.dio_days),c:C.violet},
-              {lbl:tr('prof_ccc'),val:fmtD(eff.ccc_days),c:eff.ccc_days!=null&&eff.ccc_days<30?C.green:C.amber},
-              {lbl:tr('prof_inv_turnover'),val:eff.inventory_turnover!=null?fmtX(eff.inventory_turnover):'—',c:C.accent},
-              {lbl:tr('prof_wc'),val:formatCompact(liq.working_capital),c:(liq.working_capital||0)>=0?C.green:C.red},
+              {lbl:tr('prof_current_ratio'),val:liq.current_ratio!=null?formatMultipleForLang(liq.current_ratio,2,lang):'—',c:liq.current_ratio>=1?C.green:C.red},
+              {lbl:tr('prof_quick_ratio'),val:liq.quick_ratio!=null?formatMultipleForLang(liq.quick_ratio,2,lang):'—',c:(liq.quick_ratio||0)>=0.8?C.green:C.red},
+              {lbl:tr('prof_dso'),val:formatDays(eff.dso_days),c:eff.dso_days!=null&&eff.dso_days>45?C.amber:C.green},
+              {lbl:tr('prof_dpo'),val:formatDays(eff.dpo_days),c:C.blue},
+              {lbl:tr('prof_dio'),val:formatDays(eff.dio_days),c:C.violet},
+              {lbl:tr('prof_ccc'),val:formatDays(eff.ccc_days),c:eff.ccc_days!=null&&eff.ccc_days<30?C.green:C.amber},
+              {lbl:tr('prof_inv_turnover'),val:eff.inventory_turnover!=null?formatMultipleForLang(eff.inventory_turnover,2,lang):'—',c:C.accent},
+              {lbl:tr('prof_wc'),val:formatCompactForLang(liq.working_capital,lang),c:(liq.working_capital||0)>=0?C.green:C.red},
             ].map((r,i)=>(
               <div key={i} style={{background:BG.card,borderRadius:7,padding:'8px 10px',border:`1px solid ${BG.border}`}}>
                 <div style={{fontSize:10,color:C.text2,marginBottom:3}}>{r.lbl}</div>
@@ -1621,7 +1644,7 @@ function ProfitabilityTab({data,tr,ctxLabel}) {
         </Panel>
       </div>
       <Panel title={tr('prof_revenue_growth')} titleRight={<div style={{display:'flex',gap:12}}><Legend color={C.accent} label={tr('legend_revenue')}/><Legend color={C.green} label={tr('kpi_net_profit')}/></div>}>
-        <AreaChart d1={series.revenue} d2={series.net_profit} labels={kPerds} c1={C.accent} c2={C.green} h={160} n1={tr('legend_revenue')} n2={tr('kpi_net_profit')}/>
+        <AreaChart lang={lang} d1={series.revenue} d2={series.net_profit} labels={kPerds} c1={C.accent} c2={C.green} h={160} n1={tr('legend_revenue')} n2={tr('kpi_net_profit')}/>
       </Panel>
     </div>
   )
@@ -1642,8 +1665,8 @@ function DecisionsTab({data,tSig,tSub,tr,selectedId,lang}) {
         {[
           {lbl:tr('dec_risk_rating'),val:d.advanced_metrics?.risk?.risk_rating||'—',c:{low:C.green,medium:C.amber,high:C.red,critical:C.red}[d.advanced_metrics?.risk?.risk_rating]||C.text2},
           {lbl:tr('dec_risk_factors'),val:d.advanced_metrics?.risk?.risk_factor_count??'—',c:C.text1},
-          {lbl:tr('dec_earn_consistency'),val:d.advanced_metrics?.risk?.earnings_consistency?.consistency_score!=null?`${fmtN(d.advanced_metrics?.risk.earnings_consistency.consistency_score)}/100`:'—',c:C.accent},
-          {lbl:tr('dec_rev_stability'),val:d.advanced_metrics?.risk?.revenue_stability?.stability_score!=null?`${fmtN(d.advanced_metrics?.risk.revenue_stability.stability_score)}/100`:'—',c:C.blue},
+          {lbl:tr('dec_earn_consistency'),val:d.advanced_metrics?.risk?.earnings_consistency?.consistency_score!=null?`${formatFullForLang(d.advanced_metrics?.risk.earnings_consistency.consistency_score, lang)}/100`:'—',c:C.accent},
+          {lbl:tr('dec_rev_stability'),val:d.advanced_metrics?.risk?.revenue_stability?.stability_score!=null?`${formatFullForLang(d.advanced_metrics?.risk.revenue_stability.stability_score, lang)}/100`:'—',c:C.blue},
         ].map((r,i)=>(
           <div key={i} style={{display:'flex',justifyContent:'space-between',padding:'7px 0',borderBottom:`1px solid ${BG.border2}`}}>
             <span style={{fontSize:11,color:C.text2}}>{r.lbl}</span>
@@ -1696,10 +1719,9 @@ function WhatIfPanel({data,tr,selectedId}) {
     finally { setLoading(false) }
   }
 
-  const fmtV = v => v==null?'—':new Intl.NumberFormat('en-US',{maximumFractionDigits:0}).format(v)
-  const fmtP = v => v==null?'—':v.toFixed(1)+'%'
-  const diffClr = v => v==null?C.text2:v>0?C.green:v<0?C.red:C.text2
-  const diffFmt = v => v==null?null:(v>0?'+':'')+v.toFixed(1)+'%'
+  const fmtV = (v) => (v == null ? '—' : formatFullForLang(v, lang))
+  const diffClr = (v) => (v == null ? C.text2 : v > 0 ? C.green : v < 0 ? C.red : C.text2)
+  const diffFmt = (v) => (v == null ? null : formatSignedPctForLang(Number(v), 1, lang))
 
   const inputStyle = INPUT_DARK
   const labelStyle = {fontSize:10,color:C.text2,fontWeight:600,
@@ -1789,7 +1811,7 @@ function WhatIfPanel({data,tr,selectedId}) {
             {[
               {label:tr('wi_revenue'),   val:fmtV(result.baseline?.revenue),   color:C.accent},
               {label:tr('wi_net_profit'),val:fmtV(result.baseline?.net_profit),color:C.green},
-              {label:tr('wi_net_margin'),val:fmtP(result.baseline?.net_margin_pct),color:C.violet},
+              {label:tr('wi_net_margin'),val:formatPctForLang(result.baseline?.net_margin_pct, 1, lang),color:C.violet},
             ].map(({label,val,color})=>(
               <div key={label} style={{display:'flex',justifyContent:'space-between',
                 alignItems:'center',marginBottom:6}}>
@@ -1809,7 +1831,7 @@ function WhatIfPanel({data,tr,selectedId}) {
             {[
               {label:tr('wi_revenue'),   val:fmtV(result.scenario?.revenue),   color:C.accent},
               {label:tr('wi_net_profit'),val:fmtV(result.scenario?.net_profit),color:C.green},
-              {label:tr('wi_net_margin'),val:fmtP(result.scenario?.net_margin_pct),color:C.violet},
+              {label:tr('wi_net_margin'),val:formatPctForLang(result.scenario?.net_margin_pct, 1, lang),color:C.violet},
             ].map(({label,val,color})=>(
               <div key={label} style={{display:'flex',justifyContent:'space-between',
                 alignItems:'center',marginBottom:6}}>
@@ -1829,13 +1851,14 @@ function WhatIfPanel({data,tr,selectedId}) {
               {label:tr('wi_revenue'),   val:diffFmt(result.impact?.revenue_pct_change)},
               {label:tr('wi_net_profit'),val:diffFmt(result.impact?.net_profit_pct_change)},
               {label:tr('wi_margin_pp'), val:result.impact?.net_margin_pp!=null
-                ?(result.impact.net_margin_pp>0?'+':'')+result.impact.net_margin_pp.toFixed(2)+' pp':null},
+                ? formatPpForLang(result.impact.net_margin_pp, 2, lang)
+                : null},
             ].map(({label,val})=>(
               <div key={label} style={{display:'flex',justifyContent:'space-between',
                 alignItems:'center',marginBottom:6}}>
                 <span style={{fontSize:11,color:C.text2}}>{label}</span>
                 <span style={{fontFamily:'var(--font-mono)',fontSize:12,fontWeight:700,
-                  color:val?diffClr(parseFloat(val)):C.text2,direction:'ltr'}}>{val||'—'}</span>
+                  color:val?diffClr(Number(String(val).replace(/[^\d.+-]/g,''))):C.text2,direction:'ltr'}}>{val||'—'}</span>
               </div>
             ))}
           </div>
@@ -3653,8 +3676,7 @@ function PortfolioPanel({tr, lang, companyId}) {
   }
   const SEV_COLOR = { critical: C.red, warning: C.amber, info: C.accent }
   const PRI_COLOR = { high: C.red, medium: C.amber, low: C.accent }
-// fmtM → formatCompact (from numberFormat.js)
-  const fmtV = v => v == null ? '—' : v >= 1e6 ? `${(v/1e6).toFixed(2)}M` : v >= 1e3 ? `${(v/1e3).toFixed(0)}K` : String(v)
+  const fmtV = (v) => (v == null ? '—' : formatCompactForLang(v, lang))
 
   if (!companyId) return (
     <div style={{padding:'40px',textAlign:'center',color:C.text2,fontSize:13}}>
@@ -3690,7 +3712,7 @@ function PortfolioPanel({tr, lang, companyId}) {
         {[
           {label: tr('total_revenue'), val: fmtV(sum.total_revenue),  color: C.accent},
           {label: tr('total_profit'),  val: fmtV(sum.total_profit),   color: sum.total_profit < 0 ? C.red : C.green},
-          {label: tr('portfolio_margin'), val: formatCompact(sum.portfolio_margin_pct), color: C.blue},
+          {label: tr('portfolio_margin'), val: formatPctForLang(sum.portfolio_margin_pct, 1, lang), color: C.blue},
           {label: tr('branches'),      val: sum.branch_count ?? contributions.length, color: C.text2},
         ].map(({label,val,color}) => (
           <div key={label} style={{background:BG.panel,border:`1px solid ${BG.border}`,
@@ -3710,7 +3732,7 @@ function PortfolioPanel({tr, lang, companyId}) {
                 {tr('top_contributor')}
               </div>
               <div style={{fontSize:13,fontWeight:700,color:C.text}}>{sum.top_contributor.branch_name}</div>
-              <div style={{fontSize:11,color:C.text2}}>{fmtV(sum.top_contributor.net_profit)} · {sum.top_contributor.profit_share_pct?.toFixed(1)}%</div>
+              <div style={{fontSize:11,color:C.text2}}>{fmtV(sum.top_contributor.net_profit)} · {formatPctForLang(sum.top_contributor.profit_share_pct, 1, lang)}</div>
             </div>
           )}
           {sum.biggest_drag && (
@@ -3719,7 +3741,7 @@ function PortfolioPanel({tr, lang, companyId}) {
                 {tr('biggest_drag')}
               </div>
               <div style={{fontSize:13,fontWeight:700,color:C.text}}>{sum.biggest_drag.branch_name}</div>
-              <div style={{fontSize:11,color:C.text2}}>{fmtV(sum.biggest_drag.net_profit)} · {sum.biggest_drag.profit_share_pct?.toFixed(1)}%</div>
+              <div style={{fontSize:11,color:C.text2}}>{fmtV(sum.biggest_drag.net_profit)} · {formatPctForLang(sum.biggest_drag.profit_share_pct, 1, lang)}</div>
             </div>
           )}
         </div>
@@ -3758,12 +3780,12 @@ function PortfolioPanel({tr, lang, companyId}) {
                           {b.role_label || b.role}
                         </span>
                       </td>
-                      <td style={{padding:'8px 12px',fontFamily:'var(--font-mono)',fontSize:11,color:C.text}}>{b.revenue_share_pct?.toFixed(1)}%</td>
+                      <td style={{padding:'8px 12px',fontFamily:'var(--font-mono)',fontSize:11,color:C.text}}>{formatPctForLang(b.revenue_share_pct, 1, lang)}</td>
                       <td style={{padding:'8px 12px',fontFamily:'var(--font-mono)',fontSize:11,
-                        color: b.profit_share_pct < 0 ? C.red : C.text}}>{b.profit_share_pct?.toFixed(1)}%</td>
+                        color: b.profit_share_pct < 0 ? C.red : C.text}}>{formatPctForLang(b.profit_share_pct, 1, lang)}</td>
                       <td style={{padding:'8px 12px',fontFamily:'var(--font-mono)',fontSize:11,
-                        color: (b.net_margin_pct||0) < 0 ? C.red : C.green}}>{formatCompact(b.net_margin_pct)}</td>
-                      <td style={{padding:'8px 12px',fontFamily:'var(--font-mono)',fontSize:11,color:C.text}}>{formatCompact(b.expense_ratio)}</td>
+                        color: (b.net_margin_pct||0) < 0 ? C.red : C.green}}>{formatPctForLang(b.net_margin_pct, 1, lang)}</td>
+                      <td style={{padding:'8px 12px',fontFamily:'var(--font-mono)',fontSize:11,color:C.text}}>{formatPctForLang(b.expense_ratio, 1, lang)}</td>
                       <td style={{padding:'8px 12px',fontFamily:'var(--font-mono)',fontSize:11,color:C.text2,textAlign:'center'}}>{b.profitability_rank}</td>
                       <td style={{padding:'8px 12px',fontFamily:'var(--font-mono)',fontSize:11,color:C.text2,textAlign:'center'}}>{b.cost_efficiency_rank}</td>
                       <td style={{padding:'8px 12px',fontFamily:'var(--font-mono)',fontSize:11,color:C.text2,textAlign:'center'}}>{b.growth_quality_rank}</td>
@@ -3992,7 +4014,7 @@ export default function Dashboard() {
     <div style={{padding:'18px 26px',display:'flex',flexDirection:'column',gap:14,minHeight:'calc(100vh - 62px)',background:BG.page}}>
 
       {/* Drill-down modal */}
-      <DrillModal kpiType={modal} data={data} tr={tr} onClose={()=>setModal(null)} ctxLabel={ctxLabel}/>
+      <DrillModal kpiType={modal} data={data} tr={tr} onClose={()=>setModal(null)} ctxLabel={ctxLabel} lang={lang}/>
 
       {/* Scope + Period controls */}
       <div style={{display:'flex',flexDirection:'column',gap:8}}>
@@ -4077,11 +4099,11 @@ export default function Dashboard() {
       {/* 3. KPI ROW — 5 key metrics */}
       {data&&(
         <div style={{display:'grid',gridTemplateColumns:'repeat(5,1fr)',gap:10}}>
-          <KpiCard tr={tr} lang={lang} momWord={tr('mom_label')} yoyWord={tr('yoy_label')} labelKey="kpi_total_revenue"  kpiType="revenue"    value={formatCompact(kpis.revenue?.value)} fullValue={formatFull(kpis.revenue?.value)}    mom={kpis.revenue?.mom_pct}    yoy={kpis.revenue?.yoy_pct}    color={C.accent} icon="📈" spark={series.revenue?.slice(-8)}    onClick={()=>setModal('revenue')}   insight={kpiInsight('revenue',data,lang,tr)}    cause={kpiCause('revenue',data,tr)}    forecast={kpiForecast('revenue',fcData,tr,formatCompact)}/>
-          <KpiCard tr={tr} lang={lang} momWord={tr('mom_label')} yoyWord={tr('yoy_label')} labelKey="kpi_total_expenses" kpiType="expenses"   value={formatCompact(kpis.expenses?.value)} fullValue={formatFull(kpis.expenses?.value)}   mom={kpis.expenses?.mom_pct}   yoy={kpis.expenses?.yoy_pct}   color={C.red}    icon="📉" spark={series.expenses?.slice(-8)}   onClick={()=>setModal('expenses')}  insight={kpiInsight('expenses',data,lang,tr)}   cause={kpiCause('expenses',data,tr)}/>
-          <KpiCard tr={tr} lang={lang} momWord={tr('mom_label')} yoyWord={tr('yoy_label')} labelKey="kpi_net_profit"     kpiType="net_profit" value={formatCompact(kpis.net_profit?.value)} fullValue={formatFull(kpis.net_profit?.value)} mom={kpis.net_profit?.mom_pct} yoy={kpis.net_profit?.yoy_pct} color={C.green}  icon="💰" spark={series.net_profit?.slice(-8)} onClick={()=>setModal('net_profit')} insight={kpiInsight('net_profit',data,lang,tr)} cause={kpiCause('net_profit',data,tr)} forecast={kpiForecast('net_profit',fcData,tr,formatCompact)}/>
+          <KpiCard tr={tr} lang={lang} momWord={tr('mom_label')} yoyWord={tr('yoy_label')} labelKey="kpi_total_revenue"  kpiType="revenue"    value={formatCompactForLang(kpis.revenue?.value, lang)} fullValue={formatFullForLang(kpis.revenue?.value, lang)}    mom={kpis.revenue?.mom_pct}    yoy={kpis.revenue?.yoy_pct}    color={C.accent} icon="📈" spark={series.revenue?.slice(-8)}    onClick={()=>setModal('revenue')}   insight={kpiInsight('revenue',data,lang,tr)}    cause={kpiCause('revenue',data,tr)}    forecast={kpiForecast('revenue', fcData, tr, (v) => formatCompactForLang(v, lang))}/>
+          <KpiCard tr={tr} lang={lang} momWord={tr('mom_label')} yoyWord={tr('yoy_label')} labelKey="kpi_total_expenses" kpiType="expenses"   value={formatCompactForLang(kpis.expenses?.value, lang)} fullValue={formatFullForLang(kpis.expenses?.value, lang)}   mom={kpis.expenses?.mom_pct}   yoy={kpis.expenses?.yoy_pct}   color={C.red}    icon="📉" spark={series.expenses?.slice(-8)}   onClick={()=>setModal('expenses')}  insight={kpiInsight('expenses',data,lang,tr)}   cause={kpiCause('expenses',data,tr)}/>
+          <KpiCard tr={tr} lang={lang} momWord={tr('mom_label')} yoyWord={tr('yoy_label')} labelKey="kpi_net_profit"     kpiType="net_profit" value={formatCompactForLang(kpis.net_profit?.value, lang)} fullValue={formatFullForLang(kpis.net_profit?.value, lang)} mom={kpis.net_profit?.mom_pct} yoy={kpis.net_profit?.yoy_pct} color={C.green}  icon="💰" spark={series.net_profit?.slice(-8)} onClick={()=>setModal('net_profit')} insight={kpiInsight('net_profit',data,lang,tr)} cause={kpiCause('net_profit',data,tr)} forecast={kpiForecast('net_profit', fcData, tr, (v) => formatCompactForLang(v, lang))}/>
           <KpiCard tr={tr} lang={lang} momWord={tr('mom_label')} yoyWord={tr('yoy_label')} labelKey="kpi_net_margin"     kpiType="net_margin" value={fmtP(kpis.net_margin?.value)} mom={kpis.net_margin?.mom_pct}                                 color={C.violet} icon="%"  onClick={()=>setModal('net_margin')} insight={kpiInsight('net_margin',data,lang,tr)} cause={kpiCause('net_margin',data,tr)}/>
-          <KpiCard tr={tr} lang={lang} momWord={tr('mom_label')} yoyWord={tr('yoy_label')} labelKey="cashflow_operating" kpiType="cashflow"   value={formatCompact(d.cashflow?.operating_cashflow)} fullValue={formatFull(d.cashflow?.operating_cashflow)} mom={d.cashflow?.operating_cashflow_mom} color={C.amber} icon="💧" onClick={()=>setModal('cashflow')} insight={kpiInsight('cashflow',data,lang,tr)} cause={kpiCause('cashflow',data,tr)} sub={d.cashflow?.reliability==='estimated'?tr('label_estimated_short'):null}/>
+          <KpiCard tr={tr} lang={lang} momWord={tr('mom_label')} yoyWord={tr('yoy_label')} labelKey="cashflow_operating" kpiType="cashflow"   value={formatCompactForLang(d.cashflow?.operating_cashflow, lang)} fullValue={formatFullForLang(d.cashflow?.operating_cashflow, lang)} mom={d.cashflow?.operating_cashflow_mom} color={C.amber} icon="💧" onClick={()=>setModal('cashflow')} insight={kpiInsight('cashflow',data,lang,tr)} cause={kpiCause('cashflow',data,tr)} sub={d.cashflow?.reliability==='estimated'?tr('label_estimated_short'):null}/>
         </div>
       )}
 
@@ -4135,7 +4157,7 @@ export default function Dashboard() {
                 <div key={key} style={{minWidth:120}}>
                   <div style={{fontSize:10,color:C.text2,textTransform:'uppercase',letterSpacing:'.05em',marginBottom:3}}>{label}</div>
                   <div style={{fontFamily:'var(--font-mono)',fontSize:15,fontWeight:700,color,direction:'ltr'}}>
-                    {key==='margin'?val:(val!=null?formatCompact(val):'—')}
+                    {key==='margin'?val:(val!=null?formatCompactForLang(val, lang):'—')}
                   </div>
                   {chg!=null&&<div style={{fontSize:9,fontWeight:700,color:chg>=0?C.green:C.red,marginTop:2}}>
                     {chg>=0?'▲':'▼'} {Math.abs(chg).toFixed(1)}% {tr('al_vs_prior_year')}
@@ -4160,11 +4182,11 @@ export default function Dashboard() {
                   <div style={{display:'flex',flexDirection:'column',gap:3}}>
                     <div style={{display:'flex',justifyContent:'space-between'}}>
                       <span style={{fontSize:10,color:C.text2}}>{tr('al_kpi_revenue')}</span>
-                      <span style={{fontFamily:'var(--font-mono)',fontSize:11,fontWeight:600,color:C.accent,direction:'ltr'}}>{formatCompact(fy.revenue)}</span>
+                      <span style={{fontFamily:'var(--font-mono)',fontSize:11,fontWeight:600,color:C.accent,direction:'ltr'}}>{formatCompactForLang(fy.revenue, lang)}</span>
                     </div>
                     <div style={{display:'flex',justifyContent:'space-between'}}>
                       <span style={{fontSize:10,color:C.text2}}>{tr('al_kpi_net_profit')}</span>
-                      <span style={{fontFamily:'var(--font-mono)',fontSize:11,fontWeight:600,color:fy.net_profit>=0?C.green:C.red,direction:'ltr'}}>{formatCompact(fy.net_profit)}</span>
+                      <span style={{fontFamily:'var(--font-mono)',fontSize:11,fontWeight:600,color:fy.net_profit>=0?C.green:C.red,direction:'ltr'}}>{formatCompactForLang(fy.net_profit, lang)}</span>
                     </div>
                     {fy.net_margin_pct!=null&&<div style={{display:'flex',justifyContent:'space-between'}}>
                       <span style={{fontSize:10,color:C.text2}}>{tr('al_kpi_margin')}</span>
@@ -4183,9 +4205,9 @@ export default function Dashboard() {
         <>
           <TabNav tabs={tabs} active={tab} onChange={setTab}/>
           {tab==='overview'      && <OverviewTab      data={data} tr={tr} lang={lang} onKpiClick={kpiType=>setModal(kpiType)}/>}
-          {tab==='expenses'      && <ExpenseTab       data={data} tr={tr}/>}
-          {tab==='variance'      && <VarianceTab      data={data} tr={tr}/>}
-          {tab==='profitability' && <ProfitabilityTab data={data} tr={tr} ctxLabel={ctxLabel}/>}
+          {tab==='expenses'      && <ExpenseTab       data={data} tr={tr} lang={lang}/>}
+          {tab==='variance'      && <VarianceTab      data={data} tr={tr} lang={lang}/>}
+          {tab==='profitability' && <ProfitabilityTab data={data} tr={tr} ctxLabel={ctxLabel} lang={lang}/>}
           {tab==='decisions'     && <DecisionsTab     data={data} tSig={tSig} tSub={tSub} tr={tr} selectedId={selectedId} lang={lang}/>}
           {tab==='whatif'        && <WhatIfPanel      data={data} tr={tr} selectedId={selectedId}/>}
           {tab==='narrative'     && <NarrativePanel   tr={tr} selectedId={selectedId} lang={lang}/>}

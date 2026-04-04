@@ -2,7 +2,7 @@
  * ExpenseInsightsSection — structured expense intelligence from GET /executive data.expense_intelligence
  */
 import '../styles/commandCenterStructure.css'
-import { formatCompact } from '../utils/numberFormat.js'
+import { formatCompactForLang, formatPctForLang, formatSignedPctForLang } from '../utils/numberFormat.js'
 import { strictT as st } from '../utils/strictI18n.js'
 import { CLAMP_FADE_MASK_SHORT } from '../utils/serverTextUi.js'
 import CmdServerText from './CmdServerText.jsx'
@@ -62,7 +62,7 @@ export default function ExpenseInsightsSection({
   const momTe = mom?.total_expense_pct
   const momTeStr =
     momTe != null && Number.isFinite(Number(momTe))
-      ? `${Number(momTe) >= 0 ? '+' : ''}${Number(momTe).toFixed(1)}%`
+      ? formatSignedPctForLang(Number(momTe), 1, lang)
       : null
 
   const pp = mom?.expense_pct_of_revenue_pp
@@ -77,25 +77,29 @@ export default function ExpenseInsightsSection({
 
   const topLine =
     top?.name != null && top.amount != null
-      ? `${String(top.name)} · ${formatCompact(top.amount)}`
+      ? `${String(top.name)} · ${formatCompactForLang(top.amount, lang)}`
       : null
 
   const growLine =
     grow?.name != null
-      ? `${String(grow.name)} · ${grow.pct_change != null ? `${grow.pct_change >= 0 ? '+' : ''}${Number(grow.pct_change).toFixed(1)}% ${st(tr, lang, 'mom_label')}` : formatCompact(grow.absolute_change || 0)}`
+      ? `${String(grow.name)} · ${
+          grow.pct_change != null
+            ? `${grow.pct_change > 0 ? '+' : ''}${formatPctForLang(grow.pct_change, 1, lang)} ${st(tr, lang, 'mom_label')}`
+            : formatCompactForLang(grow.absolute_change || 0, lang)
+        }`
       : null
 
   const ofRev = st(tr, lang, 'cmd_branch_of_rev')
   const ratioLine =
     ratio != null && Number.isFinite(Number(ratio))
       ? ratioTrend
-        ? `${Number(ratio).toFixed(1)}% ${ofRev} (${ratioTrend})`
-        : `${Number(ratio).toFixed(1)}% ${ofRev}`
+        ? `${formatPctForLang(ratio, 1, lang)} ${ofRev} (${ratioTrend})`
+        : `${formatPctForLang(ratio, 1, lang)} ${ofRev}`
       : null
 
   const totalLine =
     totals?.total_expense != null && totals?.revenue != null
-      ? `${st(tr, lang, 'cmd_expense_total_label')} ${formatCompact(totals.total_expense)} · ${st(tr, lang, 'cmd_expense_rev_label')} ${formatCompact(totals.revenue)}`
+      ? `${st(tr, lang, 'cmd_expense_total_label')} ${formatCompactForLang(totals.total_expense, lang)} · ${st(tr, lang, 'cmd_expense_rev_label')} ${formatCompactForLang(totals.revenue, lang)}`
       : null
 
   const shellCls = [
@@ -160,7 +164,7 @@ export default function ExpenseInsightsSection({
                   : P.text1,
             }}
           >
-            {Number(ratio).toFixed(1)}%
+            {formatPctForLang(Number(ratio), 1, lang)}
             <span className="cmd-muted-foreign" style={{ fontSize: '0.5em', fontWeight: 700, marginLeft: 6 }}>
               {ofRev}
             </span>
@@ -194,7 +198,7 @@ export default function ExpenseInsightsSection({
           {momTeStr != null
             ? row(
                 st(tr, lang, 'cmd_expense_mom_te'),
-                `${momTeStr}${ratioPrior != null && ratio != null ? ` · ${st(tr, lang, 'cmd_expense_ratio_label')} ${Number(ratio).toFixed(1)}%` : ''}`,
+                `${momTeStr}${ratioPrior != null && ratio != null ? ` · ${st(tr, lang, 'cmd_expense_ratio_label')} ${formatPctForLang(Number(ratio), 1, lang)}` : ''}`,
                 lang,
                 tr
               )

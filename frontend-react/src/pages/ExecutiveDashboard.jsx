@@ -11,7 +11,7 @@ import { useLang }        from '../context/LangContext.jsx'
 import { useCompany }     from '../context/CompanyContext.jsx'
 import { usePeriodScope } from '../context/PeriodScopeContext.jsx'
 import { kpiContextLabel, kpiLabel } from '../utils/kpiContext.js'
-import { formatCompact, formatFull, formatDual, formatPct, formatMultiple, formatDays } from '../utils/numberFormat.js'
+import { formatCompactForLang, formatFullForLang } from '../utils/numberFormat.js'
 import { buildAnalysisQuery } from '../utils/buildAnalysisQuery.js'
 import { buildExecutiveNarrative } from '../utils/buildExecutiveNarrative.js'
 import ExecutiveNarrativeStrip from '../components/ExecutiveNarrativeStrip.jsx'
@@ -580,11 +580,53 @@ function ExecutiveKpiRow({ kpis, cashflow, main, tr, lang, onSelect, alerts, ctx
                ?? main?.statements?.balance_sheet?.working_capital
   const wcColor  = wc==null?T.text3:wc>=0?T.green:T.red
   const cards = [
-    { key:'revenue',         value:formatCompact(kpis.revenue?.value),        full:formatFull(kpis.revenue?.value),        mom:kpis.revenue?.mom_pct,    yoy:kpis.revenue?.yoy_pct,    color:T.accent,  icon:'📈' },
-    { key:'net_profit',      value:formatCompact(kpis.net_profit?.value),      full:formatFull(kpis.net_profit?.value),      mom:kpis.net_profit?.mom_pct, yoy:kpis.net_profit?.yoy_pct, color:T.green,   icon:'💰' },
-    { key:'cashflow',        value:formatCompact(cashflow?.operating_cashflow), full:formatFull(cashflow?.operating_cashflow), mom:cashflow?.operating_cashflow_mom, yoy:null, color:T.blue,   icon:'💧', estimated:cfEstimated },
-    { key:'net_margin',      value:fmtP(kpis.net_margin?.value),               full:null,                                    mom:kpis.net_margin?.mom_pct, yoy:null,                     color:T.violet,  icon:'%'  },
-    { key:'working_capital', value:formatCompact(wc),                           full:formatFull(wc),                          mom:null,                     yoy:null, sub:wc!=null&&wc<0?st('wc_negative'):null, color:wcColor, icon:'⚖️' },
+    {
+      key: 'revenue',
+      value: formatCompactForLang(kpis.revenue?.value, lang),
+      full: formatFullForLang(kpis.revenue?.value, lang),
+      mom: kpis.revenue?.mom_pct,
+      yoy: kpis.revenue?.yoy_pct,
+      color: T.accent,
+      icon: '📈',
+    },
+    {
+      key: 'net_profit',
+      value: formatCompactForLang(kpis.net_profit?.value, lang),
+      full: formatFullForLang(kpis.net_profit?.value, lang),
+      mom: kpis.net_profit?.mom_pct,
+      yoy: kpis.net_profit?.yoy_pct,
+      color: T.green,
+      icon: '💰',
+    },
+    {
+      key: 'cashflow',
+      value: formatCompactForLang(cashflow?.operating_cashflow, lang),
+      full: formatFullForLang(cashflow?.operating_cashflow, lang),
+      mom: cashflow?.operating_cashflow_mom,
+      yoy: null,
+      color: T.blue,
+      icon: '💧',
+      estimated: cfEstimated,
+    },
+    {
+      key: 'net_margin',
+      value: fmtP(kpis.net_margin?.value),
+      full: null,
+      mom: kpis.net_margin?.mom_pct,
+      yoy: null,
+      color: T.violet,
+      icon: '%',
+    },
+    {
+      key: 'working_capital',
+      value: formatCompactForLang(wc, lang),
+      full: formatFullForLang(wc, lang),
+      mom: null,
+      yoy: null,
+      sub: wc != null && wc < 0 ? st('wc_negative') : null,
+      color: wcColor,
+      icon: '⚖️',
+    },
   ]
   return (
     <div>

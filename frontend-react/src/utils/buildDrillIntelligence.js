@@ -1,8 +1,8 @@
 /**
- * Client-only drill explanations from executive payload + narrative (no API).
- * Produces What / Why / Do bullets for panels and Analysis tabs.
+ * Drill “AI Explanation” — What / Why / Do built only from structured payload fields + strict i18n.
+ * No narrative prose ingestion, no global text reconstruction, no raw-backend sentence rewriting here.
  */
-import { formatCompact } from './numberFormat.js'
+import { formatCompactForLang, formatPctForLang, formatSignedPctForLang } from './numberFormat.js'
 
 const MAX = 3
 
@@ -12,13 +12,19 @@ function sliceTitle(t, n = 96) {
   return s.length > n ? `${s.slice(0, n - 1)}…` : s
 }
 
+function normLine(s) {
+  return String(s || '')
+    .trim()
+    .toLowerCase()
+}
+
 function dedupeCap(items, n = MAX) {
   const seen = new Set()
   const out = []
   for (const it of items) {
     const text = it && typeof it.text === 'string' ? it.text.trim() : ''
     if (!text) continue
-    const k = text.toLowerCase()
+    const k = normLine(text)
     if (seen.has(k)) continue
     seen.add(k)
     out.push({ ...it, text })
@@ -27,17 +33,41 @@ function dedupeCap(items, n = MAX) {
   return out
 }
 
+/** Drop lines that already appeared in an earlier section (What → Why → Do). */
+function dedupeAcrossSections(what, why, doSection, n = MAX) {
+  const seen = new Set()
+  function take(items) {
+    const out = []
+    for (const it of items) {
+      const k = normLine(it.text)
+      if (!k || seen.has(k)) continue
+      seen.add(k)
+      out.push(it)
+      if (out.length >= n) break
+    }
+    return out
+  }
+  return {
+    what: take(what),
+    why: take(why),
+    do: take(doSection),
+  }
+}
+
 function hasDigitIn(lines) {
   return lines.some((l) => l && /\d/.test(l.text || ''))
 }
 
 /** @param {(k: string, p?: Record<string, unknown>) => string} t */
-function firstKpiSnapshotLine(kpis, t) {
+function firstKpiSnapshotLine(kpis, t, lang) {
   const order = ['revenue', 'expenses', 'net_profit', 'net_margin']
   for (const k of order) {
     const row = kpis?.[k]
     if (row?.value == null || !Number.isFinite(Number(row.value))) continue
-    const v = k === 'net_margin' ? `${Number(row.value).toFixed(1)}%` : formatCompact(Number(row.value))
+    const v =
+      k === 'net_margin'
+        ? formatPctForLang(row.value, 1, lang)
+        : formatCompactForLang(Number(row.value), lang)
     return { text: t('drill_intel_kpi_level', { label: t(`kpi_label_${k}`), v }) }
   }
   return null
@@ -60,32 +90,142 @@ export function primaryDecisionTieLine(primaryResolution, t) {
   return t('drill_intel_follow_primary', { title: sliceTitle(d.title, 100) })
 }
 
-function kpiNarrativeMatch(line, kpiType) {
-  const s = String(line || '')
-  const sl = s.toLowerCase()
-  if (kpiType === 'revenue') return /revenue|sales|إيراد|gelir|turnover|top/i.test(s)
-  if (kpiType === 'expenses') return /expense|cost|spend|مصروف|gider|overhead|تكلفة|maliyet/i.test(s)
-  if (kpiType === 'net_profit') return /profit|ربح|kâr|bottom|earnings|صافي/i.test(s)
-  if (kpiType === 'net_margin') return /margin|هامش|marj|ratio|net/i.test(s)
-  if (kpiType === 'cashflow') return /cash|نقد|nakit|liquidity|flow|ocf|تشغيل/i.test(s)
-  if (kpiType === 'working_capital') return /capital|working|sermaye|عامل|ratio/i.test(s)
-  return true
+function resolveKpis(bundle, extra) {
+  return (
+    bundle.kpis ||
+    extra?.execChartBundle?.kpi_block?.kpis ||
+    {}
+  )
 }
 
-function domainNarrativeMatch(line, domain) {
-  const s = String(line || '')
-  if (domain === 'liquidity') return /cash|liquidity|نقد|nakit|capital|ratio|سيولة|likidite|current|quick/i.test(s)
-  if (domain === 'profitability') return /profit|margin|revenue|ربح|kâr|marj|إيراد|gelir|gross|net/i.test(s)
-  if (domain === 'efficiency') return /efficien|cost|ratio|كفاءة|verim|expense|asset|turnover/i.test(s)
-  if (domain === 'leverage' || domain === 'risk') return /leverage|debt|risk|دين|borç|borç|solvency/i.test(s)
-  return true
+function momWord(t) {
+  return t('mom_label')
 }
 
-function filterOrAll(lines, fn) {
-  const arr = (lines || []).filter(Boolean)
-  if (!arr.length) return []
-  const hit = arr.filter((ln) => fn(String(ln)))
-  return hit.length ? hit : arr
+function pushRevenueMom(kpis, t, arr, lang) {
+  const r = kpis?.revenue?.mom_pct
+  if (r == null || !Number.isFinite(Number(r))) return
+  const n = Number(r)
+  if (n > 0)
+    arr.push({ text: t('drill_sig_rev_mom_up', { pct: formatPctForLang(n, 1, lang), mom_word: momWord(t) }) })
+  else if (n < 0)
+    arr.push({
+      text: t('drill_sig_rev_mom_down', { pct: formatPctForLang(Math.abs(n), 1, lang), mom_word: momWord(t) }),
+    })
+  else arr.push({ text: t('drill_sig_rev_mom_flat') })
+}
+
+function pushExpenseMom(kpis, t, arr, lang) {
+  const e = kpis?.expenses?.mom_pct
+  if (e == null || !Number.isFinite(Number(e))) return
+  const n = Number(e)
+  if (n > 0)
+    arr.push({ text: t('drill_sig_exp_mom_up', { pct: formatPctForLang(n, 1, lang), mom_word: momWord(t) }) })
+  else if (n < 0)
+    arr.push({
+      text: t('drill_sig_exp_mom_down', { pct: formatPctForLang(Math.abs(n), 1, lang), mom_word: momWord(t) }),
+    })
+  else arr.push({ text: t('drill_sig_exp_mom_flat') })
+}
+
+function pushExpenseOutpacesRevenue(kpis, t, arr) {
+  const r = kpis?.revenue?.mom_pct
+  const e = kpis?.expenses?.mom_pct
+  if (r == null || e == null || !Number.isFinite(Number(r)) || !Number.isFinite(Number(e))) return
+  if (Number(e) > Number(r)) arr.push({ text: t('drill_sig_expense_faster_than_revenue') })
+}
+
+function pushNetProfitLoss(kpis, t, arr) {
+  const v = kpis?.net_profit?.value
+  if (v == null || !Number.isFinite(Number(v))) return
+  if (Number(v) < 0) arr.push({ text: t('drill_sig_operating_loss') })
+}
+
+function pushNetProfitMom(kpis, t, arr, lang) {
+  const m = kpis?.net_profit?.mom_pct
+  if (m == null || !Number.isFinite(Number(m))) return
+  const n = Number(m)
+  if (n > 0)
+    arr.push({ text: t('drill_sig_np_mom_up', { pct: formatPctForLang(n, 1, lang), mom_word: momWord(t) }) })
+  else if (n < 0)
+    arr.push({
+      text: t('drill_sig_np_mom_down', { pct: formatPctForLang(Math.abs(n), 1, lang), mom_word: momWord(t) }),
+    })
+}
+
+function pushExpenseIntelWhy(expenseIntel, t, arr, lang) {
+  if (expenseIntel?.top_category?.name && expenseIntel?.available === true) {
+    const name = String(expenseIntel.top_category.name)
+    const amt =
+      expenseIntel.top_category.amount != null && Number.isFinite(Number(expenseIntel.top_category.amount))
+        ? formatCompactForLang(Number(expenseIntel.top_category.amount), lang)
+        : '—'
+    const sh = expenseIntel.top_category.share_of_cost_pct
+    if (sh != null && Number.isFinite(Number(sh))) {
+      arr.push({
+        text: t('drill_intel_top_expense_share', {
+          name,
+          amt,
+          share: formatPctForLang(Number(sh), 1, lang),
+        }),
+      })
+    } else {
+      arr.push({ text: t('drill_intel_top_expense_short', { name, amt }) })
+    }
+  }
+}
+
+function pushTopBranchWhy(ci, t, arr, lang) {
+  const topBr = ci?.efficiency_ranking?.by_expense_pct_of_revenue_desc?.[0]
+  if (topBr?.branch_name == null || topBr.expense_pct_of_revenue == null) return
+  if (!Number.isFinite(Number(topBr.expense_pct_of_revenue))) return
+  arr.push({
+    text: t('drill_intel_branch_expense_line', {
+      name: String(topBr.branch_name),
+      pct: formatPctForLang(Number(topBr.expense_pct_of_revenue), 1, lang),
+    }),
+  })
+}
+
+function pushRatioRisk(ratioObj, ratioKey, t, arr) {
+  const r = ratioObj?.[ratioKey]
+  if (r?.status !== 'risk') return
+  arr.push({
+    text: t('drill_sig_ratio_pressure', { label: t(`ratio_${ratioKey}`) }),
+  })
+}
+
+/** First N ratios in `obj` with status risk — label from ratio_<key> i18n when present. */
+function pushRiskRatiosFromObject(obj, t, arr, max = 2) {
+  let n = 0
+  for (const [k, r] of Object.entries(obj || {})) {
+    if (r?.status !== 'risk') continue
+    arr.push({
+      text: t('drill_sig_ratio_pressure', { label: t(`ratio_${k}`) }),
+    })
+    n++
+    if (n >= max) break
+  }
+}
+
+function primaryTitleSnippet(primaryResolution) {
+  if (!primaryResolution) return ''
+  if (primaryResolution.kind === 'expense') return sliceTitle(primaryResolution.expense?.title, 24).toLowerCase()
+  return sliceTitle(primaryResolution.decision?.title, 24).toLowerCase()
+}
+
+function pushDecisionDo(primaryResolution, decisions, t, doRaw) {
+  const pd = primaryDecisionTieLine(primaryResolution, t)
+  if (pd) doRaw.push({ text: pd })
+
+  if (!Array.isArray(decisions) || !decisions[0]?.title) return
+  const title = sliceTitle(decisions[0].title, 90)
+  const snippet = primaryTitleSnippet(primaryResolution)
+  const head = title.toLowerCase().slice(0, 22)
+  if (snippet && head && snippet.includes(head)) return
+  if (pd && normLine(pd).includes(normLine(title).slice(0, 18))) return
+
+  doRaw.push({ text: t('drill_intel_ranked_decision', { title }) })
 }
 
 /**
@@ -95,20 +235,18 @@ function filterOrAll(lines, fn) {
  *   extra?: Record<string, unknown>,
  *   t: (k: string, p?: Record<string, unknown>) => string,
  * }} p
- * @returns {{ what: Array<{ text: string, serverText?: boolean }>, why: Array<{ text: string, serverText?: boolean }>, do: Array<{ text: string, serverText?: boolean }> }}
+ * @returns {{ what: Array<{ text: string }>, why: Array<{ text: string }>, do: Array<{ text: string }> }}
  */
-export function buildDrillIntelligence({ panelType, payload = {}, extra = {}, t }) {
+export function buildDrillIntelligence({ panelType, payload = {}, extra = {}, t, lang = 'en' }) {
   const bundle = extra?.drillIntelBundle || {}
-  const narrative = bundle.narrative
-  const kpis = bundle.kpis || {}
+  const kpis = resolveKpis(bundle, extra)
   const primaryResolution = bundle.primaryResolution
   const expenseIntel = bundle.expenseIntel
   const decisions = bundle.decisions || extra?.decisions || []
   const health = bundle.health
   const cashflow = extra?.execChartBundle?.cashflow || bundle.cashflow || {}
   const ci = extra?.execChartBundle?.comparative_intelligence || bundle.comparative_intelligence
-
-  const momWord = () => t('mom_label')
+  const analysisRatios = extra?.analysisRatios || {}
 
   const whatRaw = []
   const whyRaw = []
@@ -116,23 +254,55 @@ export function buildDrillIntelligence({ panelType, payload = {}, extra = {}, t 
 
   const analysisTab = panelType === 'analysis_tab' ? String(payload.tab || '') : ''
 
+  // ── KPI drill (Command Center) ─────────────────────────────
   if (panelType === 'kpi' && payload?.type) {
     const ty = String(payload.type)
-    if (payload.mom != null && Number.isFinite(Number(payload.mom))) {
-      const label = t(`kpi_label_${ty}`)
-      const pct = `${Number(payload.mom) > 0 ? '+' : ''}${Number(payload.mom).toFixed(1)}`
-      whatRaw.push({ text: t('drill_intel_kpi_momentum', { label, pct, mom_word: momWord() }) })
-    }
-    if (ty === 'net_margin' && payload.raw != null && Number.isFinite(Number(payload.raw))) {
-      whatRaw.push({ text: t('drill_intel_net_margin_level', { pct: Number(payload.raw).toFixed(1) }) })
-    }
-    if (ty === 'cashflow' && cashflow?.operating_cashflow != null && Number.isFinite(Number(cashflow.operating_cashflow))) {
-      whatRaw.push({
-        text: t('drill_intel_ocf_level', { v: formatCompact(Number(cashflow.operating_cashflow)) }),
-      })
+
+    if (ty === 'revenue') {
+      pushRevenueMom(kpis, t, whatRaw, lang)
+      pushNetProfitLoss(kpis, t, whatRaw)
+      pushExpenseOutpacesRevenue(kpis, t, whyRaw)
+      pushExpenseMom(kpis, t, whyRaw, lang)
+    } else if (ty === 'expenses') {
+      pushExpenseMom(kpis, t, whatRaw, lang)
+      pushExpenseOutpacesRevenue(kpis, t, whyRaw)
+      pushRevenueMom(kpis, t, whyRaw, lang)
+    } else if (ty === 'net_profit') {
+      pushNetProfitLoss(kpis, t, whatRaw)
+      pushNetProfitMom(kpis, t, whatRaw, lang)
+      pushExpenseOutpacesRevenue(kpis, t, whyRaw)
+      pushRevenueMom(kpis, t, whyRaw, lang)
+    } else if (ty === 'net_margin') {
+      if (payload.mom != null && Number.isFinite(Number(payload.mom))) {
+        const label = t('kpi_label_net_margin')
+        const pct = formatSignedPctForLang(Number(payload.mom), 1, lang)
+        whatRaw.push({ text: t('drill_intel_kpi_momentum', { label, pct, mom_word: momWord(t) }) })
+      }
+      if (payload.raw != null && Number.isFinite(Number(payload.raw))) {
+        whatRaw.push({
+          text: t('drill_intel_net_margin_level', { pct: formatPctForLang(Number(payload.raw), 1, lang) }),
+        })
+      }
+      pushExpenseOutpacesRevenue(kpis, t, whyRaw)
+      pushTopBranchWhy(ci, t, whyRaw, lang)
+      pushExpenseIntelWhy(expenseIntel, t, whyRaw, lang)
+    } else if (ty === 'cashflow') {
+      if (cashflow?.operating_cashflow != null && Number.isFinite(Number(cashflow.operating_cashflow))) {
+        whatRaw.push({
+          text: t('drill_intel_ocf_level', { v: formatCompactForLang(Number(cashflow.operating_cashflow), lang) }),
+        })
+      }
+      pushNetProfitLoss(kpis, t, whyRaw)
+    } else {
+      if (payload.mom != null && Number.isFinite(Number(payload.mom))) {
+        const label = t(`kpi_label_${ty}`)
+        const pct = formatSignedPctForLang(Number(payload.mom), 1, lang)
+        whatRaw.push({ text: t('drill_intel_kpi_momentum', { label, pct, mom_word: momWord(t) }) })
+      }
     }
   }
 
+  // ── Domain drill ───────────────────────────────────────────
   if (panelType === 'domain' && payload?.domain != null && payload.score != null) {
     const dom = String(payload.domain)
     whatRaw.push({
@@ -141,145 +311,123 @@ export function buildDrillIntelligence({ panelType, payload = {}, extra = {}, t 
         score: String(Math.round(Number(payload.score))),
       }),
     })
-  }
-
-  const nWhat = narrative?.whatChanged?.lines || []
-  const nWhy = narrative?.why?.lines || []
-  const nDo = narrative?.whatToDo?.lines || []
-
-  if (panelType === 'kpi' && payload?.type) {
-    const ty = String(payload.type)
-    for (const line of filterOrAll(nWhat, (ln) => kpiNarrativeMatch(ln, ty)).slice(0, 2)) {
-      whatRaw.push({ text: line })
-    }
-    for (const line of filterOrAll(nWhy, (ln) => kpiNarrativeMatch(ln, ty)).slice(0, 2)) {
-      whyRaw.push({ text: line })
-    }
-    for (const line of filterOrAll(nDo, (ln) => kpiNarrativeMatch(ln, ty)).slice(0, 2)) {
-      doRaw.push({ text: line })
-    }
-  } else if (panelType === 'domain' && payload?.domain) {
-    const dom = String(payload.domain)
-    for (const line of filterOrAll(nWhat, (ln) => domainNarrativeMatch(ln, dom)).slice(0, 2)) {
-      whatRaw.push({ text: line })
-    }
-    for (const line of filterOrAll(nWhy, (ln) => domainNarrativeMatch(ln, dom)).slice(0, 2)) {
-      whyRaw.push({ text: line })
-    }
-    for (const line of filterOrAll(nDo, (ln) => domainNarrativeMatch(ln, dom)).slice(0, 2)) {
-      doRaw.push({ text: line })
-    }
-  } else if (analysisTab) {
-    const domMap = { profitability: 'profitability', liquidity: 'liquidity', efficiency: 'efficiency' }
-    const dom = domMap[analysisTab]
-    if (dom) {
-      for (const line of filterOrAll(nWhat, (ln) => domainNarrativeMatch(ln, dom)).slice(0, 2)) {
-        whatRaw.push({ text: line })
+    const sc = Number(payload.score)
+    if (Number.isFinite(sc)) {
+      if (sc < 40) {
+        whyRaw.push({
+          text: t('drill_sig_domain_score_stress', {
+            domain: t(`domain_${dom}_simple`),
+            score: String(Math.round(sc)),
+          }),
+        })
+      } else if (sc < 60) {
+        whyRaw.push({
+          text: t('drill_sig_domain_score_watch', {
+            domain: t(`domain_${dom}_simple`),
+            score: String(Math.round(sc)),
+          }),
+        })
       }
-      for (const line of filterOrAll(nWhy, (ln) => domainNarrativeMatch(ln, dom)).slice(0, 2)) {
-        whyRaw.push({ text: line })
+    }
+  }
+
+  // ── Branch compare drill ───────────────────────────────────
+  if (panelType === 'branch_compare') {
+    whatRaw.push({ text: t('drill_sig_branch_panel_context') })
+    pushTopBranchWhy(ci, t, whyRaw, lang)
+    pushExpenseOutpacesRevenue(kpis, t, whyRaw)
+  }
+
+  // ── Alert drill ────────────────────────────────────────────
+  if (panelType === 'alert') {
+    const sev = String(payload.severity || '').toLowerCase()
+    if (sev === 'high') whatRaw.push({ text: t('drill_sig_alert_severity_high') })
+    else whatRaw.push({ text: t('drill_sig_alert_severity_watch') })
+    if (health != null && Number.isFinite(Number(health))) {
+      whyRaw.push({ text: t('drill_intel_health_score', { v: String(Math.round(Number(health))) }) })
+    }
+    pushExpenseOutpacesRevenue(kpis, t, whyRaw)
+  }
+
+  // ── Decision & expense decision drill ──────────────────────
+  if (panelType === 'decision' || panelType === 'expense_v2') {
+    const snap = firstKpiSnapshotLine(kpis, t, lang)
+    if (snap) whatRaw.push(snap)
+    else if (health != null && Number.isFinite(Number(health))) {
+      whatRaw.push({ text: t('drill_intel_health_score', { v: String(Math.round(Number(health))) }) })
+    }
+    pushExpenseIntelWhy(expenseIntel, t, whyRaw, lang)
+    pushExpenseOutpacesRevenue(kpis, t, whyRaw)
+    pushTopBranchWhy(ci, t, whyRaw, lang)
+  }
+
+  // ── Analysis tab drill (structured ratios + KPIs) ───────────
+  if (analysisTab) {
+    const prof = analysisRatios.profitability || {}
+    const liq = analysisRatios.liquidity || {}
+    const eff = analysisRatios.efficiency || {}
+
+    if (analysisTab === 'profitability') {
+      pushRevenueMom(kpis, t, whatRaw, lang)
+      pushNetProfitLoss(kpis, t, whatRaw)
+      pushNetProfitMom(kpis, t, whatRaw, lang)
+      pushExpenseOutpacesRevenue(kpis, t, whyRaw)
+      pushExpenseMom(kpis, t, whyRaw, lang)
+      pushRatioRisk(prof, 'net_margin_pct', t, whyRaw)
+      pushRatioRisk(prof, 'gross_margin_pct', t, whyRaw)
+    } else if (analysisTab === 'liquidity') {
+      whatRaw.push({ text: t('drill_sig_tab_liquidity_what') })
+      pushRatioRisk(liq, 'current_ratio', t, whyRaw)
+      pushRatioRisk(liq, 'quick_ratio', t, whyRaw)
+      if (!whyRaw.length) {
+        whyRaw.push({ text: t('drill_sig_tab_liquidity_why_hint') })
       }
-      for (const line of filterOrAll(nDo, (ln) => domainNarrativeMatch(ln, dom)).slice(0, 2)) {
-        doRaw.push({ text: line })
+    } else if (analysisTab === 'efficiency') {
+      whatRaw.push({ text: t('drill_sig_tab_efficiency_what') })
+      pushRiskRatiosFromObject(eff, t, whyRaw, 2)
+      pushTopBranchWhy(ci, t, whyRaw, lang)
+      if (!whyRaw.length) {
+        whyRaw.push({ text: t('drill_sig_tab_efficiency_why_hint') })
       }
-    } else {
-      for (const line of nWhat.slice(0, 2)) whatRaw.push({ text: line })
-      for (const line of nWhy.slice(0, 2)) whyRaw.push({ text: line })
-      for (const line of nDo.slice(0, 2)) doRaw.push({ text: line })
-    }
-  } else {
-    for (const line of nWhat.slice(0, 2)) whatRaw.push({ text: line })
-    for (const line of nWhy.slice(0, 2)) whyRaw.push({ text: line })
-    for (const line of nDo.slice(0, 2)) doRaw.push({ text: line })
-  }
-
-  if (expenseIntel?.top_category?.name && expenseIntel?.available === true) {
-    const name = String(expenseIntel.top_category.name)
-    const amt =
-      expenseIntel.top_category.amount != null && Number.isFinite(Number(expenseIntel.top_category.amount))
-        ? formatCompact(Number(expenseIntel.top_category.amount))
-        : '—'
-    const sh = expenseIntel.top_category.share_of_cost_pct
-    if (sh != null && Number.isFinite(Number(sh))) {
-      whyRaw.push({
-        text: t('drill_intel_top_expense_share', { name, amt, share: Number(sh).toFixed(1) }),
-        serverText: true,
-      })
-    } else {
-      whyRaw.push({ text: t('drill_intel_top_expense_short', { name, amt }), serverText: true })
+    } else if (analysisTab === 'decisions' || analysisTab === 'alerts') {
+      const snap = firstKpiSnapshotLine(kpis, t, lang)
+      if (snap) whatRaw.push(snap)
+      if (analysisTab === 'alerts' && health != null && Number.isFinite(Number(health))) {
+        whyRaw.push({ text: t('drill_intel_health_score', { v: String(Math.round(Number(health))) }) })
+      }
+      if (analysisTab === 'decisions') {
+        pushExpenseIntelWhy(expenseIntel, t, whyRaw, lang)
+      }
+    } else if (analysisTab === 'overview') {
+      pushRevenueMom(kpis, t, whatRaw, lang)
+      pushNetProfitLoss(kpis, t, whatRaw)
+      if (health != null && Number.isFinite(Number(health))) {
+        whyRaw.push({ text: t('drill_intel_health_score', { v: String(Math.round(Number(health))) }) })
+      }
+      pushExpenseOutpacesRevenue(kpis, t, whyRaw)
     }
   }
 
-  const topBr = ci?.efficiency_ranking?.by_expense_pct_of_revenue_desc?.[0]
-  if (
-    topBr?.branch_name != null &&
-    topBr.expense_pct_of_revenue != null &&
-    Number.isFinite(Number(topBr.expense_pct_of_revenue)) &&
-    (panelType === 'branch_compare' || (panelType === 'kpi' && payload?.type === 'net_margin'))
-  ) {
-    whyRaw.push({
-      text: t('drill_intel_branch_expense_line', {
-        name: String(topBr.branch_name),
-        pct: Number(topBr.expense_pct_of_revenue).toFixed(1),
-      }),
-      serverText: true,
-    })
-  }
-
-  if (panelType === 'domain' && payload?.domain && Array.isArray(extra?.causes)) {
-    const dom = String(payload.domain)
-    const c = extra.causes.find((x) => x?.domain === dom || x?.domain === 'cross_domain')
-    if (c?.description) whyRaw.push({ text: String(c.description), serverText: true })
-    else if (c?.title) whyRaw.push({ text: String(c.title), serverText: true })
-  }
-
-  const pd = primaryDecisionTieLine(primaryResolution, t)
-  if (pd) doRaw.push({ text: pd })
-
-  if (Array.isArray(decisions) && decisions[0]?.title) {
-    const title = sliceTitle(decisions[0].title, 90)
-    const already = doRaw.some((l) => String(l.text).toLowerCase().includes(title.toLowerCase().slice(0, 18)))
-    if (!already) {
-      doRaw.push({ text: t('drill_intel_ranked_decision', { title }), serverText: true })
-    }
-  }
+  pushDecisionDo(primaryResolution, decisions, t, doRaw)
 
   let what = dedupeCap(whatRaw, MAX)
   let why = dedupeCap(whyRaw, MAX)
   let doSection = dedupeCap(doRaw, MAX)
 
-  const combined = [...what, ...why, ...doSection]
-  if (!hasDigitIn(combined)) {
-    const snap = firstKpiSnapshotLine(kpis, t)
+  const preCombined = [...what, ...why, ...doSection]
+  if (!hasDigitIn(preCombined)) {
+    const snap = firstKpiSnapshotLine(kpis, t, lang)
     if (snap) what = dedupeCap([snap, ...what], MAX)
     else if (health != null && Number.isFinite(Number(health))) {
       what = dedupeCap([{ text: t('drill_intel_health_score', { v: String(Math.round(Number(health))) }) }, ...what], MAX)
-    } else if (payload?.mom != null) {
-      /* momentum line already attempted */
     }
   }
 
-  if (!what.length) {
-    const snap = firstKpiSnapshotLine(kpis, t)
-    if (snap) what.push(snap)
-    else if (health != null && Number.isFinite(Number(health))) {
-      what.push({ text: t('drill_intel_health_score', { v: String(Math.round(Number(health))) }) })
-    } else {
-      what.push({ text: t('drill_intel_what_fallback') })
-    }
-  }
-  if (!why.length) {
-    why.push({ text: t('drill_intel_why_fallback') })
-  }
-  if (!doSection.length) {
-    const tie = primaryDecisionTieLine(primaryResolution, t)
-    if (tie) doSection.push({ text: tie })
-    else doSection.push({ text: t('drill_intel_do_fallback') })
-  }
+  const merged = dedupeAcrossSections(what, why, doSection, MAX)
 
   return {
-    what: dedupeCap(what, MAX),
-    why: dedupeCap(why, MAX),
-    do: dedupeCap(doSection, MAX),
+    what: merged.what,
+    why: merged.why,
+    do: merged.do,
   }
 }

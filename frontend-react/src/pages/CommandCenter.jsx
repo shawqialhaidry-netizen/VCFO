@@ -9,10 +9,11 @@ import '../styles/commandCenterStructure.css'
 import { useCountUp } from '../hooks/useCountUp.js'
 import { useNavigate } from 'react-router-dom'
 import { useLang }        from '../context/LangContext.jsx'
+import { useAuth }        from '../context/AuthContext.jsx'
 import { useCompany }     from '../context/CompanyContext.jsx'
 import { usePeriodScope } from '../context/PeriodScopeContext.jsx'
 import { kpiContextLabel } from '../utils/kpiContext.js'
-import { formatCompact, formatFull } from '../utils/numberFormat.js'
+import { formatCompactForLang, formatFullForLang } from '../utils/numberFormat.js'
 import { buildAnalysisQuery } from '../utils/buildAnalysisQuery.js'
 import { buildExecutiveNarrative } from '../utils/buildExecutiveNarrative.js'
 import { analysisPathFromPanelType, pathForDrillAnalysisTab } from '../utils/analysisRoutes.js'
@@ -104,11 +105,11 @@ const lift = () => ({
   },
 })
 
-function HeroExpenseSavings({ sav }) {
+function HeroExpenseSavings({ sav, lang }) {
   const ok = sav != null && Number.isFinite(Number(sav)) && Number(sav) > 0
   const v = useCountUp(ok ? Number(sav) : null, { durationMs: 620, enabled: ok })
   if (!ok) return null
-  return formatCompact(v)
+  return formatCompactForLang(v, lang)
 }
 
 function HeroCfoImpactValue({ raw, fmtQuantImpact }) {
@@ -118,13 +119,13 @@ function HeroCfoImpactValue({ raw, fmtQuantImpact }) {
   return fmtQuantImpact(v)
 }
 
-function KpiMainNumber({ raw, mode, isHero, compact, na, signedTone }) {
+function KpiMainNumber({ raw, mode, isHero, compact, na, signedTone, lang }) {
   const ok = raw != null && raw !== '' && !Number.isNaN(Number(raw)) && Number.isFinite(Number(raw))
   const n = ok ? Number(raw) : null
   const v = useCountUp(n, { durationMs: 520, enabled: ok })
   let toneClass = 'cmd-kpi-val-neu'
   if (signedTone && ok) toneClass = n >= 0 ? 'cmd-kpi-val-pos' : 'cmd-kpi-val-neg'
-  const text = !ok ? na : mode === 'percent' ? `${Number(v).toFixed(1)}%` : formatCompact(v)
+  const text = !ok ? na : mode === 'percent' ? `${Number(v).toFixed(1)}%` : formatCompactForLang(v, lang)
   return (
     <div
       className={`cmd-kpi-val cmd-data-num ${toneClass}`}
@@ -215,7 +216,7 @@ function PrimaryDecisionHero({ resolution, impacts, tr, lang, causes, allDecisio
             </CmdServerText>
           </div>
           <div className={`cmd-hero-number cmd-data-num ${numTone}`.trim()}>
-            {hasSav ? <HeroExpenseSavings sav={sav} /> : '—'}
+            {hasSav ? <HeroExpenseSavings sav={sav} lang={lang} /> : '—'}
           </div>
           {descText ? (
             <p className="cmd-hero-desc">
@@ -584,7 +585,7 @@ function ContextPanel({ type, payload, extra, tr, lang, onClose, onNavigate, imp
   if (!type || !payload) return null
   const dc = dClr[payload.domain] || T.accent
   const tDrill = (k, p) => (p != null && typeof p === 'object' ? strictTParams(tr, lang, k, p) : strictT(tr, lang, k))
-  const drillLines = buildDrillIntelligence({ panelType: type, payload, extra, t: tDrill })
+  const drillLines = buildDrillIntelligence({ panelType: type, payload, extra, t: tDrill, lang })
   const drillTheme = { card: T.card, border: T.border, text1: T.text1, text2: T.text2, text3: T.text3, accent: T.accent }
 
   const Sec = ({ label, color=T.text3, children }) => (
@@ -818,7 +819,7 @@ function ContextPanel({ type, payload, extra, tr, lang, onClose, onNavigate, imp
                     direction: 'ltr',
                   }}
                 >
-                  {formatCompact(Number(revL))}
+                  {formatCompactForLang(Number(revL), lang)}
                 </div>
               </div>
             ) : null}
@@ -851,7 +852,7 @@ function ContextPanel({ type, payload, extra, tr, lang, onClose, onNavigate, imp
                     direction: 'ltr',
                   }}
                 >
-                  {formatCompact(Number(expL))}
+                  {formatCompactForLang(Number(expL), lang)}
                 </div>
               </div>
             ) : null}
@@ -884,7 +885,7 @@ function ContextPanel({ type, payload, extra, tr, lang, onClose, onNavigate, imp
                     direction: 'ltr',
                   }}
                 >
-                  {formatCompact(Number(npL))}
+                  {formatCompactForLang(Number(npL), lang)}
                 </div>
               </div>
             ) : null}
@@ -1202,7 +1203,7 @@ function ContextPanel({ type, payload, extra, tr, lang, onClose, onNavigate, imp
         {sav != null && Number.isFinite(Number(sav)) && Number(sav) > 0 ? (
           <Sec label={strictT(tr, lang, 'cmd_dec_impact_monthly')} color={T.green}>
             <div style={{ fontFamily: 'monospace', fontSize: 18, fontWeight: 800, color: T.green, direction: 'ltr' }}>
-              {formatCompact(sav)}
+              {formatCompactForLang(sav, lang)}
             </div>
           </Sec>
         ) : null}
@@ -1294,7 +1295,7 @@ function ExecutiveKpiRow({
   supportingOnly = false,
 }) {
   const na = strictT(tr, lang, 'cmd_na_short')
-  const dispFull = (v) => (v == null || v === '' || isNaN(Number(v)) ? null : formatFull(v))
+  const dispFull = (v) => (v == null || v === '' || isNaN(Number(v)) ? null : formatFullForLang(v, lang))
   const cfEstimated = cashflow?.reliability === 'estimated'
   const wc       = kpis.working_capital?.value
              ?? cashflow?.working_capital
@@ -1363,6 +1364,7 @@ function ExecutiveKpiRow({
           compact={compact}
           na={na}
           signedTone={!!c.signedTone}
+          lang={lang}
         />
         {c.full && (
           <div className="cmd-kpi-full-amount">
@@ -1641,14 +1643,14 @@ function ForecastNow({ fcData, tr, lang, secondary = false }) {
         <div style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:8,padding:secondary?'6px 8px':'8px 10px'}}>
           <div style={{fontSize:8,color:T.text3,textTransform:'uppercase',letterSpacing:'.08em',marginBottom:2}}>{strictT(tr, lang, 'revenue')}</div>
           <div style={{fontFamily:'monospace',fontSize:secondary?14:15,fontWeight:800,color:T.accent,direction:'ltr'}}>
-            {bRev?.point!=null?formatCompact(bRev.point):'—'}
+            {bRev?.point!=null?formatCompactForLang(bRev.point,lang):'—'}
           </div>
           {bRev?.confidence!=null&&<div style={{fontSize:8,color:T.text3,marginTop:2}}>{strictT(tr, lang, 'fc_confidence')}: {bRev.confidence}%</div>}
         </div>
         <div style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:8,padding:secondary?'6px 8px':'8px 10px'}}>
           <div style={{fontSize:8,color:T.text3,textTransform:'uppercase',letterSpacing:'.08em',marginBottom:2}}>{strictT(tr, lang, 'net_profit')}</div>
           <div style={{fontFamily:'monospace',fontSize:secondary?14:15,fontWeight:800,color:bNp?.point!=null&&Number(bNp.point)<0?T.red:T.green,direction:'ltr'}}>
-            {bNp?.point!=null?formatCompact(bNp.point):'—'}
+            {bNp?.point!=null?formatCompactForLang(bNp.point,lang):'—'}
           </div>
           {bNp?.confidence!=null&&<div style={{fontSize:8,color:T.text3,marginTop:2}}>{strictT(tr, lang, 'fc_confidence')}: {bNp.confidence}%</div>}
         </div>
@@ -1841,6 +1843,7 @@ function SecondaryInsightsGrid({ fcData, alerts, tr, lang, navigate, drillAnalys
 }
 
 export default function CommandCenter() {
+  const { authFetch } = useAuth()
   const { tr, lang }   = useLang()
   const { selectedId, selectedCompany } = useCompany()
   const { toQueryString: scopeQS, params: ps, update: psUpdate, setResolved: psSetResolved,
@@ -1890,7 +1893,7 @@ export default function CommandCenter() {
     setLoading(true)
     setNoDataMsg(null)
     try {
-      const r = await fetch(`${API}/analysis/${selectedId}/executive?${qs}`, { headers:auth() })
+      const r = await authFetch(`${API}/analysis/${selectedId}/executive?${qs}`, { headers: auth() })
       if (!r.ok) {
         if (r.status === 422) {
           setMain(null)
@@ -1928,14 +1931,14 @@ export default function CommandCenter() {
       try {
         const fqs = buildAnalysisQuery(scopeQS, { lang, window: win, consolidate: false })
         if (fqs !== null) {
-          const fr = await fetch(`${API}/analysis/${selectedId}/forecast?${fqs}`, { headers:auth() })
+          const fr = await authFetch(`${API}/analysis/${selectedId}/forecast?${fqs}`, { headers: auth() })
           if (fr.ok) { const fj = await fr.json(); if (fj?.data) setFcData(fj.data) }
         }
       } catch (_) {}
     } finally {
       setLoading(false)
     }
-  }, [selectedId, lang, consolidate, win, scopeQS, tr, psIncomplete, psSetResolved])
+  }, [selectedId, lang, consolidate, win, scopeQS, tr, psIncomplete, psSetResolved, authFetch])
 
   useEffect(() => { load() }, [load])
 
@@ -1947,31 +1950,6 @@ export default function CommandCenter() {
     }
     prevLoadingRef.current = loading
   }, [loading, main])
-
-  if (!selectedId) {
-  return (
-    <div className="cmd-page" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', justifyContent: 'center', minHeight: '70vh' }}>
-      <div className="cmd-page-constrain" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 16 }}>
-        <span style={{ fontSize: 52, opacity: 0.15 }}>🏢</span>
-        <div style={{ fontSize: 15, fontWeight: 600, color: T.text2, textAlign: 'left' }}>{strictT(tr, lang, 'exec_no_company')}</div>
-      </div>
-    </div>
-  )
-  }
-
-  if (selectedId && noDataMsg && !main) {
-    return (
-      <div className="cmd-page">
-        <div className="cmd-page-constrain">
-          <div style={{ padding: '12px 16px', borderRadius: 14, width: '100%', textAlign: 'left',
-            background: 'rgba(251,191,36,0.10)', border: '1px solid rgba(251,191,36,0.25)',
-            color: T.text2, fontSize: 13, fontWeight: 600 }}>
-            {noDataMsg}
-          </div>
-        </div>
-      </div>
-    )
-  }
 
   const health = main?.health_score_v2 ?? intel?.health_score_v2 ?? null
   const status = intel?.status ?? (health!=null ? health>=80?'excellent':health>=60?'good':health>=40?'warning':'risk' : 'neutral')
@@ -2069,6 +2047,31 @@ export default function CommandCenter() {
     setPLoad(null)
     setPXtra(null)
   }, [])
+
+  if (!selectedId) {
+    return (
+      <div className="cmd-page" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', justifyContent: 'center', minHeight: '70vh' }}>
+        <div className="cmd-page-constrain" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 16 }}>
+          <span style={{ fontSize: 52, opacity: 0.15 }}>🏢</span>
+          <div style={{ fontSize: 15, fontWeight: 600, color: T.text2, textAlign: 'left' }}>{strictT(tr, lang, 'exec_no_company')}</div>
+        </div>
+      </div>
+    )
+  }
+
+  if (selectedId && noDataMsg && !main) {
+    return (
+      <div className="cmd-page">
+        <div className="cmd-page-constrain">
+          <div style={{ padding: '12px 16px', borderRadius: 14, width: '100%', textAlign: 'left',
+            background: 'rgba(251,191,36,0.10)', border: '1px solid rgba(251,191,36,0.25)',
+            color: T.text2, fontSize: 13, fontWeight: 600 }}>
+            {noDataMsg}
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="cmd-page">
@@ -2347,6 +2350,7 @@ export default function CommandCenter() {
 
       <AiCfoPanel
         tr={tr}
+        lang={lang}
         hasExecutiveData={!!main}
         narrative={narrative}
         kpis={kpis}

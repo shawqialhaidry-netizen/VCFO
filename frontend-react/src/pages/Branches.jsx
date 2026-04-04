@@ -9,7 +9,13 @@ import { useCompany } from '../context/CompanyContext.jsx'
 import DrillBackBar from '../components/DrillBackBar.jsx'
 import { useLang }    from '../context/LangContext.jsx'
 import { usePeriodScope } from '../context/PeriodScopeContext.jsx'
-import { formatCompact, formatFull, formatDual, formatPct, formatMultiple, formatDays } from '../utils/numberFormat.js'
+import {
+  formatCompactForLang,
+  formatFullForLang,
+  formatPct,
+  formatPctForLang,
+  formatMultipleForLang,
+} from '../utils/numberFormat.js'
 import { buildAnalysisQuery } from '../utils/buildAnalysisQuery.js'
 
 const API = '/api/v1'
@@ -657,7 +663,7 @@ function BranchRow({ branch: b, onEdit, onDelete, onAnalyse, canWrite, tr, lang 
 
 // ── Intelligence Panel ────────────────────────────────────────────────────────
 function IntelligencePanel({ intel, loading }) {
-  const { tr } = useLang()
+  const { tr, lang } = useLang()
   if (loading) return (
     <div style={{ textAlign: 'center', padding: 48 }}>
       <div style={{ width: 28, height: 28, margin: '0 auto', border: '2px solid var(--border)',
@@ -680,10 +686,14 @@ function IntelligencePanel({ intel, loading }) {
   const PRIORITY_COLOR = { high: 'var(--red)', medium: 'var(--amber)', low: 'var(--text-muted)' }
   const INSIGHT_ICON   = { lead: '🏆', improving: '📈', risk: '⚠️', inefficient: '⚡', opportunity: '💡' }
   const RANK_KEYS = [
-    { k: 'revenue',       label: tr('col_revenue'),     fmt: v => formatCompact(v) },
-    { k: 'profitability', label: tr('col_net_margin'),   fmt: v => formatPct(v) },
-    { k: 'efficiency',    label: tr('col_exp_ratio'),    fmt: v => formatPct(v) },
-    { k: 'growth',        label: tr('col_mom_growth'),   fmt: v => v==null?'—':`${v>0?'+':''}${v.toFixed(1)}%` },
+    { k: 'revenue',       label: tr('col_revenue'),     fmt: (v) => formatCompactForLang(v, lang) },
+    { k: 'profitability', label: tr('col_net_margin'),   fmt: (v) => formatPctForLang(v, 1, lang) },
+    { k: 'efficiency',    label: tr('col_exp_ratio'),    fmt: (v) => formatPctForLang(v, 1, lang) },
+    {
+      k: 'growth',
+      label: tr('col_mom_growth'),
+      fmt: (v) => (v == null ? '—' : v > 0 ? `+${formatPctForLang(v, 1, lang)}` : formatPctForLang(v, 1, lang)),
+    },
   ]
 
   const cls = intel.classifications || {}
@@ -726,7 +736,9 @@ function IntelligencePanel({ intel, loading }) {
               </div>
               {branch?.value != null && (
                 <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
-                  {typeof branch.value === 'number' && branch.value > 1000 ? formatCompact(branch.value) : formatPct(branch.value)}
+                  {typeof branch.value === 'number' && branch.value > 1000
+                    ? formatCompactForLang(branch.value, lang)
+                    : formatPctForLang(branch.value, 1, lang)}
                 </div>
               )}
             </div>
@@ -807,14 +819,14 @@ function IntelligencePanel({ intel, loading }) {
                 {/* KPI quick stats */}
                 <div style={{ display: 'flex', gap: 16, fontSize: 11 }}>
                   <span style={{ color: 'var(--accent)', fontFamily: 'monospace', fontWeight: 700 }}>
-                    {formatCompact(b.kpis?.revenue)}
+                    {formatCompactForLang(b.kpis?.revenue, lang)}
                   </span>
                   <span style={{ color: clr(b.kpis?.net_margin_pct), fontFamily: 'monospace' }}>
-                    {formatPct(b.kpis?.net_margin_pct)} {tr('label_nm')}
+                    {formatPctForLang(b.kpis?.net_margin_pct, 1, lang)} {tr('label_nm')}
                   </span>
                   {b.kpis?.expense_ratio != null && (
                     <span style={{ color: (b.kpis.expense_ratio > 60) ? 'var(--red)' : 'var(--text-muted)', fontFamily: 'monospace' }}>
-                      {formatPct(b.kpis.expense_ratio)} {tr('label_exp')}
+                      {formatPctForLang(b.kpis.expense_ratio, 1, lang)} {tr('label_exp')}
                     </span>
                   )}
                 </div>
@@ -1060,12 +1072,12 @@ function BranchAnalysisPanel({ branch, onClose, window: brWindow }) {
                 {/* KPI cards */}
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, marginBottom: 20 }}>
                   {[
-                    { label: tr('kpi_revenue'),           value: formatCompact(l.revenue),            full: formatFull(l.revenue),   color: 'var(--accent)' },
-                    { label: tr('kpi_net_profit'),        value: formatCompact(l.net_profit),         full: formatFull(l.net_profit),color: clr(l.net_profit) },
-                    { label: tr('kpi_gross_margin'),      value: formatPct(l.gross_margin_pct),       full: null, color: clr(l.gross_margin_pct) },
-                    { label: tr('kpi_net_margin'),        value: formatPct(l.net_margin_pct),         full: null, color: clr(l.net_margin_pct) },
-                    { label: tr('kpi_expense_ratio'),     value: formatPct(l.expense_ratio),          full: null, color: l.expense_ratio > 70 ? 'var(--red)' : 'var(--text-primary)' },
-                    { label: tr('kpi_operating_margin'),  value: formatPct(l.operating_margin_pct),  full: null, color: clr(l.operating_margin_pct) },
+                    { label: tr('kpi_revenue'),           value: formatCompactForLang(l.revenue, lang),            full: formatFullForLang(l.revenue, lang),   color: 'var(--accent)' },
+                    { label: tr('kpi_net_profit'),        value: formatCompactForLang(l.net_profit, lang),         full: formatFullForLang(l.net_profit, lang),color: clr(l.net_profit) },
+                    { label: tr('kpi_gross_margin'),      value: formatPctForLang(l.gross_margin_pct, 1, lang),       full: null, color: clr(l.gross_margin_pct) },
+                    { label: tr('kpi_net_margin'),        value: formatPctForLang(l.net_margin_pct, 1, lang),         full: null, color: clr(l.net_margin_pct) },
+                    { label: tr('kpi_expense_ratio'),     value: formatPctForLang(l.expense_ratio, 1, lang),          full: null, color: l.expense_ratio > 70 ? 'var(--red)' : 'var(--text-primary)' },
+                    { label: tr('kpi_operating_margin'),  value: formatPctForLang(l.operating_margin_pct, 1, lang),  full: null, color: clr(l.operating_margin_pct) },
                   ].map((kpi, i) => (
                     <div key={i} style={{
                       background: 'var(--bg-elevated)', border: '1px solid var(--border)',
@@ -1107,15 +1119,19 @@ function BranchAnalysisPanel({ branch, onClose, window: brWindow }) {
                               background: i === periods.length-1 ? 'rgba(0,212,170,.05)' : 'transparent' }}>
                               <td style={{ padding: '8px 12px', color: 'var(--text-secondary)', fontWeight: 600 }}>{p}</td>
                               <td style={{ padding: '8px 12px', textAlign: 'right', color: 'var(--accent)', fontFamily: 'monospace' }}>
-                                {formatCompact(revSeries[i])}
+                                {formatCompactForLang(revSeries[i], lang)}
                               </td>
                               <td style={{ padding: '8px 12px', textAlign: 'right', fontFamily: 'monospace',
                                 color: (npSeries[i] ?? 0) >= 0 ? 'var(--green)' : 'var(--red)' }}>
-                                {formatCompact(npSeries[i])}
+                                {formatCompactForLang(npSeries[i], lang)}
                               </td>
                               <td style={{ padding: '8px 12px', textAlign: 'right', fontFamily: 'monospace',
                                 color: momRev[i] == null ? 'var(--text-muted)' : momRev[i] > 0 ? 'var(--green)' : 'var(--red)' }}>
-                                {momRev[i] == null ? '—' : `${momRev[i] > 0 ? '+' : ''}${momRev[i].toFixed(1)}%`}
+                                {momRev[i] == null
+                                  ? '—'
+                                  : momRev[i] > 0
+                                    ? `+${formatPctForLang(momRev[i], 1, lang)}`
+                                    : formatPctForLang(momRev[i], 1, lang)}
                               </td>
                             </tr>
                           ))}
@@ -1133,10 +1149,10 @@ function BranchAnalysisPanel({ branch, onClose, window: brWindow }) {
                       textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: 8 }}>{tr('insights_title')}</div>
                     <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', fontSize: 12, color: 'var(--text-secondary)' }}>
                       {ins.avg_revenue != null && (
-                        <span>{tr('avg_revenue')} <strong style={{ color: 'var(--accent)' }}>{formatCompact(ins.avg_revenue)}</strong></span>
+                        <span>{tr('avg_revenue')} <strong style={{ color: 'var(--accent)' }}>{formatCompactForLang(ins.avg_revenue, lang)}</strong></span>
                       )}
                       {ins.avg_net_profit != null && (
-                        <span>{tr('avg_net_profit')} <strong style={{ color: clr(ins.avg_net_profit) }}>{formatCompact(ins.avg_net_profit)}</strong></span>
+                        <span>{tr('avg_net_profit')} <strong style={{ color: clr(ins.avg_net_profit) }}>{formatCompactForLang(ins.avg_net_profit, lang)}</strong></span>
                       )}
                       {ins.periods_growing > 0 && (
                         <span>{tr('growth_months')} <strong style={{ color: 'var(--green)' }}>{ins.periods_growing}</strong></span>

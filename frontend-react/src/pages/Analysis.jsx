@@ -25,7 +25,13 @@ import { useLang }    from '../context/LangContext.jsx'
 import { useCompany } from '../context/CompanyContext.jsx'
 import { usePeriodScope } from '../context/PeriodScopeContext.jsx'  // FIX-1.2
 import { kpiContextLabel, kpiLabel } from '../utils/kpiContext.js'
-import { formatCompact, formatFull, formatDual, formatPct, formatMultiple, formatDays } from '../utils/numberFormat.js'
+import {
+  formatCompactForLang,
+  formatFullForLang,
+  formatPctForLang,
+  formatMultipleForLang,
+  formatDays,
+} from '../utils/numberFormat.js'
 import { buildAnalysisQuery } from '../utils/buildAnalysisQuery.js'
 import { ANALYSIS_PATH_BY_TAB } from '../utils/analysisRoutes.js'
 
@@ -36,11 +42,7 @@ function auth() {
 }
 
 // ── Formatters ────────────────────────────────────────────────────────────────
-// fmtM → formatCompact (from numberFormat.js)
-const fmtP  = v => v==null?'—':`${Number(v).toFixed(1)}%`
-const fmtX  = v => v==null?'—':`${Number(v).toFixed(2)}x`
-const fmtD  = v => v==null?'—':`${Math.round(v)}d`
-const fmtV  = (k,v) => k.includes('margin')||k.includes('_pct')?fmtP(v):k.includes('ratio')||k.includes('turnover')?fmtX(v):k.includes('days')?fmtD(v):formatCompact(v)
+const fmtD = (v) => (v == null ? '—' : `${Math.round(v)}d`)
 const clr   = v => v==null?'var(--text-secondary)':v>0?'var(--green)':v<0?'var(--red)':'var(--text-secondary)'
 const arr   = v => v==null?'':v>0?'▲':v<0?'▼':'─'
 const stC   = {excellent:'var(--green)',good:'var(--accent)',warning:'var(--amber)',risk:'var(--red)',neutral:'var(--text-secondary)'}
@@ -543,6 +545,19 @@ export default function Analysis({ routeDefaultTab = null } = {}) {
     if (params != null && typeof params === 'object') return strictTParams(trCtx, lang, key, params)
     return strictT(trCtx, lang, key)
   }, [trCtx, lang])
+
+  const fmtV = useCallback(
+    (k, v) => {
+      if (v == null || (typeof v === 'number' && !Number.isFinite(v))) return '—'
+      if (k.includes('margin') || k.includes('_pct')) return formatPctForLang(v, 1, lang)
+      if (k.includes('ratio') || k.includes('turnover')) return formatMultipleForLang(v, 2, lang)
+      if (k.includes('days')) return fmtD(v)
+      return formatCompactForLang(v, lang)
+    },
+    [lang],
+  )
+  const fmtP = useCallback((v) => formatPctForLang(v, 1, lang), [lang])
+  const fmtX = useCallback((v) => formatMultipleForLang(v, 2, lang), [lang])
   const ctxLabel = () => kpiContextLabel({ window: 'ALL', ps: ps||{}, latestPeriod: data?.meta?.periods?.slice(-1)[0] || '', lang, tr })
   const { selectedId, selectedCompany } = useCompany()
   const { params: ps, toQueryString: scopeQS, setResolved, isIncompleteCustom, window: win } = usePeriodScope()
@@ -679,8 +694,13 @@ export default function Analysis({ routeDefaultTab = null } = {}) {
         cashflow: drillBundle.cashflow,
         comparative_intelligence: drillBundle.comparative_intelligence,
       },
+      analysisRatios: {
+        profitability: prof,
+        liquidity: liq,
+        efficiency: eff,
+      },
     }
-  }, [drillBundle])
+  }, [drillBundle, prof, liq, eff])
 
   const analysisDrillLines = useCallback(
     (tabKey) => {
@@ -690,9 +710,10 @@ export default function Analysis({ routeDefaultTab = null } = {}) {
         payload: { tab: tabKey },
         extra: drillExtra,
         t: tr,
+        lang,
       })
     },
-    [drillExtra, tr],
+    [drillExtra, tr, lang],
   )
 
   const kpiExplain = {
@@ -838,7 +859,7 @@ export default function Analysis({ routeDefaultTab = null } = {}) {
             <div style={{fontSize:9,color:'var(--text-secondary)',marginTop:4}}>/100</div>
             <div style={{fontSize:10,fontWeight:700,color:hc,marginTop:6,textAlign:'center'}}>{tr(`status_${status}_simple`)}</div>
           </Card>
-          <MetricCard label={kpiLabel(tr('fc_revenue'), ctxLabel(), tr)} value={formatCompact(kpis.revenue?.value)} fullValue={formatFull(kpis.revenue?.value)}
+          <MetricCard label={kpiLabel(tr('fc_revenue'), ctxLabel(), tr)} value={formatCompactForLang(kpis.revenue?.value, lang)} fullValue={formatFullForLang(kpis.revenue?.value, lang)}
             lang={lang} tr={tr} momWord={tr('mom_label')}
             mom={kpis.revenue?.mom_pct} spark={series.revenue?.slice(-10)} color='var(--accent)' explain={kpiExplain.revenue}
             insight={(() => {
@@ -849,8 +870,8 @@ export default function Analysis({ routeDefaultTab = null } = {}) {
                 : null
             })()}
             cause={(()=>{const dec=(d?.decisions||[]).find(x=>x.domain==='growth');return dec?.reason?dec.reason.split('. ')[0].slice(0,60):null})()}
-            forecast={kpiForecast('revenue',fcData,tr,formatCompact)}/>
-          <MetricCard label={kpiLabel(tr('fc_net_profit'), ctxLabel(), tr)} value={formatCompact(kpis.net_profit?.value)} fullValue={formatFull(kpis.net_profit?.value)}
+            forecast={kpiForecast('revenue', fcData, tr, (v) => formatCompactForLang(v, lang))}/>
+          <MetricCard label={kpiLabel(tr('fc_net_profit'), ctxLabel(), tr)} value={formatCompactForLang(kpis.net_profit?.value, lang)} fullValue={formatFullForLang(kpis.net_profit?.value, lang)}
             lang={lang} tr={tr} momWord={tr('mom_label')}
             mom={kpis.net_profit?.mom_pct} spark={series.net_profit?.slice(-10)} color='var(--green)' explain={kpiExplain.net_profit}
             insight={(() => {
@@ -861,7 +882,7 @@ export default function Analysis({ routeDefaultTab = null } = {}) {
               const gm = ratios?.profitability?.gross_margin_pct
               return gm?.value != null ? tr('dash_gross_margin_line', { value: gm.value.toFixed(1) }) : null
             })()}
-            forecast={kpiForecast('net_profit',fcData,tr,formatCompact)}/>
+            forecast={kpiForecast('net_profit', fcData, tr, (v) => formatCompactForLang(v, lang))}/>
           <MetricCard label={tr('net_margin')} value={fmtP(kpis.net_margin?.value)}
             lang={lang} tr={tr} momWord={tr('mom_label')}
             mom={kpis.net_margin?.mom_pct} color='var(--violet)' explain={kpiExplain.margin}
@@ -944,11 +965,18 @@ export default function Analysis({ routeDefaultTab = null } = {}) {
                 sub={tr('cashflow_operating_sub')}/>
               <div style={{fontFamily:'var(--font-mono)',fontSize:26,fontWeight:800,
                 color:cashflow.operating_cashflow>=0?'var(--green)':'var(--red)',direction:'ltr',marginBottom:6}}>
-                {formatCompact(cashflow.operating_cashflow)}
+                {formatCompactForLang(cashflow.operating_cashflow, lang)}
               </div>
               {cashflow.operating_cashflow_mom!=null&&(
                 <div style={{fontSize:11,color:clr(cashflow.operating_cashflow_mom),marginBottom:8}}>
-                  {cashflow.operating_cashflow_mom>0?'+':''}{cashflow.operating_cashflow_mom?.toFixed(1)}% {tr('mom_short')}
+                  {cashflow.operating_cashflow_mom > 0 ? '+' : ''}
+                  {Number(cashflow.operating_cashflow_mom).toFixed(1)}
+                  {String(lang || '')
+                    .toLowerCase()
+                    .startsWith('ar')
+                    ? '٪ '
+                    : '% '}
+                  {tr('mom_short')}
                 </div>
               )}
               <p style={{fontSize:11,color:'var(--text-secondary)',lineHeight:1.5,marginBottom:10}}>
@@ -984,7 +1012,7 @@ export default function Analysis({ routeDefaultTab = null } = {}) {
                         {tr(`kpi_label_${k}`)}
                       </div>
                       <div style={{ fontFamily: 'var(--font-mono)', fontSize: 16, fontWeight: 800, direction: 'ltr' }}>
-                        {v != null && Number.isFinite(Number(v)) ? formatCompact(Number(v)) : '—'}
+                        {v != null && Number.isFinite(Number(v)) ? formatCompactForLang(Number(v), lang) : '—'}
                       </div>
                     </div>
                   ))}
@@ -1038,7 +1066,7 @@ export default function Analysis({ routeDefaultTab = null } = {}) {
               <Card style={{ gridColumn: '1 / -1', borderTop: '2px solid var(--amber)' }}>
                 <SectionHead label={tr('liquidity')} color="var(--blue)" sub={tr('drill_intel_tab_fallback_hint')} />
                 <div style={{ fontFamily: 'var(--font-mono)', fontSize: 20, fontWeight: 800, direction: 'ltr', color: 'var(--accent)' }}>
-                  {cashflow?.operating_cashflow != null ? formatCompact(cashflow.operating_cashflow) : '—'}
+                  {cashflow?.operating_cashflow != null ? formatCompactForLang(cashflow.operating_cashflow, lang) : '—'}
                 </div>
                 <p style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 8 }}>{tr('cashflow_operating_sub')}</p>
               </Card>
@@ -1055,7 +1083,7 @@ export default function Analysis({ routeDefaultTab = null } = {}) {
                 <SectionHead label={tr('cashflow_operating')} color='var(--blue)'/>
                 <div style={{fontFamily:'var(--font-mono)',fontSize:22,fontWeight:800,
                   color:cashflow.operating_cashflow>=0?'var(--green)':'var(--red)',direction:'ltr'}}>
-                  {formatCompact(cashflow.operating_cashflow)}
+                  {formatCompactForLang(cashflow.operating_cashflow, lang)}
                 </div>
               </Card>
             </div>
@@ -1098,7 +1126,7 @@ export default function Analysis({ routeDefaultTab = null } = {}) {
                       {tr('kpi_label_expenses')}
                     </div>
                     <div style={{ fontFamily: 'var(--font-mono)', fontSize: 16, fontWeight: 800, direction: 'ltr' }}>
-                      {kpis.expenses?.value != null ? formatCompact(kpis.expenses.value) : '—'}
+                      {kpis.expenses?.value != null ? formatCompactForLang(kpis.expenses.value, lang) : '—'}
                     </div>
                   </div>
                   <div>

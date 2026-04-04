@@ -3,7 +3,13 @@
  * Bullets only: max 3 per column, compact money, CFO-readable.
  */
 
-import { formatCompact, formatMultiple } from './numberFormat.js'
+import {
+  formatCompactForLang,
+  formatMultipleForLang,
+  formatPctForLang,
+  formatPpForLang,
+  formatSignedPctForLang,
+} from './numberFormat.js'
 import { normalizeUiLang } from './strictI18n.js'
 
 const MAX_COL = 3
@@ -21,13 +27,14 @@ function momWord(lang) {
  * @param {(key: string, params?: Record<string, string>) => string} t
  * @param {string} mw - momentum label (e.g. mom_label)
  */
-function lexFromTranslate(t, mw) {
+function lexFromTranslate(t, mw, lang) {
   return {
     revenue: t('narr_word_revenue'),
     expenses: t('narr_word_expenses'),
     margin: t('narr_word_margin'),
     contributing: (cat, amt) => t('narr_contributing', { cat, amt }),
-    branchPct: (name, pct) => t('narr_branch_pct', { name, pct: String(pct) }),
+    branchPct: (name, pct) =>
+      t('narr_branch_pct', { name, pct: formatPctForLang(Number(pct), 0, lang) }),
     branchPressure: (name, amt) => t('narr_branch_pressure', { name, amt, mom_word: mw }),
     actionFrom: (title) => t('narr_action_entity', { title }),
     stableWhat: t('narr_stable_what'),
@@ -71,7 +78,7 @@ function lex(lang, momentumSuffix) {
       expenses: 'المصروفات',
       margin: 'الهامش',
       contributing: (cat, amt) => `أبرز مساهمة: ${cat} بمقدار ${amt}`,
-      branchPct: (name, pct) => `${name} تمثّل ${pct}% من زيادة التكلفة`,
+      branchPct: (name, pct) => `${name} تمثّل ${formatPctForLang(Number(pct), 0, lang)} من زيادة التكلفة`,
       branchPressure: (name, amt) => `${name}: زيادة مصروفات بمقدار ${amt} ${mw}`,
       actionFrom: (title) => String(title || '').trim(),
       stableWhat: 'الأداء مستقر دون انحرافات جوهرية.',
@@ -80,7 +87,7 @@ function lex(lang, momentumSuffix) {
       whyWc: (amt) => `رأس المال العامل: ${amt}.`,
       whyCr: (r) => `النسبة الجارية ${r} — السيولة ضمن المتابعة.`,
       whyNp: (amt) => `صافي الربح (سياق الفترة): ${amt}.`,
-      whyNoNumber: 'لا سائد واحد؛ تابع اتجاهات الفترة.',
+      whyNoNumber: 'لا عاملًا واحدًا يهيمن؛ راقب اتجاه الفترة ككل.',
       doDefault: 'حافظ على الانضباط التشغيلي وراقب التدفق النقدي عن كثب.',
       healthMarginDown: (pp, cat, branch) =>
         branch && cat
@@ -108,7 +115,7 @@ function lex(lang, momentumSuffix) {
       expenses: 'Giderler',
       margin: 'Marj',
       contributing: (cat, amt) => `${cat}: ${amt} katkı`,
-      branchPct: (name, pct) => `${name} maliyet artışının %${pct}'ini sürüklüyor`,
+      branchPct: (name, pct) => `${name} maliyet artışına ${formatPctForLang(Number(pct), 0, lang)} ile öncülük ediyor`,
       branchPressure: (name, amt) => `${name} maliyet baskısı ${amt} ${mw}`,
       actionFrom: (title) => String(title || '').trim(),
       stableWhat: 'Performans, önemli sapma olmadan istikrarlı.',
@@ -144,7 +151,7 @@ function lex(lang, momentumSuffix) {
     expenses: 'Expenses',
     margin: 'Margin',
     contributing: (cat, amt) => `${cat} contributing ${amt}`,
-    branchPct: (name, pct) => `${name} driving ${pct}% of cost increase`,
+    branchPct: (name, pct) => `${name} driving ${formatPctForLang(Number(pct), 0, lang)} of cost increase`,
     branchPressure: (name, amt) => `${name} adding ${amt} expense ${mw}`,
     actionFrom: (title) => String(title || '').trim(),
     stableWhat: 'Performance stable with no material deviations.',
@@ -176,23 +183,12 @@ function lex(lang, momentumSuffix) {
   }
 }
 
-function fmtSignedMoney(v) {
+function fmtSignedMoney(v, lang) {
   if (v == null || v === '' || isNaN(Number(v))) return ''
   const n = Number(v)
-  if (n > 0) return '+' + formatCompact(n)
-  return formatCompact(n)
-}
-
-function fmtPct(p) {
-  if (p == null || !Number.isFinite(Number(p))) return ''
-  const n = Number(p)
-  return `${n >= 0 ? '+' : ''}${n.toFixed(1)}%`
-}
-
-function fmtPp(p) {
-  if (p == null || !Number.isFinite(Number(p))) return ''
-  const n = Number(p)
-  return `${n >= 0 ? '+' : ''}${n.toFixed(1)}pp`
+  const fc = formatCompactForLang(n, lang)
+  if (n > 0) return '+' + fc
+  return fc
 }
 
 function arrowForDelta(n) {
@@ -251,25 +247,35 @@ function buildWhatLines(payload, L, lang = 'en', mw) {
 
   if (revD != null && Number.isFinite(Number(revD))) {
     const pct =
-      revMomPct != null && Number.isFinite(Number(revMomPct)) ? ` (${fmtPct(revMomPct)})` : ''
-    lines.push(`${L.revenue} ${arrowForDelta(revD)} ${fmtSignedMoney(revD)}${pct} ${momentum}`)
+      revMomPct != null && Number.isFinite(Number(revMomPct))
+        ? ` (${formatSignedPctForLang(revMomPct, 1, lang)})`
+        : ''
+    lines.push(`${L.revenue} ${arrowForDelta(revD)} ${fmtSignedMoney(revD, lang)}${pct} ${momentum}`)
   } else if (revMomPct != null && Number.isFinite(Number(revMomPct))) {
-    lines.push(`${L.revenue} ${arrowForDelta(revMomPct)} (${fmtPct(revMomPct)}) ${momentum}`)
+    lines.push(
+      `${L.revenue} ${arrowForDelta(revMomPct)} (${formatSignedPctForLang(revMomPct, 1, lang)}) ${momentum}`,
+    )
   }
 
   if (expD != null && Number.isFinite(Number(expD))) {
     const pct =
-      expMomPct != null && Number.isFinite(Number(expMomPct)) ? ` (${fmtPct(expMomPct)})` : ''
-    lines.push(`${L.expenses} ${arrowForDelta(expD)} ${fmtSignedMoney(expD)}${pct} ${momentum}`)
+      expMomPct != null && Number.isFinite(Number(expMomPct))
+        ? ` (${formatSignedPctForLang(expMomPct, 1, lang)})`
+        : ''
+    lines.push(`${L.expenses} ${arrowForDelta(expD)} ${fmtSignedMoney(expD, lang)}${pct} ${momentum}`)
   } else if (expMomPct != null && Number.isFinite(Number(expMomPct))) {
-    lines.push(`${L.expenses} ${arrowForDelta(expMomPct)} (${fmtPct(expMomPct)}) ${momentum}`)
+    lines.push(
+      `${L.expenses} ${arrowForDelta(expMomPct)} (${formatSignedPctForLang(expMomPct, 1, lang)}) ${momentum}`,
+    )
   }
 
   if (ratioPp != null && Number.isFinite(Number(ratioPp))) {
     const a = Number(ratioPp) > 0 ? '↓' : Number(ratioPp) < 0 ? '↑' : '→'
-    lines.push(`${L.margin} ${a} ${fmtPp(ratioPp)} ${momentum}`)
+    lines.push(`${L.margin} ${a} ${formatPpForLang(ratioPp, 1, lang)} ${momentum}`)
   } else if (nmMomPct != null && Number.isFinite(Number(nmMomPct))) {
-    lines.push(`${L.margin} ${arrowForDelta(nmMomPct)} (${fmtPct(nmMomPct)}) ${momentum}`)
+    lines.push(
+      `${L.margin} ${arrowForDelta(nmMomPct)} (${formatSignedPctForLang(nmMomPct, 1, lang)}) ${momentum}`,
+    )
   }
 
   return lines.slice(0, MAX_COL)
@@ -281,7 +287,7 @@ function buildWhyLines(payload, L, lang, translate) {
   const links = fb?.why?.links || {}
   const cat = links.category_driver_mom
   if (cat?.category != null && cat.delta != null && Number.isFinite(Number(cat.delta))) {
-    const amt = fmtSignedMoney(cat.delta)
+    const amt = fmtSignedMoney(cat.delta, lang)
     _dedupePush(lines, L.contributing(String(cat.category), amt))
   }
 
@@ -295,7 +301,7 @@ function buildWhyLines(payload, L, lang, translate) {
   const cp = payload.comparative_intelligence?.cost_pressure
   const momBr = cp?.driving_expense_increase_mom
   if (momBr?.branch_name && momBr.mom_delta_total_expense != null) {
-    const amt = fmtSignedMoney(momBr.mom_delta_total_expense)
+    const amt = fmtSignedMoney(momBr.mom_delta_total_expense, lang)
     _dedupePush(lines, L.branchPressure(String(momBr.branch_name), amt))
   }
 
@@ -306,14 +312,14 @@ function buildWhyLines(payload, L, lang, translate) {
     ineff.expense_pct_of_revenue != null &&
     !lines.some((l) => l.includes(String(ineff.branch_name)))
   ) {
-    const pct = Number(ineff.expense_pct_of_revenue).toFixed(1)
+    const pct = formatPctForLang(Number(ineff.expense_pct_of_revenue), 1, lang)
     const name = String(ineff.branch_name)
     if (typeof translate === 'function') {
       const ofRev = translate('cmd_branch_of_rev')
       _dedupePush(lines, translate('narr_ineff_branch_line', { name, pct, of_rev: ofRev }))
     } else {
       const tag = lang === 'ar' ? 'من الإيرادات' : lang === 'tr' ? 'gelire göre' : 'of revenue'
-      _dedupePush(lines, `${name} · ${pct}% ${tag}`)
+      _dedupePush(lines, `${name} · ${pct} ${tag}`)
     }
   }
 
@@ -344,35 +350,35 @@ function ratioVal(m) {
 }
 
 /** One WHY line that includes a number when payload exposes metrics (OCF → WC → CR → NP). */
-function pickWhyNumberLine(payload, L) {
+function pickWhyNumberLine(payload, L, lang) {
   const cf = payload.cashflow
   const cfOk = cf && typeof cf === 'object' && cf.error !== 'no data'
   if (cfOk && cf.operating_cashflow != null && Number.isFinite(Number(cf.operating_cashflow))) {
-    let s = L.whyOcf(formatCompact(cf.operating_cashflow))
+    let s = L.whyOcf(formatCompactForLang(cf.operating_cashflow, lang))
     if (cf.operating_cashflow_mom != null && Number.isFinite(Number(cf.operating_cashflow_mom))) {
-      s += ' ' + L.whyOcfMom(fmtPct(cf.operating_cashflow_mom))
+      s += ' ' + L.whyOcfMom(formatSignedPctForLang(cf.operating_cashflow_mom, 1, lang))
     }
     return s
   }
   const stm = payload.statements
   const ocf2 = stm?.summary?.operating_cashflow ?? stm?.cashflow?.operating_cashflow
-  if (ocf2 != null && Number.isFinite(Number(ocf2))) return L.whyOcf(formatCompact(ocf2))
+  if (ocf2 != null && Number.isFinite(Number(ocf2))) return L.whyOcf(formatCompactForLang(ocf2, lang))
 
   const wc =
     payload.kpi_block?.kpis?.working_capital?.value ??
     stm?.summary?.working_capital ??
     stm?.balance_sheet?.working_capital
-  if (wc != null && Number.isFinite(Number(wc))) return L.whyWc(formatCompact(wc))
+  if (wc != null && Number.isFinite(Number(wc))) return L.whyWc(formatCompactForLang(wc, lang))
 
   const liq = payload.intelligence?.ratios?.liquidity
   const cr = ratioVal(liq?.current_ratio)
-  if (cr != null) return L.whyCr(formatMultiple(cr))
+  if (cr != null) return L.whyCr(formatMultipleForLang(cr, 2, lang))
 
   const np =
     payload.kpi_block?.kpis?.net_profit?.point ??
     stm?.summary?.latest_net_profit ??
     stm?.income_statement?.net_profit
-  if (np != null && Number.isFinite(Number(np))) return L.whyNp(formatCompact(np))
+  if (np != null && Number.isFinite(Number(np))) return L.whyNp(formatCompactForLang(np, lang))
 
   return null
 }
@@ -381,11 +387,11 @@ function lineHasDigit(s) {
   return /\d/.test(String(s || ''))
 }
 
-function buildHealthHeadline(payload, L) {
+function buildHealthHeadline(payload, L, lang) {
   const nmMomPct = payload.kpi_block?.kpis?.net_margin?.mom_pct
   if (nmMomPct == null || !Number.isFinite(Number(nmMomPct))) return ''
   const n = Number(nmMomPct)
-  const pp = `${Math.abs(n).toFixed(1)}%`
+  const pp = formatPctForLang(Math.abs(n), 1, lang)
   const ei = payload.expense_intelligence
   const cat = ei?.top_category?.name ? String(ei.top_category.name) : ''
   const cp = payload.comparative_intelligence?.cost_pressure
@@ -433,7 +439,7 @@ export function buildExecutiveNarrative(payload = {}, options = {}) {
   const lang = normalizeUiLang(options.lang)
   const translate = typeof options.t === 'function' ? options.t : null
   const mw = translate ? translate('mom_label') : momWord(lang)
-  const L = translate ? lexFromTranslate(translate, mw) : lex(lang, mw)
+  const L = translate ? lexFromTranslate(translate, mw, lang) : lex(lang, mw)
 
   if (!payload || typeof payload !== 'object') {
     return {
@@ -452,7 +458,7 @@ export function buildExecutiveNarrative(payload = {}, options = {}) {
   if (!whatLines.length) whatLines = [L.stableWhat]
 
   const rawWhyLines = buildWhyLines(payload, L, lang, translate)
-  const metricWhy = pickWhyNumberLine(payload, L)
+  const metricWhy = pickWhyNumberLine(payload, L, lang)
   let whyLines = rawWhyLines.slice()
   if (!whyLines.length) {
     whyLines = metricWhy ? [metricWhy] : [L.whyNoNumber]
@@ -463,7 +469,7 @@ export function buildExecutiveNarrative(payload = {}, options = {}) {
 
   const rawDoLines = buildDoLines(payload, L, lang)
   let doLines = rawDoLines.length ? rawDoLines.slice(0, MAX_COL) : [L.doDefault]
-  const healthHeadline = buildHealthHeadline(payload, L)
+  const healthHeadline = buildHealthHeadline(payload, L, lang)
   const actionLine = rawDoLines.length ? rawDoLines[0] : null
 
   const whatChanged = {

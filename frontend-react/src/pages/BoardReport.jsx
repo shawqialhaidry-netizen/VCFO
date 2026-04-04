@@ -9,7 +9,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { usePeriodScope } from '../context/PeriodScopeContext.jsx'
 import { useLang }        from '../context/LangContext.jsx'
 import { useCompany }     from '../context/CompanyContext.jsx'
-import { formatCompact, formatFull, formatPct } from '../utils/numberFormat.js'
+import { formatCompactForLang, formatFullForLang, formatPct } from '../utils/numberFormat.js'
 
 const API = '/api/v1'
 function auth() {
@@ -223,7 +223,7 @@ function BCard({branch,roleKey,alsoKey,accent,tr,momLabel}){
       </div>
       <div style={{fontSize:15,fontWeight:800,color:T.text1,marginBottom:10}}>{branch.branch_name||branch.name||'—'}</div>
       <div style={{display:'flex',gap:18,flexWrap:'wrap'}}>
-        {branch.revenue!=null&&<div><div style={{fontSize:8,color:T.text3,textTransform:'uppercase',letterSpacing:'.06em',marginBottom:2}}>{tr('fc_revenue')}</div><div style={{fontSize:12,fontWeight:700,color:T.text1,fontFamily:'monospace'}}>{formatCompact(branch.revenue)}</div></div>}
+        {branch.revenue!=null&&<div><div style={{fontSize:8,color:T.text3,textTransform:'uppercase',letterSpacing:'.06em',marginBottom:2}}>{tr('fc_revenue')}</div><div style={{fontSize:12,fontWeight:700,color:T.text1,fontFamily:'monospace'}}>{formatCompactForLang(branch.revenue, lang)}</div></div>}
         {branch.net_margin!=null&&<div><div style={{fontSize:8,color:T.text3,textTransform:'uppercase',letterSpacing:'.06em',marginBottom:2}}>{tr('prof_net_margin')}</div><div style={{fontSize:12,fontWeight:700,color:branch.net_margin>=0?T.green:T.red,fontFamily:'monospace'}}>{formatPct(branch.net_margin)}</div></div>}
         {branch.mom_revenue_pct!=null&&<div><div style={{fontSize:8,color:T.text3,textTransform:'uppercase',letterSpacing:'.06em',marginBottom:2}}>{momLabel}</div><div style={{fontSize:12,fontWeight:700,color:branch.mom_revenue_pct>=0?T.green:T.red,fontFamily:'monospace'}}>{branch.mom_revenue_pct>0?'▲ ':'▼ '}{Math.abs(branch.mom_revenue_pct).toFixed(1)}%</div></div>}
       </div>
@@ -380,16 +380,16 @@ export default function BoardReport(){
         <SDiv n={2} title={tr('board_snapshot')} accent={T.violet}/>
         <div className="kpi-grid" style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:12,marginBottom:16}}>
           <KpiCard
-            label={tr('fc_revenue')} value={formatCompact(snap.revenue)} full={formatFull(snap.revenue)}
+            label={tr('fc_revenue')} value={formatCompactForLang(snap.revenue, lang)} full={formatFullForLang(snap.revenue, lang)}
             mom={snap.revenue_mom_pct??null} momLabel={momLabel}
-            avg={revAvg!=null?formatCompact(revAvg):null} avgLabel={avgLabel}
+            avg={revAvg!=null?formatCompactForLang(revAvg, lang):null} avgLabel={avgLabel}
             chg={prevComp.rev_chg_pct??null} chgLabel={prevComp.label||''}
             color={T.accent}
           />
           <KpiCard
-            label={tr('fc_net_profit')} value={formatCompact(snap.net_profit)} full={formatFull(snap.net_profit)}
+            label={tr('fc_net_profit')} value={formatCompactForLang(snap.net_profit, lang)} full={formatFullForLang(snap.net_profit, lang)}
             mom={snap.net_profit_mom_pct??null} momLabel={momLabel}
-            avg={npAvg!=null?formatCompact(npAvg):null} avgLabel={avgLabel}
+            avg={npAvg!=null?formatCompactForLang(npAvg, lang):null} avgLabel={avgLabel}
             chg={prevComp.np_chg_pct??null} chgLabel={prevComp.label||''}
             color={snap.net_profit>=0?T.green:T.red}
           />
@@ -402,7 +402,7 @@ export default function BoardReport(){
         <div className="two-col" style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:8}}>
           <Sec accent={T.blue}>
             <div style={{fontSize:10,fontWeight:800,color:T.blue,textTransform:'uppercase',letterSpacing:'.08em',marginBottom:12}}>{tr('liquidity_title')}</div>
-            <MRow label={tr('kpi_working_capital')} value={formatCompact(snap.working_capital)}/>
+            <MRow label={tr('kpi_working_capital')} value={formatCompactForLang(snap.working_capital, lang)}/>
             <MRow label={tr('ratio_current_ratio')} value={snap.current_ratio!=null?`${snap.current_ratio.toFixed(2)}×`:null} badge={crBadge?.l} bc={crBadge?.c}/>
             <MRow label={tr('ratio_dso_days')}      value={snap.dso_days!=null?`${Math.round(snap.dso_days)}d`:null}/>
             <MRow label={tr('ratio_ccc_days')}      value={snap.ccc_days!=null?`${Math.round(snap.ccc_days)}d`:null}/>
@@ -480,7 +480,7 @@ export default function BoardReport(){
                 ? <p style={{fontSize:12,color:T.text3,fontStyle:'italic',margin:0}}>—</p>
                 : expDrivers.map((d,i)=>(
                     <SRow key={i} rank={i+1}
-                      description={`${tr(d.label_key)||d.category_key}: ${formatPct(d.ratio_pct)} · ${formatCompact(d.amount)}${d.mom_change_pct!=null?` · MoM ${d.mom_change_pct>=0?'+':''}${d.mom_change_pct.toFixed(1)}%`:''}`}
+                      description={`${tr(d.label_key)||d.category_key}: ${formatPct(d.ratio_pct)} · ${formatCompactForLang(d.amount, lang)}${d.mom_change_pct!=null?` · ${tr('mom_label')} ${d.mom_change_pct>=0?'+':''}${d.mom_change_pct.toFixed(1)}${lang==='ar'?'٪':'%'}`:''}`}
                       color={T.violet}/>
                   ))
               }

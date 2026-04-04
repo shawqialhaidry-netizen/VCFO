@@ -1,9 +1,9 @@
 /**
  * buildCashBrainSnapshot — liquidity & cash intelligence from executive payload only.
- * Pure function; no I/O. Numbers: compact K/M and Western % — use formatCompact / fixed decimals.
+ * Pure function; no I/O. Numbers: locale-aware compact + ratios via format*ForLang when options.lang is set.
  */
 
-import { formatCompact, formatMultiple } from './numberFormat.js'
+import { formatCompactForLang, formatMultipleForLang, formatPctForLang } from './numberFormat.js'
 import { factOverlapsWhy } from './buildExecutiveNarrative.js'
 
 function dedupeBullets(narrative, bullets) {
@@ -258,10 +258,11 @@ function cashLex(lang) {
   }
 }
 
-function fmtMomPct(v) {
+function fmtMomPct(v, lang) {
   if (v == null || !Number.isFinite(Number(v))) return ''
   const n = Number(v)
-  return `${n >= 0 ? '+' : ''}${n.toFixed(1)}%`
+  const body = formatPctForLang(Math.abs(n), 1, lang)
+  return `${n >= 0 ? '+' : '-'}${body.replace(/^[+-]/, '')}`
 }
 
 function liquidityInsightSeverity(data, key) {
@@ -272,7 +273,7 @@ function liquidityInsightSeverity(data, key) {
   return row?.severity || null
 }
 
-function buildPressure(data, L, narrative) {
+function buildPressure(data, L, narrative, lang) {
   const ocf = pickOcf(data)
   const ocfMom = pickOcfMom(data)
   const np = pickNp(data)
@@ -317,11 +318,11 @@ function buildPressure(data, L, narrative) {
     tier = 'moderate'
 
   const rawBullets = []
-  if (ocf != null) rawBullets.push(L.bullets.ocf(formatCompact(ocf)))
-  if (ocfMom != null) rawBullets.push(L.bullets.ocfMom(fmtMomPct(ocfMom)))
+  if (ocf != null) rawBullets.push(L.bullets.ocf(formatCompactForLang(ocf, lang)))
+  if (ocfMom != null) rawBullets.push(L.bullets.ocfMom(fmtMomPct(ocfMom, lang)))
   if (cq && cq !== 'indeterminate') rawBullets.push(L.bullets.convert(L.convLabel(cq)))
   if (below) rawBullets.push(L.bullets.insightBelow)
-  if (wcNet != null && wcNet !== 0) rawBullets.push(L.bullets.wcNet(formatCompact(wcNet)))
+  if (wcNet != null && wcNet !== 0) rawBullets.push(L.bullets.wcNet(formatCompactForLang(wcNet, lang)))
 
   const bullets = dedupeBullets(narrative, rawBullets)
 
@@ -334,7 +335,7 @@ function buildPressure(data, L, narrative) {
   }
 }
 
-function buildLiquidity(data, L, narrative) {
+function buildLiquidity(data, L, narrative, lang) {
   const liq = liquidityRatios(data)
   const cr = metricVal(liq.current_ratio)
   const qr = metricVal(liq.quick_ratio)
@@ -383,9 +384,9 @@ function buildLiquidity(data, L, narrative) {
   else if (qr != null && qr < 0.7) tier = 'moderate'
 
   const rawBullets = []
-  if (cr != null) rawBullets.push(L.bullets.currentRatio(formatMultiple(cr)))
-  if (qr != null) rawBullets.push(L.bullets.quickRatio(formatMultiple(qr)))
-  if (wc != null && wc < 0) rawBullets.push(L.bullets.wcNeg(formatCompact(wc)))
+  if (cr != null) rawBullets.push(L.bullets.currentRatio(formatMultipleForLang(cr, 2, lang)))
+  if (qr != null) rawBullets.push(L.bullets.quickRatio(formatMultipleForLang(qr, 2, lang)))
+  if (wc != null && wc < 0) rawBullets.push(L.bullets.wcNeg(formatCompactForLang(wc, lang)))
 
   const bullets = dedupeBullets(narrative, rawBullets)
 
@@ -502,8 +503,8 @@ export function buildCashBrainSnapshot(data = {}, options = {}) {
   const narrative = options.narrative || null
   const L = cashLex(lang)
 
-  const pressure = buildPressure(data, L, narrative)
-  const liquidity = buildLiquidity(data, L, narrative)
+  const pressure = buildPressure(data, L, narrative, lang)
+  const liquidity = buildLiquidity(data, L, narrative, lang)
   const survival = buildSurvival(data, L, narrative)
 
   return {

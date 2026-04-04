@@ -269,7 +269,7 @@ function generateForIntent(intent, cx, tr) {
       }
       const om = cx.cashflow.ocfMomFmt
       if (om) {
-        const l2 = tSafe(tr, 'ai_cfo_fact_ocf_mom', { p: om.replace('%', '') })
+        const l2 = tSafe(tr, 'ai_cfo_fact_ocf_mom', { p: om.replace(/[%٪]/g, '') })
         if (l2) what.push(l2)
       }
       const wc = cx.cashflow.wcFmt
@@ -315,7 +315,7 @@ function generateForIntent(intent, cx, tr) {
         if (l) what.push(l)
       }
       if (cx.revenue.momFmt) {
-        const l2 = tSafe(tr, 'ai_cfo_fact_rev_mom', { p: cx.revenue.momFmt.replace('%', '') })
+        const l2 = tSafe(tr, 'ai_cfo_fact_rev_mom', { p: cx.revenue.momFmt.replace(/[%٪]/g, '') })
         if (l2) what.push(l2)
       }
       const np = cx.profit.valueFmt
@@ -338,7 +338,7 @@ function generateForIntent(intent, cx, tr) {
         if (l) what.push(l)
       }
       if (cx.expenses.momFmt) {
-        const l2 = tSafe(tr, 'ai_cfo_fact_exp_mom', { p: cx.expenses.momFmt.replace('%', '') })
+        const l2 = tSafe(tr, 'ai_cfo_fact_exp_mom', { p: cx.expenses.momFmt.replace(/[%٪]/g, '') })
         if (l2) what.push(l2)
       }
       const top = cx.expenses.topCategory
@@ -357,7 +357,7 @@ function generateForIntent(intent, cx, tr) {
         if (l) what.push(l)
       }
       if (cx.margin.momFmt) {
-        const l2 = tSafe(tr, 'ai_cfo_fact_nm_mom', { p: cx.margin.momFmt.replace('%', '') })
+        const l2 = tSafe(tr, 'ai_cfo_fact_nm_mom', { p: cx.margin.momFmt.replace(/[%٪]/g, '') })
         if (l2) what.push(l2)
       }
       const bridge = tSafe(tr, 'ai_cfo_intel_margin_bridge', {
@@ -461,6 +461,7 @@ export function buildAiCfoReply(question, ctx) {
     scopeLabel: ctx.scopeLabel,
     scopeSummary: ctx.scopeSummary,
     alerts: ctx.alerts,
+    lang: ctx.lang ?? 'en',
   })
 
   const { intent } = detectAiCfoIntent(question)

@@ -1,21 +1,15 @@
 /**
- * What / Why / Do drill explanation — labels from i18n; body lines use CmdServerText when server-sourced.
+ * What / Why / Do drill explanation — strict i18n lines from structured builders + final Arabic guard.
  */
-import CmdServerText from './CmdServerText.jsx'
+import { enforceLanguageFinal } from '../utils/enforceLanguageFinal.js'
 
-function BulletList({ items, lang, tr, textColor }) {
+function BulletList({ items, textColor, lang }) {
   if (!items?.length) return null
   return (
     <ul style={{ margin: 0, paddingLeft: 16, color: textColor, fontSize: 12, lineHeight: 1.55 }}>
       {items.map((item, i) => (
         <li key={i} style={{ marginBottom: 6 }}>
-          {item.serverText ? (
-            <CmdServerText lang={lang} tr={tr} as="span">
-              {item.text}
-            </CmdServerText>
-          ) : (
-            item.text
-          )}
+          <span>{enforceLanguageFinal(item.text, lang)}</span>
         </li>
       ))}
     </ul>
@@ -24,9 +18,9 @@ function BulletList({ items, lang, tr, textColor }) {
 
 /**
  * @param {object} p
- * @param {Array<{ text: string, serverText?: boolean }>} [p.what]
- * @param {Array<{ text: string, serverText?: boolean }>} [p.why]
- * @param {Array<{ text: string, serverText?: boolean }>} [p.do]
+ * @param {Array<{ text: string }>} [p.what]
+ * @param {Array<{ text: string }>} [p.why]
+ * @param {Array<{ text: string }>} [p.do]
  * @param {(k: string, params?: object) => string} p.tr
  * @param {string} p.lang
  * @param {{ card?: string, border?: string, text1?: string, text2?: string, text3?: string, accent?: string }} [p.theme]
@@ -69,7 +63,7 @@ export default function DrillIntelligenceBlock({ what = [], why = [], do: doLine
           <div style={{ fontSize: 9, fontWeight: 800, color: text3, textTransform: 'uppercase', marginBottom: 6 }}>
             {tr('ai_cfo_section_what')}
           </div>
-          <BulletList items={what} lang={lang} tr={tr} textColor={text1} />
+          <BulletList items={what} textColor={text1} lang={lang} />
         </div>
       ) : null}
       {why.length ? (
@@ -77,7 +71,7 @@ export default function DrillIntelligenceBlock({ what = [], why = [], do: doLine
           <div style={{ fontSize: 9, fontWeight: 800, color: text3, textTransform: 'uppercase', marginBottom: 6 }}>
             {tr('ai_cfo_section_why')}
           </div>
-          <BulletList items={why} lang={lang} tr={tr} textColor={text2} />
+          <BulletList items={why} textColor={text2} lang={lang} />
         </div>
       ) : null}
       {doLines.length ? (
@@ -85,7 +79,7 @@ export default function DrillIntelligenceBlock({ what = [], why = [], do: doLine
           <div style={{ fontSize: 9, fontWeight: 800, color: text3, textTransform: 'uppercase', marginBottom: 6 }}>
             {tr('ai_cfo_section_do')}
           </div>
-          <BulletList items={doLines} lang={lang} tr={tr} textColor={text2} />
+          <BulletList items={doLines} textColor={text2} lang={lang} />
         </div>
       ) : null}
     </div>

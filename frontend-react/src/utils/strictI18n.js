@@ -39,7 +39,7 @@ export function localizedMissingPlaceholder(lang) {
 export function looksLikeRawI18nKey(v) {
   if (typeof v !== 'string') return false
   const t = v.trim()
-  return /^(exec_|cmd_|nav_|dq_|kpi_label_|kpi_explain_|tab_|ratio_|domain_signal_|narr_|drill_intel_|ai_cfo_)[a-z0-9_]+$/i.test(t)
+  return /^(exec_|cmd_|nav_|dq_|kpi_label_|kpi_explain_|tab_|ratio_|domain_signal_|narr_|drill_intel_|drill_sig_|ai_cfo_|loc_)[a-z0-9_]+$/i.test(t)
 }
 
 function invalidTranslation(key, val) {

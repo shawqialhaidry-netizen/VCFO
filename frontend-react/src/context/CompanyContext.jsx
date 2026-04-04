@@ -5,6 +5,7 @@
  * - Provides analysis cache
  */
 import { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react'
+import { useAuth } from './AuthContext.jsx'
 
 const API = '/api/v1'
 const CompanyContext = createContext(null)
@@ -22,6 +23,7 @@ function authHeaders() {
 }
 
 export function CompanyProvider({ children }) {
+  const { authFetch } = useAuth()
   const [companies, setCompanies]               = useState([])
   const [selectedId, setSelectedId]             = useState(
     () => localStorage.getItem('vcfo_company_id') || ''

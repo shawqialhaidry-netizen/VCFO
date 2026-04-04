@@ -5,8 +5,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import '../styles/aiCfoPanel.css'
 import { buildAiCfoReply } from '../utils/buildAiCfoReply.js'
+import { enforceLanguageFinal } from '../utils/enforceLanguageFinal.js'
 
-function AssistantBody({ what, why, doLines, actions, onDrill, followUp, onFollowUp, tr }) {
+function AssistantBody({ what, why, doLines, actions, onDrill, followUp, onFollowUp, tr, lang }) {
+  const fin = (s) => enforceLanguageFinal(String(s ?? ''), lang)
   return (
     <div className="ai-cfo-msg__bubble">
       {what?.length ? (
@@ -14,7 +16,7 @@ function AssistantBody({ what, why, doLines, actions, onDrill, followUp, onFollo
           <div className="ai-cfo-block__label">{tr('ai_cfo_section_what')}</div>
           <ul className="ai-cfo-block__list">
             {what.map((line, i) => (
-              <li key={`w-${i}`}>{line}</li>
+              <li key={`w-${i}`}>{fin(line)}</li>
             ))}
           </ul>
         </div>
@@ -24,7 +26,7 @@ function AssistantBody({ what, why, doLines, actions, onDrill, followUp, onFollo
           <div className="ai-cfo-block__label">{tr('ai_cfo_section_why')}</div>
           <ul className="ai-cfo-block__list">
             {why.map((line, i) => (
-              <li key={`y-${i}`}>{line}</li>
+              <li key={`y-${i}`}>{fin(line)}</li>
             ))}
           </ul>
         </div>
@@ -34,7 +36,7 @@ function AssistantBody({ what, why, doLines, actions, onDrill, followUp, onFollo
           <div className="ai-cfo-block__label">{tr('ai_cfo_section_do')}</div>
           <ul className="ai-cfo-block__list">
             {doLines.map((line, i) => (
-              <li key={`d-${i}`}>{line}</li>
+              <li key={`d-${i}`}>{fin(line)}</li>
             ))}
           </ul>
         </div>
@@ -56,7 +58,7 @@ function AssistantBody({ what, why, doLines, actions, onDrill, followUp, onFollo
       {followUp ? (
         <div className="ai-cfo-follow">
           <button type="button" className="ai-cfo-follow__chip" onClick={() => onFollowUp?.()}>
-            {followUp}
+            {fin(followUp)}
           </button>
         </div>
       ) : null}
@@ -79,9 +81,11 @@ function AssistantBody({ what, why, doLines, actions, onDrill, followUp, onFollo
  * @param {string} [p.companyName]
  * @param {string} [p.scopeLabel]
  * @param {string} [p.scopeSummary]
+ * @param {string} [p.lang]
  */
 export default function AiCfoPanel({
   tr,
+  lang,
   hasExecutiveData,
   narrative,
   kpis,
@@ -105,6 +109,7 @@ export default function AiCfoPanel({
   const replyCtx = useMemo(
     () => ({
       tr,
+      lang: lang || 'en',
       narrative,
       kpis: kpis || {},
       main: main || {},
@@ -119,6 +124,7 @@ export default function AiCfoPanel({
     }),
     [
       tr,
+      lang,
       narrative,
       kpis,
       main,
@@ -257,6 +263,7 @@ export default function AiCfoPanel({
                       m.followUpFill ? () => runQuery(m.followUpFill) : undefined
                     }
                     tr={tr}
+                    lang={lang || 'en'}
                   />
                 </div>
               ),

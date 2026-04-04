@@ -2,21 +2,21 @@
  * Unified executive snapshot for AI CFO (client-side only; shapes data already fetched).
  */
 
-import { formatCompact } from './numberFormat.js'
+import { formatCompactForLang, formatPctForLang, formatSignedPctForLang } from './numberFormat.js'
 
 function num(v) {
   const n = Number(v)
   return Number.isFinite(n) ? n : null
 }
 
-function fmtMoney(v) {
+function fmtMoney(v, lang) {
   const n = num(v)
-  return n == null ? null : formatCompact(n)
+  return n == null ? null : formatCompactForLang(n, lang)
 }
 
-function fmtPctRaw(v) {
+function fmtPctRaw(v, lang) {
   const n = num(v)
-  return n == null ? null : `${n.toFixed(1)}%`
+  return n == null ? null : formatPctForLang(n, 1, lang)
 }
 
 function momDir(m) {
@@ -27,10 +27,10 @@ function momDir(m) {
   return 'flat'
 }
 
-function fmtMom(m) {
+function fmtMom(m, lang) {
   const n = num(m)
   if (n == null) return null
-  return `${n > 0 ? '+' : ''}${n.toFixed(1)}%`
+  return formatSignedPctForLang(n, 1, lang)
 }
 
 function primaryBlock(res) {
@@ -92,6 +92,7 @@ function riskLines(alerts) {
  * }} p
  */
 export function buildAiCfoExecutiveContext(p) {
+  const lang = p.lang != null ? String(p.lang) : 'en'
   const kpis = p.kpis || {}
   const main = p.main || {}
   const cf = main.cashflow || {}
@@ -105,7 +106,7 @@ export function buildAiCfoExecutiveContext(p) {
     p.expenseIntel?.available === true && p.expenseIntel?.top_category?.name
       ? {
           name: String(p.expenseIntel.top_category.name),
-          amountFmt: fmtMoney(p.expenseIntel.top_category.amount),
+          amountFmt: fmtMoney(p.expenseIntel.top_category.amount, lang),
           share: num(p.expenseIntel.top_category.share_of_cost_pct),
         }
       : null
@@ -118,42 +119,42 @@ export function buildAiCfoExecutiveContext(p) {
 
     revenue: {
       value: num(rev?.value),
-      valueFmt: fmtMoney(rev?.value),
+      valueFmt: fmtMoney(rev?.value, lang),
       mom: num(rev?.mom_pct),
-      momFmt: fmtMom(rev?.mom_pct),
+      momFmt: fmtMom(rev?.mom_pct, lang),
       momDir: momDir(rev?.mom_pct),
       yoy: num(rev?.yoy_pct),
     },
     profit: {
       value: num(np?.value),
-      valueFmt: fmtMoney(np?.value),
+      valueFmt: fmtMoney(np?.value, lang),
       mom: num(np?.mom_pct),
-      momFmt: fmtMom(np?.mom_pct),
+      momFmt: fmtMom(np?.mom_pct, lang),
       momDir: momDir(np?.mom_pct),
     },
     margin: {
       value: num(nm?.value),
-      valueFmt: fmtPctRaw(nm?.value),
+      valueFmt: fmtPctRaw(nm?.value, lang),
       mom: num(nm?.mom_pct),
-      momFmt: fmtMom(nm?.mom_pct),
+      momFmt: fmtMom(nm?.mom_pct, lang),
       momDir: momDir(nm?.mom_pct),
     },
     expenses: {
       value: num(ex?.value),
-      valueFmt: fmtMoney(ex?.value),
+      valueFmt: fmtMoney(ex?.value, lang),
       mom: num(ex?.mom_pct),
-      momFmt: fmtMom(ex?.mom_pct),
+      momFmt: fmtMom(ex?.mom_pct, lang),
       momDir: momDir(ex?.mom_pct),
       topCategory: expenseTop,
     },
     cashflow: {
       ocf: num(cf?.operating_cashflow),
-      ocfFmt: fmtMoney(cf?.operating_cashflow),
+      ocfFmt: fmtMoney(cf?.operating_cashflow, lang),
       ocfMom: num(cf?.operating_cashflow_mom),
-      ocfMomFmt: fmtMom(cf?.operating_cashflow_mom),
+      ocfMomFmt: fmtMom(cf?.operating_cashflow_mom, lang),
       ocfMomDir: momDir(cf?.operating_cashflow_mom),
       wc: num(kpis.working_capital?.value ?? cf?.working_capital),
-      wcFmt: fmtMoney(kpis.working_capital?.value ?? cf?.working_capital),
+      wcFmt: fmtMoney(kpis.working_capital?.value ?? cf?.working_capital, lang),
     },
     health_score: p.health != null && Number.isFinite(Number(p.health)) ? Math.round(Number(p.health)) : null,
     primary_decision: primaryBlock(p.primaryResolution),

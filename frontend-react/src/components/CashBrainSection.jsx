@@ -1,7 +1,9 @@
 /**
  * Cash Brain — compact 3-card row (executive scope only).
  */
-import { formatCompact } from '../utils/numberFormat.js'
+import { formatCompactForLang } from '../utils/numberFormat.js'
+import { strictTParams } from '../utils/strictI18n.js'
+import { enforceLanguageFinal } from '../utils/enforceLanguageFinal.js'
 
 const P = {
   surface: 'linear-gradient(165deg, rgba(17,24,39,0.98) 0%, rgba(15,23,42,0.99) 100%)',
@@ -65,10 +67,11 @@ function CashMiniCard({ label, kind, tier, meaningful, insufficientLabel, childr
   )
 }
 
-export default function CashBrainSection({ snapshot }) {
+export default function CashBrainSection({ snapshot, lang = 'en', tr }) {
   if (!snapshot) return null
 
   const { pressure, liquidity, survival, cardLabels, insufficientLabel, sectionTitle, sectionSub } = snapshot
+  const lineFin = (s) => enforceLanguageFinal(String(s ?? ''), lang)
 
   return (
     <div
@@ -105,7 +108,7 @@ export default function CashBrainSection({ snapshot }) {
         >
           <>
             <div style={{ fontSize: 13, fontWeight: 650, color: P.text1, lineHeight: 1.45, marginBottom: 8 }}>
-              {pressure.headline}
+              {lineFin(pressure.headline)}
             </div>
             {(pressure.bullets || []).map((line, i) => (
               <div
@@ -118,7 +121,7 @@ export default function CashBrainSection({ snapshot }) {
                   textAlign: 'start',
                 }}
               >
-                {line}
+                {lineFin(line)}
               </div>
             ))}
           </>
@@ -133,7 +136,7 @@ export default function CashBrainSection({ snapshot }) {
         >
           <>
             <div style={{ fontSize: 13, fontWeight: 650, color: P.text1, lineHeight: 1.45, marginBottom: 8 }}>
-              {liquidity.headline}
+              {lineFin(liquidity.headline)}
             </div>
             {(liquidity.bullets || []).map((line, i) => (
               <div
@@ -147,7 +150,7 @@ export default function CashBrainSection({ snapshot }) {
                   textAlign: 'start',
                 }}
               >
-                {line}
+                {lineFin(line)}
               </div>
             ))}
           </>
@@ -162,7 +165,7 @@ export default function CashBrainSection({ snapshot }) {
         >
           <>
             <div style={{ fontSize: 13, fontWeight: 650, color: P.text1, lineHeight: 1.45, marginBottom: 8 }}>
-              {survival.headline}
+              {lineFin(survival.headline)}
             </div>
             {survival.copy ? (
               <div
@@ -173,7 +176,7 @@ export default function CashBrainSection({ snapshot }) {
                   marginBottom: 0,
                 }}
               >
-                {survival.copy}
+                {lineFin(survival.copy)}
               </div>
             ) : null}
             {(() => {
@@ -182,10 +185,27 @@ export default function CashBrainSection({ snapshot }) {
                 survival.months != null &&
                 survival.months > 0 &&
                 !String(survival.copy || '').trim()
-              )
-                parts.push(`${survival.months.toFixed(1)} mo`)
-              if (survival.burn != null && survival.burn > 0) parts.push(`burn ${formatCompact(survival.burn)}`)
-              if (survival.cash != null) parts.push(`cash ${formatCompact(survival.cash)}`)
+              ) {
+                parts.push(
+                  tr
+                    ? strictTParams(tr, lang, 'cash_brain_survival_mo', { n: survival.months.toFixed(1) })
+                    : `${survival.months.toFixed(1)} mo`,
+                )
+              }
+              if (survival.burn != null && survival.burn > 0) {
+                const amt = formatCompactForLang(survival.burn, lang)
+                parts.push(
+                  tr
+                    ? strictTParams(tr, lang, 'cash_brain_survival_burn', { amt })
+                    : `burn ${amt}`,
+                )
+              }
+              if (survival.cash != null) {
+                const amt = formatCompactForLang(survival.cash, lang)
+                parts.push(
+                  tr ? strictTParams(tr, lang, 'cash_brain_survival_cash', { amt }) : `cash ${amt}`,
+                )
+              }
               if (!parts.length) return null
               return (
                 <div
@@ -197,7 +217,7 @@ export default function CashBrainSection({ snapshot }) {
                     marginTop: 8,
                   }}
                 >
-                  {parts.join(' · ')}
+                  {lineFin(parts.join(' · '))}
                 </div>
               )
             })()}

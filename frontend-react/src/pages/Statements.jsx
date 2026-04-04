@@ -21,7 +21,12 @@ import { buildAnalysisQuery } from '../utils/buildAnalysisQuery.js'
 
 import { hasFlag, safeIncludes } from '../utils/dataGuards.js'
 import { kpiContextLabel, kpiLabel } from '../utils/kpiContext.js'
-import { formatCompact, formatFull, formatDual, formatPct, formatMultiple, formatDays } from '../utils/numberFormat.js'
+import {
+  formatCompactForLang,
+  formatFullForLang,
+  formatPctForLang,
+  formatMultipleForLang,
+} from '../utils/numberFormat.js'
 
 const API = '/api/v1'
 function auth() {
@@ -30,9 +35,7 @@ function auth() {
 }
 
 // ── Formatters ────────────────────────────────────────────────────────────────
-// fmtM → formatCompact (from numberFormat.js)
-const fmtP  = v => v==null?'—':`${Number(v).toFixed(1)}%`
-const fmtX  = v => v==null?'—':`${Number(v).toFixed(2)}x`
+const fmtX = (v) => (v == null ? '—' : `${Number(v).toFixed(2)}x`)
 const fmtD  = (v,base) => { if(v==null||base==null||base===0)return null; return v-base }
 const fmtDp = (v,base) => { if(v==null||base==null||base===0)return null; return ((v-base)/Math.abs(base))*100 }
 const arr   = v => v==null?'':v>0?'▲':v<0?'▼':'─'
@@ -165,10 +168,11 @@ function SectionHead({label,color='var(--accent)',sub}) {
 }
 
 // ── Comparison row: label | current | prior | variance | variance% ─────────
-function CmpRow({label,cur,prior,bold,color,invertColor,pct,onClick,indent}) {
+function CmpRow({ label, cur, prior, bold, color, invertColor, pct, onClick, indent, lang }) {
   const delta  = fmtD(cur,prior)
   const deltap = fmtDp(cur,prior)
   const dc     = invertColor ? clrVi(delta,true) : clrV(delta)
+  const fmtPcell = (v) => (v == null ? '—' : formatPctForLang(v, 1, lang))
   return (
     <div onClick={onClick}
       style={{display:'grid',gridTemplateColumns:'1fr 90px 90px 80px 70px',
@@ -182,21 +186,25 @@ function CmpRow({label,cur,prior,bold,color,invertColor,pct,onClick,indent}) {
       {/* Current */}
       <span style={{fontFamily:'var(--font-mono)',fontSize:bold?13:12,fontWeight:bold?800:500,
         color:color||'var(--text-primary)',textAlign:'right',direction:'ltr'}}>
-        {pct?fmtP(cur):formatCompact(cur)}
+        {pct ? fmtPcell(cur) : formatCompactForLang(cur, lang)}
       </span>
       {/* Prior */}
       <span style={{fontFamily:'var(--font-mono)',fontSize:11,
         color:'var(--text-secondary)',textAlign:'right',direction:'ltr'}}>
-        {prior!=null?(pct?fmtP(prior):formatCompact(prior)):'—'}
+        {prior != null ? (pct ? fmtPcell(prior) : formatCompactForLang(prior, lang)) : '—'}
       </span>
       {/* Variance absolute */}
       <span style={{fontFamily:'var(--font-mono)',fontSize:11,color:dc,textAlign:'right',direction:'ltr'}}>
-        {delta!=null?(delta>0?'+':'')+formatCompact(delta):'—'}
+        {delta != null ? `${delta > 0 ? '+' : ''}${formatCompactForLang(delta, lang)}` : '—'}
       </span>
       {/* Variance % */}
       <span style={{fontFamily:'var(--font-mono)',fontSize:10,
         color:dc,textAlign:'right',direction:'ltr'}}>
-        {deltap!=null?(deltap>0?'+':'')+deltap.toFixed(1)+'%':'—'}
+        {deltap != null
+          ? deltap > 0
+            ? `+${formatPctForLang(deltap, 1, lang)}`
+            : formatPctForLang(deltap, 1, lang)
+          : '—'}
       </span>
     </div>
   )
@@ -345,14 +353,20 @@ function InsightCard({ins,onClick,lang,tr}) {
 }
 
 // ── Ratio row ─────────────────────────────────────────────────────────────────
-function RatioRow({label,value,status,unit}) {
-  const sc = status==='good'?'var(--green)':status==='warning'?'var(--amber)':'var(--red)'
+function RatioRow({ label, value, status, unit, lang }) {
+  const sc = status === 'good' ? 'var(--green)' : status === 'warning' ? 'var(--amber)' : 'var(--red)'
+  let disp = '—'
+  if (value != null && Number.isFinite(Number(value))) {
+    if (unit === '%') disp = formatPctForLang(value, 2, lang)
+    else if (unit === 'x') disp = formatMultipleForLang(value, 2, lang)
+    else disp = formatCompactForLang(value, lang)
+  }
   return (
     <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',
       padding:'8px 0',borderBottom:'1px solid var(--border)'}}>
       <span style={{fontSize:11,color:'var(--text-secondary)'}}>{label}</span>
       <span style={{fontFamily:'var(--font-mono)',fontSize:13,fontWeight:700,color:sc,direction:'ltr'}}>
-        {value!=null?`${Number(value).toFixed(2)}${unit||''}` :'—'}
+        {disp}
       </span>
     </div>
   )
@@ -678,8 +692,8 @@ export default function Statements() {
         {/* ── TOP SUMMARY ROW (UPGRADE 2) ─────────────────────────── */}
         <div style={{display:'grid',gridTemplateColumns:'repeat(5,1fr)',gap:8}}>
           <KpiCard label={tr('fc_revenue')}
-            value={formatCompact(smry.revenue)}
-            fullValue={formatFull(smry.revenue)}
+            value={formatCompactForLang(smry.revenue, lang)}
+            fullValue={formatFullForLang(smry.revenue, lang)}
             lang={lang}
             tr={tr}
             momWord={strictT(tr, lang, 'mom_label')}
@@ -689,11 +703,11 @@ export default function Statements() {
             color='var(--accent)'
             insight={stmtInsight('revenue',data?.data,tr)}
             cause={stmtCause('revenue',data?.data,tr)}
-            forecast={stmtForecast('revenue',fcData,tr,formatCompact)}
+            forecast={stmtForecast('revenue', fcData, tr, (v) => formatCompactForLang(v, lang))}
             onClick={()=>setTab('income')}/>
           <KpiCard label={tr('fc_net_profit')}
-            value={formatCompact(smry.net_profit)}
-            fullValue={formatFull(smry.net_profit)}
+            value={formatCompactForLang(smry.net_profit, lang)}
+            fullValue={formatFullForLang(smry.net_profit, lang)}
             lang={lang}
             tr={tr}
             momWord={strictT(tr, lang, 'mom_label')}
@@ -701,14 +715,14 @@ export default function Statements() {
             mom={cmpMode==='mom'?momNp:null}
             yoy={cmpMode==='yoy'?yoyNp:null}
             color={smry.net_profit>=0?'var(--green)':'var(--red)'}
-            sub={smry.net_margin_pct!=null?fmtP(smry.net_margin_pct):null}
+            sub={smry.net_margin_pct != null ? formatPctForLang(smry.net_margin_pct, 1, lang) : null}
             insight={stmtInsight('net_profit',data?.data,tr)}
             cause={stmtCause('net_profit',data?.data,tr)}
-            forecast={stmtForecast('net_profit',fcData,tr,formatCompact)}
+            forecast={stmtForecast('net_profit', fcData, tr, (v) => formatCompactForLang(v, lang))}
             onClick={()=>setTab('income')}/>
           <KpiCard label={tr('cashflow_operating')}
-            value={formatCompact(smry.operating_cashflow)}
-            fullValue={formatFull(smry.operating_cashflow)}
+            value={formatCompactForLang(smry.operating_cashflow, lang)}
+            fullValue={formatFullForLang(smry.operating_cashflow, lang)}
             lang={lang}
             tr={tr}
             momWord={strictT(tr, lang, 'mom_label')}
@@ -720,8 +734,8 @@ export default function Statements() {
             cause={stmtCause('cashflow',data?.data,tr)}
             onClick={()=>setTab('cashflow')}/>
           <KpiCard label={tr('working_capital')}
-            value={formatCompact(smry.working_capital)}
-            fullValue={formatFull(smry.working_capital)}
+            value={formatCompactForLang(smry.working_capital, lang)}
+            fullValue={formatFullForLang(smry.working_capital, lang)}
             lang={lang}
             tr={tr}
             momWord={strictT(tr, lang, 'mom_label')}
@@ -802,22 +816,22 @@ export default function Statements() {
                 </div>
               </div>
               <CmpHeader lang={l} priorLabel={priorLabel} tr={tr}/>
-              <CmpRow label={tr('fc_revenue')}
+              <CmpRow lang={lang} label={tr('fc_revenue')}
                 cur={is_.revenue} prior={prior.revenue}
                 bold color='var(--accent)'
                 onClick={()=>setPanel(insights.find(x=>x.domain==='growth')||null)}/>
-              <CmpRow label={tr('cogs')}
+              <CmpRow lang={lang} label={tr('cogs')}
                 cur={is_.cogs} prior={null} invertColor/>
-              <CmpRow label={tr('stmt_bridge_gross')}
+              <CmpRow lang={lang} label={tr('stmt_bridge_gross')}
                 cur={is_.gross_profit} prior={null}
                 bold color='var(--green)'/>
-              <CmpRow label={tr('stmt_bridge_opex')}
+              <CmpRow lang={lang} label={tr('stmt_bridge_opex')}
                 cur={is_.operating_expenses} prior={null} invertColor/>
-              <CmpRow label={tr('stmt_bridge_op')}
+              <CmpRow lang={lang} label={tr('stmt_bridge_op')}
                 cur={is_.operating_profit} prior={null} bold/>
-              {is_.tax!=null&&<CmpRow label={tr('stmt_bridge_tax')}
+              {is_.tax!=null&&<CmpRow lang={lang} label={tr('stmt_bridge_tax')}
                 cur={is_.tax} prior={null} invertColor/>}
-              <CmpRow label={tr('fc_net_profit')}
+              <CmpRow lang={lang} label={tr('fc_net_profit')}
                 cur={is_.net_profit} prior={prior.net_profit}
                 bold color={is_.net_profit>=0?'var(--green)':'var(--red)'}
                 onClick={()=>setPanel(insights.find(x=>x.key==='low_net_margin')||null)}/>
@@ -839,7 +853,9 @@ export default function Statements() {
                   <div key={lbl} style={{display:'flex',justifyContent:'space-between',
                     padding:'7px 0',borderBottom:'1px solid var(--border)'}}>
                     <span style={{fontSize:11,color:'var(--text-secondary)'}}>{lbl}</span>
-                    <span style={{fontFamily:'var(--font-mono)',fontSize:13,fontWeight:700,color:c}}>{fmtP(v)}</span>
+                    <span style={{fontFamily:'var(--font-mono)',fontSize:13,fontWeight:700,color:c}}>
+                      {formatPctForLang(v, 1, lang)}
+                    </span>
                   </div>
                 ))}
               </Card>
@@ -851,7 +867,7 @@ export default function Statements() {
                   [tr('net_margin'), ratios.profitability?.net_margin_pct?.value, ratios.profitability?.net_margin_pct?.status, '%'],
                   [tr('gross_margin'), ratios.profitability?.gross_margin_pct?.value, ratios.profitability?.gross_margin_pct?.status, '%'],
                 ].map(([label,v,st,unit])=>(
-                  <RatioRow key={label} label={label} value={v} status={st} unit={unit}/>
+                  <RatioRow key={label} label={label} value={v} status={st} unit={unit} lang={lang}/>
                 ))}
               </Card>}
 
@@ -877,11 +893,11 @@ export default function Statements() {
                 textTransform:'uppercase',letterSpacing:'.06em',margin:'8px 0 4px'}}>
                 {tr('assets')}
               </div>
-              <CmpRow label={tr('current_assets')}
+              <CmpRow lang={lang} label={tr('current_assets')}
                 cur={bs_.current_assets} prior={null} color='var(--blue)'/>
-              <CmpRow label={tr('noncurrent_assets')}
+              <CmpRow lang={lang} label={tr('noncurrent_assets')}
                 cur={bs_.noncurrent_assets} prior={null} indent/>
-              <CmpRow label={tr('total_assets')}
+              <CmpRow lang={lang} label={tr('total_assets')}
                 cur={bs_.total_assets} prior={null} bold color='var(--blue)'/>
 
               {/* Liabilities section */}
@@ -889,20 +905,20 @@ export default function Statements() {
                 textTransform:'uppercase',letterSpacing:'.06em',margin:'12px 0 4px'}}>
                 {tr('liabilities')}
               </div>
-              <CmpRow label={tr('current_liabilities')}
+              <CmpRow lang={lang} label={tr('current_liabilities')}
                 cur={bs_.current_liabilities} prior={null} invertColor/>
-              <CmpRow label={tr('noncurrent_liabilities')}
+              <CmpRow lang={lang} label={tr('noncurrent_liabilities')}
                 cur={bs_.noncurrent_liabilities} prior={null} invertColor indent/>
-              <CmpRow label={tr('total_liabilities')}
+              <CmpRow lang={lang} label={tr('total_liabilities')}
                 cur={bs_.total_liabilities} prior={null} bold color='var(--red)' invertColor/>
 
               {/* Equity */}
-              <CmpRow label={tr('equity')}
+              <CmpRow lang={lang} label={tr('equity')}
                 cur={bs_.total_equity} prior={null} bold color='var(--green)'/>
 
               {/* Working Capital — highlighted */}
               <div style={{marginTop:10,paddingTop:10,borderTop:'2px solid var(--border)'}}>
-                <CmpRow label={tr('working_capital')}
+                <CmpRow lang={lang} label={tr('working_capital')}
                   cur={bs_.working_capital} prior={null} bold
                   color={bs_.working_capital>=0?'var(--green)':'var(--red)'}
                   onClick={bs_.working_capital<0?()=>setPanel(insights.find(x=>x.key==='negative_working_capital')||null):null}/>
@@ -922,7 +938,7 @@ export default function Statements() {
                   {bs_.balance_diff!=null&&!bs_.is_balanced&&(
                     <span style={{fontFamily:'var(--font-mono)',fontSize:10,
                       color:'var(--amber)',marginLeft:'auto'}}>
-                      Δ {formatCompact(bs_.balance_diff)}
+                      Δ {formatCompactForLang(bs_.balance_diff, lang)}
                     </span>
                   )}
                 </div>
@@ -954,7 +970,7 @@ export default function Statements() {
                   [tr('quick_ratio'),    ratios.liquidity?.quick_ratio?.value,   ratios.liquidity?.quick_ratio?.status,   'x'],
                   [tr('working_capital'), bs_.working_capital, bs_.working_capital>=0?'good':'risk',''],
                 ].map(([label,v,st,unit])=>(
-                  <RatioRow key={label} label={label} value={v} status={st} unit={unit}/>
+                  <RatioRow key={label} label={label} value={v} status={st} unit={unit} lang={lang}/>
                 ))}
               </Card>
 
@@ -965,7 +981,7 @@ export default function Statements() {
                   [tr('total_assets'),   bs_.total_assets, 'good', ''],
                   [tr('total_equity'),   bs_.total_equity,  bs_.total_equity>=0?'good':'risk',''],
                 ].map(([label,v,st,unit])=>(
-                  <RatioRow key={label} label={label} value={v} status={st} unit={unit}/>
+                  <RatioRow key={label} label={label} value={v} status={st} unit={unit} lang={lang}/>
                 ))}
               </Card>
 
@@ -990,18 +1006,18 @@ export default function Statements() {
               </div>
 
               <CmpHeader lang={l} priorLabel={priorLabel} tr={tr}/>
-              <CmpRow label={tr('fc_net_profit')}
+              <CmpRow lang={lang} label={tr('fc_net_profit')}
                 cur={is_.net_profit} prior={prior.net_profit}/>
               {cf_.da_estimate!=null&&cf_.da_estimate!==0&&(
-                <CmpRow label={tr('cf_da_estimate')}
+                <CmpRow lang={lang} label={tr('cf_da_estimate')}
                   cur={cf_.da_estimate} prior={null} color='var(--accent)'/>
               )}
               {cf_.wc_change?.net!=null&&(
-                <CmpRow label={tr('cf_wc_change')}
+                <CmpRow lang={lang} label={tr('cf_wc_change')}
                   cur={cf_.wc_change.net} prior={null}
                   color={cf_.wc_change.net>=0?'var(--green)':'var(--red)'}/>
               )}
-              <CmpRow label={tr('cashflow_operating')}
+              <CmpRow lang={lang} label={tr('cashflow_operating')}
                 cur={cf_.operating_cashflow} prior={prior.cashflow}
                 bold color={cf_.operating_cashflow>=0?'var(--green)':'var(--red)'}/>
 
@@ -1034,7 +1050,8 @@ export default function Statements() {
                       <span style={{fontSize:11,color:'var(--text-secondary)'}}>{lbl}</span>
                       <span style={{fontFamily:'var(--font-mono)',fontSize:11,
                         color:clrV(v),direction:'ltr'}}>
-                        {v>0?'+':''}{formatCompact(v)}
+                        {v > 0 ? '+' : ''}
+                        {formatCompactForLang(v, lang)}
                       </span>
                     </div>
                   ))}
@@ -1060,16 +1077,22 @@ export default function Statements() {
                 <SectionHead label={tr('ocf_quality')} color={cfFlagClr}/>
                 <div style={{fontFamily:'var(--font-mono)',fontSize:24,fontWeight:800,
                   color:cfFlagClr,direction:'ltr',marginBottom:6}}>
-                  {formatCompact(cf_.operating_cashflow)}
+                  {formatCompactForLang(cf_.operating_cashflow, lang)}
                 </div>
                 {cf_.quality&&<>
                   {[
-                    [tr('conversion_ratio'),
-                     cf_.quality.cash_conversion_ratio!=null?`${cf_.quality.cash_conversion_ratio?.toFixed(2)}x`:null],
+                    [
+                      tr('conversion_ratio'),
+                      cf_.quality.cash_conversion_ratio != null
+                        ? formatMultipleForLang(cf_.quality.cash_conversion_ratio, 2, lang)
+                        : null,
+                    ],
                     [tr('quality'),
                      cf_.quality.cash_conversion_quality||null],
                     [tr('profit_cash_gap'),
-                     cf_.quality.profit_vs_cash_gap!=null?formatCompact(cf_.quality.profit_vs_cash_gap):null],
+                     cf_.quality.profit_vs_cash_gap != null
+                       ? formatCompactForLang(cf_.quality.profit_vs_cash_gap, lang)
+                       : null],
                   ].filter(([,v])=>v!=null).map(([lbl,v])=>(
                     <div key={lbl} style={{display:'flex',justifyContent:'space-between',
                       padding:'6px 0',borderBottom:'1px solid var(--border)'}}>

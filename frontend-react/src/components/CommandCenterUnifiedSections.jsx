@@ -4,7 +4,12 @@
 import '../styles/commandCenterStructure.css'
 import { useState } from 'react'
 import { useCountUp } from '../hooks/useCountUp.js'
-import { formatCompact, formatMultiple } from '../utils/numberFormat.js'
+import {
+  formatCompactForLang,
+  formatMultipleForLang,
+  formatPctForLang,
+  formatSignedPctForLang,
+} from '../utils/numberFormat.js'
 import { factOverlapsWhy } from '../utils/buildExecutiveNarrative.js'
 import { strictT as st } from '../utils/strictI18n.js'
 import { CLAMP_FADE_MASK_SHORT } from '../utils/serverTextUi.js'
@@ -102,10 +107,10 @@ function pickSyntheticSignalCard(main, intel, tr, lang) {
   const cf = main?.cashflow
   const cfOk = cf && typeof cf === 'object' && cf.error !== 'no data'
   if (cfOk && cf.operating_cashflow != null && Number.isFinite(Number(cf.operating_cashflow))) {
-    let v = formatCompact(cf.operating_cashflow)
+    let v = formatCompactForLang(cf.operating_cashflow, lang)
     if (cf.operating_cashflow_mom != null && Number.isFinite(Number(cf.operating_cashflow_mom))) {
       const m = Number(cf.operating_cashflow_mom)
-      v += ` (${m >= 0 ? '+' : ''}${m.toFixed(1)}% ${st(tr, lang, 'mom_label')})`
+      v += ` (${formatSignedPctForLang(m, 1, lang)} ${st(tr, lang, 'mom_label')})`
     }
     return {
       key: 'syn_ocf',
@@ -119,7 +124,7 @@ function pickSyntheticSignalCard(main, intel, tr, lang) {
     return {
       key: 'syn_ocf2',
       label: st(tr, lang, 'cmd_sig_ocf'),
-      value: formatCompact(ocf2),
+      value: formatCompactForLang(ocf2, lang),
     }
   }
   const wc =
@@ -130,7 +135,7 @@ function pickSyntheticSignalCard(main, intel, tr, lang) {
     return {
       key: 'syn_wc',
       label: st(tr, lang, 'cmd_sig_wc'),
-      value: formatCompact(wc),
+      value: formatCompactForLang(wc, lang),
     }
   }
   const cr = ratioVal(intel?.ratios?.liquidity?.current_ratio)
@@ -138,7 +143,7 @@ function pickSyntheticSignalCard(main, intel, tr, lang) {
     return {
       key: 'syn_cr',
       label: st(tr, lang, 'cmd_sig_liquidity'),
-      value: formatMultiple(cr),
+      value: formatMultipleForLang(cr, 2, lang),
     }
   }
   return null
@@ -151,7 +156,7 @@ export function keySignalsShowsInefficientBranch(comparativeIntel, narrative, tr
   const ofRev = st(tr, lang, 'cmd_branch_of_rev')
   let ineffLine =
     ineff.expense_pct_of_revenue != null
-      ? `${ineff.branch_name} · ${ineff.expense_pct_of_revenue}% ${ofRev}`
+      ? `${ineff.branch_name} · ${formatPctForLang(Number(ineff.expense_pct_of_revenue), 1, lang)} ${ofRev}`
       : ineff.branch_name
   const blob = narrativeBlob(narrative)
   if (ineffLine && blob.includes(String(ineff.branch_name).toLowerCase())) return null
@@ -163,15 +168,15 @@ function expenseIntelSignalCards(expenseIntel, comparativeIntel, tr, lang) {
   const out = []
   const top = expenseIntel.top_category
   if (top?.name != null && top.amount != null) {
-    let value = `${top.name} · ${formatCompact(top.amount)}`
+    let value = `${top.name} · ${formatCompactForLang(top.amount, lang)}`
     const share = top.share_of_cost_pct
     const mam = top.amount_mom_pct
     if (share != null && Number.isFinite(Number(share))) {
       const sm =
         mam != null && Number.isFinite(Number(mam))
-          ? ` (${Number(mam) >= 0 ? '+' : ''}${Number(mam).toFixed(1)}%)`
+          ? ` (${formatSignedPctForLang(Number(mam), 1, lang)})`
           : ''
-      value = `${top.name} = ${Number(share).toFixed(0)}% ${st(tr, lang, 'cmd_ei_pct_of_cost')}${sm}`
+      value = `${top.name} = ${formatPctForLang(Number(share), 0, lang)} ${st(tr, lang, 'cmd_ei_pct_of_cost')}${sm}`
     }
     out.push({
       key: 'ei_top',
@@ -199,7 +204,7 @@ function expenseIntelSignalCards(expenseIntel, comparativeIntel, tr, lang) {
     out.push({
       key: 'ei_ratio',
       label: st(tr, lang, 'cmd_sig_expense_ratio_signal'),
-      value: `${Number(ratio).toFixed(1)}% ${ofRev}${dir}`,
+      value: `${formatPctForLang(Number(ratio), 1, lang)} ${ofRev}${dir}`,
     })
   }
   const g = expenseIntel.largest_increasing_category
@@ -207,9 +212,9 @@ function expenseIntelSignalCards(expenseIntel, comparativeIntel, tr, lang) {
     const pc = g.pct_change
     const val =
       pc != null && Number.isFinite(Number(pc))
-        ? `${g.name} · ${Number(pc) >= 0 ? '+' : ''}${Number(pc).toFixed(1)}% ${st(tr, lang, 'mom_label')}`
+        ? `${g.name} · ${formatSignedPctForLang(Number(pc), 1, lang)} ${st(tr, lang, 'mom_label')}`
         : g.absolute_change != null
-          ? `${g.name} · ${formatCompact(g.absolute_change)}`
+          ? `${g.name} · ${formatCompactForLang(g.absolute_change, lang)}`
           : String(g.name)
     out.push({
       key: 'ei_grow',
@@ -239,7 +244,7 @@ export function KeySignalsSection({
   const cat = financialBrain?.why?.links?.category_driver_mom
   let costDriver =
     cat?.category != null
-      ? `${cat.category}${cat.delta != null ? ` · ${formatCompact(cat.delta)}` : ''}`
+      ? `${cat.category}${cat.delta != null ? ` · ${formatCompactForLang(cat.delta, lang)}` : ''}`
       : null
   const blob = narrativeBlob(narrative)
   if (costDriver && cat?.category && blob.includes(String(cat.category).toLowerCase())) {
@@ -251,7 +256,7 @@ export function KeySignalsSection({
   const ofRevKs = st(tr, lang, 'cmd_branch_of_rev')
   let ineffLine =
     ineff?.branch_name && ineff.expense_pct_of_revenue != null
-      ? `${ineff.branch_name} · ${ineff.expense_pct_of_revenue}% ${ofRevKs}`
+      ? `${ineff.branch_name} · ${formatPctForLang(Number(ineff.expense_pct_of_revenue), 1, lang)} ${ofRevKs}`
       : ineff?.branch_name || null
   if (ineffLine && ineff?.branch_name && blob.includes(String(ineff.branch_name).toLowerCase())) {
     ineffLine = null
@@ -405,28 +410,28 @@ export function BranchIntelligenceSection({
     rows.push({
       k: 'hiexp',
       label: st(tr, lang, 'cmd_branch_hi_expense'),
-      text: `${hiExp.branch_name} · ${formatCompact(hiExp.total_expense)} (${hiExp.expense_pct_of_revenue}% ${ofRevBr})`,
+      text: `${hiExp.branch_name} · ${formatCompactForLang(hiExp.total_expense, lang)} (${formatPctForLang(hiExp.expense_pct_of_revenue, 1, lang)} ${ofRevBr})`,
     })
   }
   if (topIneff?.branch_name && (!dup || String(topIneff.branch_name).toLowerCase() !== dup)) {
     rows.push({
       k: 'ineffrank',
       label: st(tr, lang, 'cmd_branch_eff_rank'),
-      text: `${topIneff.branch_name} · ${topIneff.expense_pct_of_revenue}% ${ofRevBr}`,
+      text: `${topIneff.branch_name} · ${formatPctForLang(topIneff.expense_pct_of_revenue, 1, lang)} ${ofRevBr}`,
     })
   }
   if (mom?.branch_name && mom.mom_delta_total_expense != null) {
     rows.push({
       k: 'mom',
       label: st(tr, lang, 'cmd_branch_cost_pressure'),
-      text: `${mom.branch_name} · ${momLab}${formatCompact(mom.mom_delta_total_expense)}`,
+      text: `${mom.branch_name} · ${momLab}${formatCompactForLang(mom.mom_delta_total_expense, lang)}`,
     })
   }
   if (loEff?.branch_name && (!dup || String(loEff.branch_name).toLowerCase() !== dup)) {
     rows.push({
       k: 'loeff',
       label: st(tr, lang, 'cmd_branch_best_ratio'),
-      text: `${loEff.branch_name} · ${loEff.expense_pct_of_revenue}% ${ofRevBr}`,
+      text: `${loEff.branch_name} · ${formatPctForLang(loEff.expense_pct_of_revenue, 1, lang)} ${ofRevBr}`,
     })
   }
 
@@ -495,7 +500,7 @@ export function BranchIntelligenceSection({
                 <div style={{ fontSize: 13, fontWeight: 800, color: P.text1, lineHeight: 1.25 }}>{name}</div>
                 <div className="cmd-branch-metric-line cmd-data-num">
                   {pct != null && Number.isFinite(Number(pct))
-                    ? `${Number(pct).toFixed(2)}% ${ofRevBr}`
+                    ? `${formatPctForLang(Number(pct), 2, lang)} ${ofRevBr}`
                     : '—'}
                 </div>
               </div>
@@ -629,7 +634,7 @@ function decisionActionMeta(d, tr, lang) {
 function decisionImpactSummary(d, tr, lang) {
   const savings = d.expected_financial_impact?.estimated_monthly_savings
   if (savings != null && Number.isFinite(Number(savings)) && Number(savings) > 0) {
-    return `${st(tr, lang, 'cmd_dec_impact_monthly')}: ${formatCompact(savings)}`
+    return `${st(tr, lang, 'cmd_dec_impact_monthly')}: ${formatCompactForLang(savings, lang)}`
   }
   return null
 }
@@ -640,7 +645,7 @@ function DecisionImpactAmount({ savingsRaw, tr, lang }) {
   if (!ok) return '—'
   return (
     <>
-      {st(tr, lang, 'cmd_dec_impact_monthly')}: {formatCompact(v)}
+      {st(tr, lang, 'cmd_dec_impact_monthly')}: {formatCompactForLang(v, lang)}
     </>
   )
 }

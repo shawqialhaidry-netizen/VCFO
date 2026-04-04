@@ -14,7 +14,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
-import { formatCompact } from '../utils/numberFormat.js'
+import { formatCompactForLang, formatPctForLang } from '../utils/numberFormat.js'
 import { strictT as st } from '../utils/strictI18n.js'
 import {
   extractBranchCompareRows,
@@ -80,8 +80,14 @@ export function ExecutiveKpiTrendChart({ kpiBlock, cashflow, kpiType, tr, lang }
 
   const { stroke, cursor } = trendLineVisuals(kpiType)
   const pctAxis = kpiType === 'net_margin'
-  const tooltipFmt = (v) => (pctAxis && v != null && Number.isFinite(Number(v)) ? `${Number(v).toFixed(1)}%` : formatCompact(v))
-  const yAxisFmt = (v) => (pctAxis && v != null && Number.isFinite(Number(v)) ? `${Number(v).toFixed(0)}%` : formatCompact(v))
+  const tooltipFmt = (v) =>
+    pctAxis && v != null && Number.isFinite(Number(v))
+      ? formatPctForLang(v, 1, lang)
+      : formatCompactForLang(v, lang)
+  const yAxisFmt = (v) =>
+    pctAxis && v != null && Number.isFinite(Number(v))
+      ? formatPctForLang(v, 0, lang)
+      : formatCompactForLang(v, lang)
 
   return (
     <div className="cmd-chart-enter" style={{ marginTop: 18, marginBottom: 8 }}>
@@ -191,11 +197,11 @@ export function ExecutiveProfitBridgeChart({ kpiBlock, tr, lang }) {
               tick={{ fill: G.text, fontSize: 9 }}
               axisLine={{ stroke: G.grid }}
               tickLine={false}
-              tickFormatter={(v) => formatCompact(v)}
+              tickFormatter={(v) => formatCompactForLang(v, lang)}
               width={52}
             />
             <Tooltip
-              content={(props) => <ExecTooltip {...props} formatter={(v) => formatCompact(v)} />}
+              content={(props) => <ExecTooltip {...props} formatter={(v) => formatCompactForLang(v, lang)} />}
               cursor={{ fill: 'rgba(255,255,255,0.04)' }}
             />
             <Bar dataKey="value" radius={[4, 4, 0, 0]} animationDuration={400} animationEasing="ease-out">
@@ -228,7 +234,8 @@ export function ExecutiveBranchCompareChart({ comparativeIntelligence, tr, lang 
     )
   }
 
-  const fmt = (v) => (metric === 'revenue' ? formatCompact(v) : `${Number(v).toFixed(2)}%`)
+  const fmt = (v) =>
+    metric === 'revenue' ? formatCompactForLang(v, lang) : formatPctForLang(v, 2, lang)
 
   return (
     <div className="cmd-chart-enter" style={{ marginTop: 8 }}>
@@ -266,7 +273,7 @@ export function ExecutiveBranchCompareChart({ comparativeIntelligence, tr, lang 
               tick={{ fill: G.text, fontSize: 9 }}
               axisLine={{ stroke: G.grid }}
               tickLine={false}
-              tickFormatter={(v) => (metric === 'revenue' ? formatCompact(v) : `${v}%`)}
+              tickFormatter={(v) => (metric === 'revenue' ? formatCompactForLang(v, lang) : formatPctForLang(v, 0, lang))}
             />
             <YAxis
               type="category"
