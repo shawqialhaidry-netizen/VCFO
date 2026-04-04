@@ -20,7 +20,187 @@ Rules:
 from __future__ import annotations
 from typing import Any, Optional
 
+from app.services.cfo_decision_depth import (
+    build_ratio_depth_context,
+    depth_get,
+)
+from app.services.structured_profit_story import build_structured_profit_story_from_analysis
+
 _REC_SEVERITY_ORDER = {"high": 3, "medium": 2, "low": 1}
+
+
+def _trend_mag_dict(trends: dict) -> dict[str, Any]:
+    return {
+        "rev_roll_3m": _get(trends, "revenue", "rolling_3m"),
+        "np_roll_3m": _get(trends, "net_profit", "rolling_3m"),
+        "rev_yoy": _get(trends, "revenue", "yoy_change"),
+        "np_yoy": _get(trends, "net_profit", "yoy_change"),
+        "rev_cagr": _get(trends, "revenue", "cagr_pct"),
+        "rev_ytd": _get(trends, "revenue", "ytd_vs_prior"),
+    }
+
+
+def _anomaly_targets(an: dict) -> set[str]:
+    m = str(an.get("metric") or "")
+    if m == "revenue":
+        return {"growth", "profitability"}
+    if m == "net_profit":
+        return {"profitability"}
+    if m == "gross_margin":
+        return {"profitability", "efficiency"}
+    if m == "data_quality":
+        return {"liquidity", "profitability", "efficiency", "leverage", "growth"}
+    return {"profitability", "growth"}
+
+
+def _build_decision_fingerprint(
+    key: str,
+    domain: str,
+    ratios: dict,
+    depth_ctx: dict,
+    extra_metrics: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
+    sig: dict[str, Any] = {"key": key, "domain": domain, "metrics": {}}
+    m = sig["metrics"]
+    nm = _get(ratios, "profitability", "net_margin_pct", "value")
+    if nm is not None:
+        m["nm"] = round(float(nm), 2)
+    gm = _get(ratios, "profitability", "gross_margin_pct", "value")
+    if gm is not None:
+        m["gm"] = round(float(gm), 2)
+    cr = _get(ratios, "liquidity", "current_ratio", "value")
+    if cr is not None:
+        m["cr"] = round(float(cr), 3)
+    ccc = _get(ratios, "efficiency", "ccc_days", "value")
+    if ccc is not None:
+        m["ccc"] = round(float(ccc), 1)
+    de = _get(ratios, "leverage", "debt_to_equity", "value")
+    if de is not None:
+        m["de"] = round(float(de), 2)
+    dso = _get(ratios, "efficiency", "dso_days", "value")
+    if dso is not None:
+        m["dso"] = round(float(dso), 1)
+    if extra_metrics:
+        for ek, ev in extra_metrics.items():
+            if ev is not None:
+                try:
+                    m[str(ek)] = round(float(ev), 4) if isinstance(ev, (int, float)) else ev
+                except (TypeError, ValueError):
+                    m[str(ek)] = ev
+    return sig
+
+
+def _fingerprint_is_stale(
+    fp: dict[str, Any],
+    prior: list[dict],
+) -> bool:
+    if not prior:
+        return False
+    key, domain = fp.get("key"), fp.get("domain")
+    cur_m = fp.get("metrics") or {}
+    eps = {
+        "nm": 0.45,
+        "gm": 0.55,
+        "cr": 0.09,
+        "ccc": 4.0,
+        "de": 0.12,
+        "dso": 5.0,
+    }
+    for p in prior:
+        if p.get("key") != key or p.get("domain") != domain:
+            continue
+        pm = p.get("metrics") or {}
+        if not pm or not cur_m:
+            return False
+        stale = True
+        for k, v in cur_m.items():
+            if v is None or pm.get(k) is None:
+                stale = False
+                break
+            e = eps.get(k, 0.02)
+            if k in ("rev_g3", "rev_growth_3m"):
+                e = 1.25
+            if k == "er":
+                e = 1.1
+            if abs(float(v) - float(pm[k])) > e:
+                stale = False
+                break
+        if stale:
+            return True
+    return False
+
+
+def _branch_profitability_concentration(
+    branch_context: Optional[dict],
+    company_nm: Any,
+) -> Optional[dict[str, Any]]:
+    if not branch_context or company_nm is None:
+        return None
+    w = branch_context.get("weakest") or {}
+    bid = w.get("branch_id")
+    name = w.get("name")
+    wnm = w.get("net_margin_pct")
+    share = w.get("revenue_share_pct")
+    if bid is None or name is None or wnm is None:
+        return None
+    try:
+        cn = float(company_nm)
+        sh = float(share) if share is not None else 0.0
+        wn = float(wnm)
+    except (TypeError, ValueError):
+        return None
+    if sh < 8.0:
+        return None
+    if (cn - wn) < 4.0:
+        return None
+    return {
+        "scope": "branch",
+        "branch_id": bid,
+        "branch_name": name,
+        "revenue_contribution_pct": round(sh, 2),
+        "branch_net_margin_pct": round(wn, 2),
+        "company_net_margin_pct": round(cn, 2),
+        "gap_pp": round(cn - wn, 2),
+    }
+
+
+PARADOX_GROWTH_MARGIN_KEY = "paradox_growth_negative_operating_margin"
+_PARADOX_DOMAIN_TOKEN = "__paradox_growth_margin__"
+
+
+def _revenue_growth_trailing_3m_vs_prior_3m(analysis: Optional[dict]) -> Optional[float]:
+    """Average revenue last 3 periods vs average of prior 3 periods (% change)."""
+    if not analysis or not isinstance(analysis, dict):
+        return None
+    tr = analysis.get("trends") or {}
+    rev = [float(x) for x in (tr.get("revenue_series") or []) if x is not None]
+    if len(rev) < 6:
+        return None
+    last3 = sum(rev[-3:]) / 3.0
+    prev3 = sum(rev[-6:-3]) / 3.0
+    if prev3 <= 0:
+        return None
+    return round((last3 - prev3) / prev3 * 100, 2)
+
+
+def _latest_total_cost_ratio_pct_from_trends(analysis: Optional[dict]) -> Optional[float]:
+    """(COGS + OpEx) / revenue using latest non-null points in trend series."""
+    if not analysis or not isinstance(analysis, dict):
+        return None
+    tr = analysis.get("trends") or {}
+
+    def _last(series: list) -> Optional[float]:
+        for x in reversed(series or []):
+            if x is not None:
+                return float(x)
+        return None
+
+    r = _last(tr.get("revenue_series") or [])
+    if r is None or r <= 0:
+        return None
+    c = _last(tr.get("cogs_series") or []) or 0.0
+    e = _last(tr.get("expenses_series") or []) or 0.0
+    return round((c + e) / r * 100, 2)
 
 
 def _mom_from_levels(series: list) -> Optional[float]:
@@ -311,19 +491,19 @@ _DT: dict[str, dict] = {
     "liq_strengthen_working_capital": {
         "en": {
             "title":     "Strengthen Working Capital Position",
-            "rationale": "Working capital is below optimal levels. The business needs a buffer to absorb operational fluctuations without disrupting payments.",
+            "rationale": "Current ratio {cr}x vs 6M rolling avg {cr_roll6m}x (Δ {delta_cr_vs_roll6m}); quick ratio {qr}x; WC {wc}. Liquidity is softer than recent baseline — build a buffer before volatility hits cash.",
             "action":    "1) Implement 30-day payment terms for all new customer contracts. 2) Set up automated invoice reminders at 15, 30, and 45 days. 3) Consider factoring receivables to unlock trapped cash. 4) Target working capital ratio of 1.5x within 2 quarters.",
             "impact":    "Improves operational resilience and reduces reliance on credit lines.",
         },
         "ar": {
             "title":     "تعزيز موقف رأس المال العامل",
-            "rationale": "رأس المال العامل أقل من المستويات المثلى. الشركة بحاجة إلى هامش لامتصاص التقلبات التشغيلية دون تعطيل المدفوعات.",
+            "rationale": "النسبة الجارية {cr} مقارنة بمتوسط 6 أشهر {cr_roll6m} (التغير {delta_cr_vs_roll6m})؛ السريعة {qr}؛ رأس المال العامل {wc}. السيولة أضعف من خط الأساس الأخير — عزّز الهامش قبل ضغط النقد.",
             "action":    "1) تطبيق شروط دفع 30 يوماً لجميع عقود العملاء الجديدة. 2) إعداد تذكيرات فاتورة آلية في 15 و30 و45 يوماً. 3) النظر في خصم الفواتير لتحرير النقد المحتجز. 4) استهداف نسبة رأس مال عامل 1.5x خلال ربعين.",
             "impact":    "يحسن المرونة التشغيلية ويقلل الاعتماد على خطوط الائتمان.",
         },
         "tr": {
             "title":     "İşletme Sermayesini Güçlendirin",
-            "rationale": "İşletme sermayesi optimum seviyenin altında.",
+            "rationale": "Cari oran {cr} (6 aylık ort. {cr_roll6m}, Δ {delta_cr_vs_roll6m}); asit-test {qr}; işletme sermayesi {wc}. Likidite son dönem ortalamasının altında — nakit şoklarından önce tampon oluşturun.",
             "action":    "1) Tüm yeni müşteri sözleşmeleri için 30 günlük ödeme koşulları uygulayın. 2) 15, 30 ve 45. günlerde otomatik fatura hatırlatmaları kurun. 3) Alacakların faktoring yoluyla nakde çevrilmesini değerlendirin.",
             "impact":    "Operasyonel dayanıklılığı artırır ve kredi limitlerine bağımlılığı azaltır.",
         },
@@ -333,19 +513,19 @@ _DT: dict[str, dict] = {
     "prof_margin_recovery": {
         "en": {
             "title":     "Margin Recovery Programme",
-            "rationale": "Net margin {nm}% is below a healthy range for sustainable financial performance. Sustained margin pressure will erode equity over time.",
+            "rationale": "Net margin {nm}% vs 6M rolling avg {nm_roll6m}% (Δ {delta_nm_vs_roll6m} pp) — below a sustainable range; sustained pressure erodes equity.",
             "action":    "1) Run unit economics analysis (cost per unit/service line) — identify margin leakage. 2) Review the largest Cost Drivers (COGS and Operating Expenses) and their allocation logic. 3) Update pricing and customer segmentation for low-margin segments. 4) Target a minimum 12% Net Margin within 3 quarters.",
             "impact":    "Each 1pp margin improvement on current revenue ≈ {per_pp} additional annual profit.",
         },
         "ar": {
             "title":     "برنامج استعادة الهوامش",
-            "rationale": "الهامش الصافي {nm}% أقل من النطاق الصحي للأداء المالي المستدام. استمرار ضغط الهوامش سيؤدي إلى تآكل حقوق الملكية بمرور الوقت.",
+            "rationale": "الهامش الصافي {nm}% مقارنة بمتوسط 6 أشهر {nm_roll6m}% (Δ {delta_nm_vs_roll6m} نقطة) — دون نطاق مستدام؛ الضغط المستمر يآكل حقوق الملكية.",
             "action":    "1) إجراء تحليل اقتصاديات الوحدة (التكلفة لكل وحدة/خط خدمة) لتحديد تسرب الهوامش. 2) مراجعة أكبر محركات التكاليف (تكلفة المبيعات والمصروفات التشغيلية) ومنهجية توزيعها. 3) تحديث التسعير وتقسيم العملاء لشرائح الهامش المنخفض. 4) استهداف هامش صافي لا يقل عن 12% خلال 3 أرباع.",
             "impact":    "كل تحسن بنسبة 1 نقطة مئوية في الهامش على الإيرادات الحالية ≈ {per_pp} ربح إضافي سنوي.",
         },
         "tr": {
             "title":     "Marj İyileştirme Programı",
-            "rationale": "Net marj %{nm}, sürdürülebilir finansal performans için sağlıklı aralığın altında.",
+            "rationale": "Net marj %{nm} (6 aylık ort. %{nm_roll6m}, Δ {delta_nm_vs_roll6m} pp) — sürdürülebilir bandın altında; baskı sürerse özkaynak aşınır.",
             "action":    "1) Birim ekonomisi analizi (birim/hizmet hattı başına maliyet) yapın ve marj kaçaklarını bulun. 2) En büyük maliyet etkenlerini (COGS ve işletme giderleri) ve tahsis mantığını gözden geçirin. 3) Düşük marjlı segmentler için fiyatlandırma ve müşteri segmentasyonunu güncelleyin.",
             "impact":    "Mevcut gelirde her 1 puanlık marj iyileşmesi ≈ {per_pp} ek yıllık kar.",
         },
@@ -354,21 +534,243 @@ _DT: dict[str, dict] = {
     "prof_cost_structure_review": {
         "en": {
             "title":     "Strategic Cost Structure Review",
-            "rationale": "Gross margin {gm}% and operating costs suggest room for structural improvement. Without action, profitability will remain compressed.",
+            "rationale": "Gross margin {gm}% vs 6M rolling avg {gm_roll6m}% (Δ {delta_gm_vs_roll6m} pp) — room for structural COGS/pricing improvement; without action, profitability stays compressed.",
             "action":    "1) Map all cost centres by percentage of revenue — benchmark against peers. 2) Identify top 5 cost drivers and set 5% reduction targets. 3) Evaluate outsourcing non-core activities (maintenance, admin). 4) Implement monthly cost performance reviews with department heads.",
             "impact":    "Structural cost reduction improves both margins and long-term competitiveness.",
         },
         "ar": {
             "title":     "مراجعة هيكل التكاليف الاستراتيجية",
-            "rationale": "هامش الربح الإجمالي {gm}% والتكاليف التشغيلية تشير إلى وجود مجال للتحسين الهيكلي. بدون إجراء، ستبقى الربحية مضغوطة.",
+            "rationale": "هامش إجمالي {gm}% مقارنة بمتوسط 6 أشهر {gm_roll6m}% (Δ {delta_gm_vs_roll6m} نقطة) — مجال لتحسين هيكلي؛ بدون إجراء تبقى الربحية مضغوطة.",
             "action":    "1) رسم خريطة لجميع مراكز التكاليف كنسبة مئوية من الإيرادات — المقارنة مع النظراء. 2) تحديد أكبر 5 محركات للتكاليف وتحديد أهداف تخفيض 5%. 3) تقييم الاستعانة بمصادر خارجية للأنشطة غير الأساسية. 4) تطبيق مراجعات شهرية لأداء التكاليف مع رؤساء الأقسام.",
             "impact":    "تخفيض التكاليف الهيكلي يحسن الهوامش والقدرة التنافسية على المدى الطويل.",
         },
         "tr": {
             "title":     "Stratejik Maliyet Yapısı Gözden Geçirme",
-            "rationale": "Brüt marj %{gm} ve işletme maliyetleri yapısal iyileştirme alanı olduğunu gösteriyor.",
+            "rationale": "Brüt marj %{gm} (6 aylık ort. %{gm_roll6m}, Δ {delta_gm_vs_roll6m} pp) — yapısal SMM/fiyat iyileştirmesi gerekli.",
             "action":    "1) Tüm maliyet merkezlerini gelirin yüzdesi olarak haritalayın. 2) En büyük 5 maliyet etkenini belirleyin ve %5 azaltma hedefleri koyun. 3) Çekirdek dışı faaliyetler için dış kaynak kullanımını değerlendirin.",
             "impact":    "Yapısal maliyet azaltımı marjları ve uzun vadeli rekabetçiliği artırır.",
+        },
+    },
+
+    # ── Financial paradox (Phase 5C) ───────────────────────────────────────────
+    "paradox_growth_negative_operating_margin": {
+        "en": {
+            "title":     "Revenue is growing but profitability remains negative",
+            "rationale": "Cost structure is exceeding revenue growth",
+            "action":    "Analyze cost breakdown (COGS vs OPEX) and identify break-even point",
+            "impact":    "Evidence: trailing 3M revenue growth {revenue_growth_3m_pct}% vs prior 3M; operating margin {operating_margin_pct}%; (COGS+OpEx)/revenue {expense_ratio_pct}%.",
+        },
+        "ar": {
+            "title":     "الإيرادات تنمو لكن الربحية لا تزال سالبة",
+            "rationale": "هيكل التكاليف يتجاوز نمو الإيرادات",
+            "action":    "حلّل تفصيل التكاليف (تكلفة البضاعة مقابل المصاريف التشغيلية) وحدد نقطة التعادل",
+            "impact":    "أدلة: نمو إيراد متوسط 3 أشهر {revenue_growth_3m_pct}% مقابل الـ3 السابقة؛ هامش تشغيلي {operating_margin_pct}٪؛ (تكلفة البضاعة+مصاريف)/إيراد {expense_ratio_pct}٪.",
+        },
+        "tr": {
+            "title":     "Gelir büyüyor ancak kârlılık hâlâ negatif",
+            "rationale": "Maliyet yapısı gelir büyümesini aşıyor",
+            "action":    "Maliyet dağılımını analiz edin (SMM vs faaliyet gideri) ve başabaş noktasını belirleyin",
+            "impact":    "Kanıt: son 3 dönem ortalama gelir büyümesi {revenue_growth_3m_pct}% (önceki 3’e göre); faaliyet marjı %{operating_margin_pct}; (SMM+OpEx)/gelir %{expense_ratio_pct}.",
+        },
+    },
+
+    # ── Structured profit bridge story (Phase STEP 4) — rationale fragments ─────
+    "profit_story.paradox_growth_loss.what_changed": {
+        "en": {
+            "rationale": "Profit bridge ({previous_period} → {latest_period}): revenue moved {delta_rev_fmt} while net profit moved {delta_np_fmt}. COGS {delta_cogs_fmt}, OpEx {delta_opex_fmt}.",
+        },
+        "ar": {
+            "rationale": "جسر الربح ({previous_period} → {latest_period}): تحرك الإيراد {delta_rev_fmt} بينما تحرك صافي الربح {delta_np_fmt}. تكلفة المبيعات {delta_cogs_fmt}، المصاريف التشغيلية {delta_opex_fmt}.",
+        },
+        "tr": {
+            "rationale": "Kâr köprüsü ({previous_period} → {latest_period}): gelir {delta_rev_fmt}, net kâr {delta_np_fmt}. SMM {delta_cogs_fmt}, faaliyet gideri {delta_opex_fmt}.",
+        },
+    },
+    "profit_story.paradox_growth_loss.why": {
+        "en": {
+            "rationale": "Revenue growth did not translate into profit — cost absorption exceeded the revenue gain (bridge primary mover: {primary_driver}).",
+        },
+        "ar": {
+            "rationale": "نمو الإيرادات لم يتحول إلى ربح — استيعاب التكاليف تجاوز مكسب الإيرادات (المحرك الرئيسي في الجسر: {primary_driver}).",
+        },
+        "tr": {
+            "rationale": "Gelir artışı kâra dönüşmedi — maliyetler gelir kazanımını aştı (köprüde birincil hareket: {primary_driver}).",
+        },
+    },
+    "profit_story.paradox_growth_loss.action": {
+        "en": {
+            "rationale": "Reconcile the period bridge to COGS and OpEx accounts; executive review of {primary_driver} and pricing/cost pass-through.",
+        },
+        "ar": {
+            "rationale": "طابق الجسر مع حسابات تكلفة المبيعات والمصاريف التشغيلية؛ مراجعة تنفيذية لـ {primary_driver} وتمرير التكلفة/التسعير.",
+        },
+        "tr": {
+            "rationale": "Köprüyü SMM ve faaliyet gideri hesaplarıyla mutabık kılın; {primary_driver} ve fiyat/maliyet yansıtması için yönetici incelemesi.",
+        },
+    },
+    "profit_story.cost_pressure.what_changed": {
+        "en": {
+            "rationale": "Profit bridge: net profit {delta_np_fmt} with OpEx {delta_opex_fmt} and revenue {delta_rev_fmt} ({previous_period} → {latest_period}).",
+        },
+        "ar": {
+            "rationale": "جسر الربح: صافي الربح {delta_np_fmt} مع المصاريف التشغيلية {delta_opex_fmt} والإيراد {delta_rev_fmt} ({previous_period} → {latest_period}).",
+        },
+        "tr": {
+            "rationale": "Kâr köprüsü: net kâr {delta_np_fmt}, faaliyet gideri {delta_opex_fmt}, gelir {delta_rev_fmt} ({previous_period} → {latest_period}).",
+        },
+    },
+    "profit_story.cost_pressure.why": {
+        "en": {
+            "rationale": "Operating expense movement is the largest bridge driver versus revenue and COGS — OpEx pressure dominated the P&L path.",
+        },
+        "ar": {
+            "rationale": "حركة المصاريف التشغيلية هي أكبر محرك في الجسر مقارنة بالإيراد وتكلفة المبيعات — ضغط المصاريف التشغيلية ساد مسار الأرباح والخسائر.",
+        },
+        "tr": {
+            "rationale": "Faaliyet gideri hareketi, gelir ve SMM’ye kıyasla köprüde baskın sürücü — OpEx baskısı P&L yolunu belirledi.",
+        },
+    },
+    "profit_story.cost_pressure.action": {
+        "en": {
+            "rationale": "Target OpEx categories with the largest period deltas; tie spend to revenue and margin guardrails.",
+        },
+        "ar": {
+            "rationale": "استهدف فئات المصاريف التشغيلية ذات أكبر تغيرات الفترة؛ اربط الإنفاق بالإيراد وحدود الهامش.",
+        },
+        "tr": {
+            "rationale": "Dönemde en büyük değişimi gösteren OpEx kalemlerini hedefleyin; harcamayı gelir ve marj sınırlarına bağlayın.",
+        },
+    },
+    "profit_story.margin_compression.what_changed": {
+        "en": {
+            "rationale": "Profit bridge: net profit {delta_np_fmt}; COGS {delta_cogs_fmt}; gross profit {delta_gp_fmt}; revenue {delta_rev_fmt} ({previous_period} → {latest_period}).",
+        },
+        "ar": {
+            "rationale": "جسر الربح: صافي الربح {delta_np_fmt}؛ تكلفة المبيعات {delta_cogs_fmt}؛ إجمالي الربح {delta_gp_fmt}؛ الإيراد {delta_rev_fmt} ({previous_period} → {latest_period}).",
+        },
+        "tr": {
+            "rationale": "Kâr köprüsü: net kâr {delta_np_fmt}; SMM {delta_cogs_fmt}; brüt kâr {delta_gp_fmt}; gelir {delta_rev_fmt} ({previous_period} → {latest_period}).",
+        },
+    },
+    "profit_story.margin_compression.why": {
+        "en": {
+            "rationale": "COGS movement is the dominant bridge lever — gross margin compressed before operating costs.",
+        },
+        "ar": {
+            "rationale": "حركة تكلفة المبيعات هي الرافعة المهيمنة في الجسر — ضُغط الهامش الإجمالي قبل التكاليف التشغيلية.",
+        },
+        "tr": {
+            "rationale": "SMM hareketi baskın köprü kolu — faaliyet öncesi brüt marj sıkıştı.",
+        },
+    },
+    "profit_story.margin_compression.action": {
+        "en": {
+            "rationale": "Review COGS drivers (input prices, mix, waste); align pricing and procurement to recover gross margin.",
+        },
+        "ar": {
+            "rationale": "راجع محركات تكلفة المبيعات (أسعار المدخلات، المزيج، الهدر)؛ وائم التسعير والمشتريات لاستعادة الهامش الإجمالي.",
+        },
+        "tr": {
+            "rationale": "SMM sürücülerini gözden geçirin (girdi fiyatı, mix, fire); brüt marj için fiyat ve tedariki hizalayın.",
+        },
+    },
+    "profit_story.healthy_growth.what_changed": {
+        "en": {
+            "rationale": "Profit bridge: net profit {delta_np_fmt} with revenue {delta_rev_fmt} as the primary driver ({previous_period} → {latest_period}).",
+        },
+        "ar": {
+            "rationale": "جسر الربح: صافي الربح {delta_np_fmt} مع الإيراد {delta_rev_fmt} كالمحرك الأساسي ({previous_period} → {latest_period}).",
+        },
+        "tr": {
+            "rationale": "Kâr köprüsü: net kâr {delta_np_fmt}, birincil sürücü gelir {delta_rev_fmt} ({previous_period} → {latest_period}).",
+        },
+    },
+    "profit_story.healthy_growth.why": {
+        "en": {
+            "rationale": "Top-line expansion led the P&L improvement with net margin context {nm_pct}% — growth is funding profit.",
+        },
+        "ar": {
+            "rationale": "توسع الإيرادات قاد تحسين قائمة الأرباح والخسائر مع هامش صافٍ {nm_pct}% — النمو يغذي الربح.",
+        },
+        "tr": {
+            "rationale": "Üst hat genişlemesi P&L iyileşmesine öncülük etti; net marj bağlamı %{nm_pct} — büyüme kârı besliyor.",
+        },
+    },
+    "profit_story.healthy_growth.action": {
+        "en": {
+            "rationale": "Protect gross and operating margin while scaling; monitor COGS and OpEx pass-through as revenue grows.",
+        },
+        "ar": {
+            "rationale": "احم الهامش الإجمالي والتشغيلي أثناء التوسع؛ راقب تمرير تكلفة المبيعات والمصاريف مع نمو الإيراد.",
+        },
+        "tr": {
+            "rationale": "Ölçeklenirken brüt ve faaliyet marjını koruyun; gelir büyürken SMM ve OpEx yansımasını izleyin.",
+        },
+    },
+    "profit_story.profit_recovery.what_changed": {
+        "en": {
+            "rationale": "Profit bridge: net profit {delta_np_fmt} led by revenue {delta_rev_fmt}; latest net margin {nm_pct}% ({previous_period} → {latest_period}).",
+        },
+        "ar": {
+            "rationale": "جسر الربح: صافي الربح {delta_np_fmt} بقيادة الإيراد {delta_rev_fmt}؛ أحدث هامش صافٍ {nm_pct}% ({previous_period} → {latest_period}).",
+        },
+        "tr": {
+            "rationale": "Kâr köprüsü: net kâr {delta_np_fmt}, gelir {delta_rev_fmt} öncülüğünde; güncel net marj %{nm_pct} ({previous_period} → {latest_period}).",
+        },
+    },
+    "profit_story.profit_recovery.why": {
+        "en": {
+            "rationale": "Profit improved while net margin remains below a typical health band — recovery is underway but margin discipline stays critical.",
+        },
+        "ar": {
+            "rationale": "تحسن الربح مع بقاء الهامش الصافي دون نطاق صحة نموذجي — الاستعادة جارية لكن انضباط الهامش يبقى حاسماً.",
+        },
+        "tr": {
+            "rationale": "Kâr iyileşti; net marj tipik sağlık bandının altında — toparlanma sürüyor, marj disiplini kritik.",
+        },
+    },
+    "profit_story.profit_recovery.action": {
+        "en": {
+            "rationale": "Lock in revenue gains; continue cost and pricing actions until net margin clears sustainable targets.",
+        },
+        "ar": {
+            "rationale": "ثبّت مكاسب الإيراد؛ واصل إجراءات التكلفة والتسعير حتى يتجاوز الهامش الصافي أهدافاً مستدامة.",
+        },
+        "tr": {
+            "rationale": "Gelir kazanımlarını kilitleyin; net marj sürdürülebilir hedefleri aşana kadar maliyet ve fiyat adımlarını sürdürün.",
+        },
+    },
+    "profit_story.mixed.what_changed": {
+        "en": {
+            "rationale": "Profit bridge ({previous_period} → {latest_period}): revenue {delta_rev_fmt}, COGS {delta_cogs_fmt}, OpEx {delta_opex_fmt}, net profit {delta_np_fmt}.",
+        },
+        "ar": {
+            "rationale": "جسر الربح ({previous_period} → {latest_period}): الإيراد {delta_rev_fmt}، تكلفة المبيعات {delta_cogs_fmt}، المصاريف التشغيلية {delta_opex_fmt}، صافي الربح {delta_np_fmt}.",
+        },
+        "tr": {
+            "rationale": "Kâr köprüsü ({previous_period} → {latest_period}): gelir {delta_rev_fmt}, SMM {delta_cogs_fmt}, OpEx {delta_opex_fmt}, net kâr {delta_np_fmt}.",
+        },
+    },
+    "profit_story.mixed.why": {
+        "en": {
+            "rationale": "Offsetting movements across revenue, COGS, and OpEx — no single bridge line clearly dominated the outcome.",
+        },
+        "ar": {
+            "rationale": "حركات متعاكسة عبر الإيراد وتكلفة المبيعات والمصاريف التشغيلية — لا سطر جسر واحد هيمن بوضوح على النتيجة.",
+        },
+        "tr": {
+            "rationale": "Gelir, SMM ve OpEx üzerinde dengeleyici hareketler — sonucu tek bir köprü kalemi belirlemedi.",
+        },
+    },
+    "profit_story.mixed.action": {
+        "en": {
+            "rationale": "Walk the full waterfall (revenue → COGS → OpEx → net); prioritize the next-largest absolute delta after executive review.",
+        },
+        "ar": {
+            "rationale": "امشِ كامل الشلال (إيراد → تكلفة مبيعات → مصاريف تشغيلية → صافي)؛ أولوية لثاني أكبر تغير مطلق بعد المراجعة التنفيذية.",
+        },
+        "tr": {
+            "rationale": "Tam şelaleyi yürüyün (gelir → SMM → OpEx → net); yönetici incelemesinden sonra mutlak değeri en büyük ikinci kaleme öncelik verin.",
         },
     },
 
@@ -441,19 +843,19 @@ _DT: dict[str, dict] = {
     "growth_revenue_acceleration": {
         "en": {
             "title":     "Revenue Growth Acceleration",
-            "rationale": "Revenue trend is stable-to-positive and financial position supports controlled growth investment.",
+            "rationale": "Revenue momentum is measurable: 3M avg MoM {rev_roll_3m}%, YoY {yoy_rev_pct}%, CAGR {cagr_rev_pct}% — trend {rev_dir} supports selective reinvestment behind demand.",
             "action":    "1) Identify the top 3 Revenue Drivers: new customer segments, new offerings, and expansion in high-performing markets. 2) Run a 90-day pilot for the highest-potential lever. 3) Allocate 5–10% of operating cash flow to growth initiatives. 4) Set quarterly Revenue growth targets with clear accountability.",
             "impact":    "Incremental revenue growth at current margins directly improves profit and owner value.",
         },
         "ar": {
             "title":     "تسريع نمو الإيرادات",
-            "rationale": "اتجاه الإيرادات مستقر إلى إيجابي والوضع المالي يدعم الاستثمار في النمو المتحكم فيه.",
+            "rationale": "زخم الإيرادات قابل للقياس: متوسط 3 أشهر {rev_roll_3m}%، سنوي {yoy_rev_pct}%، معدل نمو مركب {cagr_rev_pct}% — اتجاه {rev_dir} يدعم إعادة استثمار انتقائية.",
             "action":    "1) تحديد أهم 3 محركات للإيرادات: شرائح عملاء جديدة، عروض/خدمات جديدة، وتوسع في الأسواق الأعلى أداءً. 2) إجراء تجربة لمدة 90 يوماً للمحرك الأعلى تأثيراً. 3) تخصيص 5-10% من التدفق النقدي التشغيلي لمبادرات النمو. 4) تحديد أهداف نمو الإيرادات ربع سنوية مع مساءلة واضحة.",
             "impact":    "نمو الإيرادات الإضافي بالهوامش الحالية يحسن مباشرة الأرباح وقيمة المالك.",
         },
         "tr": {
             "title":     "Gelir Büyümesini Hızlandırın",
-            "rationale": "Gelir trendi stabil-pozitif ve finansal durum kontrollü büyüme yatırımını destekliyor.",
+            "rationale": "Gelir ivmesi ölçülebilir: 3 aylık ort. MoM %{rev_roll_3m}, YoY %{yoy_rev_pct}, CAGR %{cagr_rev_pct} — {rev_dir} trendi seçici yatırımı destekliyor.",
             "action":    "1) En iyi 3 gelir büyüme kaldıraçlarını belirleyin: yeni müşteri segmentleri, yeni teklifler ve yüksek performanslı pazarlarda genişleme. 2) En yüksek potansiyelli kaldıraç için 90 günlük pilot çalıştırın. 3) Faaliyet nakit akışının %5-10'unu büyüme girişimlerine ayırın.",
             "impact":    "Mevcut marjlarla artan gelir büyümesi doğrudan kârı ve sahip değerini artırır.",
         },
@@ -491,6 +893,56 @@ def _t(key: str, lang: str, **kwargs) -> dict:
     return {k: _f(v) for k, v in loc.items()}
 
 
+def _try_paradox_growth_negative_om_pack(
+    analysis: Optional[dict],
+    ratios: dict,
+    lang: str,
+) -> Optional[tuple[dict[str, Any], dict[str, Any], dict[str, Any], list[dict]]]:
+    """
+    IF trailing 3M avg revenue growth vs prior 3M > 5% AND operating margin < 0
+    → structured high-priority paradox decision + evidence metrics.
+    """
+    om = _get(ratios, "profitability", "operating_margin_pct", "value")
+    if om is None or float(om) >= 0:
+        return None
+    rg = _revenue_growth_trailing_3m_vs_prior_3m(analysis)
+    if rg is None or float(rg) <= 5:
+        return None
+    er = _latest_total_cost_ratio_pct_from_trends(analysis)
+
+    fmt_rg = f"{float(rg):+.1f}"
+    fmt_om = f"{float(om):.1f}"
+    fmt_er = "—" if er is None else f"{float(er):.1f}"
+    kwargs = {
+        "revenue_growth_3m_pct": fmt_rg,
+        "operating_margin_pct": fmt_om,
+        "expense_ratio_pct": fmt_er,
+    }
+    txt = _t(PARADOX_GROWTH_MARGIN_KEY, lang, **kwargs)
+    card = {
+        "key": PARADOX_GROWTH_MARGIN_KEY,
+        "domain": "profitability",
+        **txt,
+    }
+    template_params = dict(kwargs)
+    sm: list[dict] = [
+        {"metric": "revenue_growth_trailing_3m_pct", "value": float(rg)},
+        {"metric": "operating_margin_pct", "value": float(om)},
+    ]
+    if er is not None:
+        sm.append({"metric": "expense_ratio_pct", "value": float(er)})
+    fp = {
+        "key": PARADOX_GROWTH_MARGIN_KEY,
+        "domain": "profitability",
+        "metrics": {
+            "rev_g3": float(rg),
+            "om": float(om),
+            "er": float(er) if er is not None else None,
+        },
+    }
+    return card, template_params, fp, sm
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 #  Domain scoring
 # ──────────────────────────────────────────────────────────────────────────────
@@ -503,8 +955,16 @@ def _get(d: dict, *keys, default=None):
     return d
 
 
-def _score_domain(domain: str, ratios: dict, trends: dict,
-                   alerts: list, anomalies: list) -> int:
+def _score_domain(
+    domain: str,
+    ratios: dict,
+    trends: dict,
+    alerts: list,
+    anomalies: list,
+    *,
+    depth: Optional[dict] = None,
+    trend_mag: Optional[dict] = None,
+) -> int:
     """Return 0–100 urgency score for a domain. 100 = critical."""
     score = 0
 
@@ -553,14 +1013,51 @@ def _score_domain(domain: str, ratios: dict, trends: dict,
         elif np_dir == "stable": score += 10
         if ytd_rev is not None and ytd_rev > 5: score += 20
 
+    # Rolling / magnitude overlays (Phase 5B)
+    dep = depth or {}
+    tm = trend_mag or {}
+    if domain == "growth":
+        rr = tm.get("rev_roll_3m")
+        if rr is not None:
+            score += min(14, int(abs(float(rr)) * 1.4))
+        cv = tm.get("rev_cagr")
+        if cv is not None:
+            score += min(12, int(abs(float(cv)) / 5))
+        yv = tm.get("rev_yoy")
+        if yv is not None:
+            score += min(10, int(abs(float(yv)) / 6))
+        ny = tm.get("np_yoy")
+        if ny is not None:
+            score += min(8, int(abs(float(ny)) / 8))
+    elif domain == "liquidity":
+        row = depth_get(dep, "liquidity.current_ratio")
+        d6 = row.get("delta_vs_roll_6m")
+        if d6 is not None and float(d6) <= -0.1:
+            score += 12
+        z = row.get("z_vs_roll6_excl_latest")
+        if z is not None and float(z) <= -1.5:
+            score += 10
+    elif domain == "profitability":
+        row = depth_get(dep, "profitability.net_margin_pct")
+        d6 = row.get("delta_vs_roll_6m")
+        if d6 is not None and float(d6) <= -1.0:
+            score += 10
+    elif domain == "efficiency":
+        row = depth_get(dep, "efficiency.ccc_days")
+        d6 = row.get("delta_vs_roll_6m")
+        if d6 is not None and float(d6) >= 15:
+            score += 10
+
     # Alert penalty boost
     for a in alerts:
         if domain in a.get("impact", ""):
             score += {"high": 15, "medium": 8, "low": 3}.get(a.get("severity", "low"), 0)
 
-    # Anomaly boost
+    # Anomaly boost — domain-targeted (series anomalies now populate via aligned keys)
     for an in anomalies:
-        score += {"critical": 10, "high": 6, "medium": 3}.get(an.get("severity", "medium"), 0)
+        pts = {"critical": 10, "high": 6, "medium": 3}.get(an.get("severity", "medium"), 3)
+        if domain in _anomaly_targets(an):
+            score += pts
 
     return min(100, score)
 
@@ -569,15 +1066,26 @@ def _score_domain(domain: str, ratios: dict, trends: dict,
 #  Decision selector
 # ──────────────────────────────────────────────────────────────────────────────
 
-def _select_decision(domain: str, ratios: dict, trends: dict,
-                     health_score: int, lang: str) -> Optional[tuple[dict, dict[str, Any]]]:
+def _select_decision(
+    domain: str,
+    ratios: dict,
+    trends: dict,
+    health_score: int,
+    lang: str,
+    *,
+    depth_ctx: Optional[dict] = None,
+    analysis: Optional[dict] = None,
+) -> Optional[tuple[dict, dict[str, Any]]]:
     """Pick the most appropriate decision key for a domain and build the card.
 
     Returns ``(card, template_params)`` where ``template_params`` are the same
     keyword arguments passed into decision templates (for causal realization).
     """
 
+    dep = depth_ctx or {}
+
     cr  = _get(ratios, "liquidity",     "current_ratio",    "value")
+    qr  = _get(ratios, "liquidity",     "quick_ratio",      "value")
     wc  = _get(ratios, "liquidity",     "working_capital",  "value")
     nm  = _get(ratios, "profitability", "net_margin_pct",   "value")
     gm  = _get(ratios, "profitability", "gross_margin_pct", "value")
@@ -587,6 +1095,17 @@ def _select_decision(domain: str, ratios: dict, trends: dict,
     rev_ytd = _get(trends, "revenue",   "ytd_vs_prior")
     rev_dir = _get(trends, "revenue",   "direction") or "insufficient_data"
     np_dir  = _get(trends, "net_profit","direction") or "insufficient_data"
+    rev_roll = _get(trends, "revenue", "rolling_3m")
+    yoy_rev = _get(trends, "revenue", "yoy_change")
+    cagr = _get(trends, "revenue", "cagr_pct")
+
+    tr_raw = (analysis or {}).get("trends") or {}
+    mom_s = tr_raw.get("revenue_mom_pct") or tr_raw.get("revenue_mom") or []
+    last_mom = next((x for x in reversed(mom_s) if x is not None), None)
+
+    cr_d = depth_get(dep, "liquidity.current_ratio")
+    nm_d = depth_get(dep, "profitability.net_margin_pct")
+    gm_d = depth_get(dep, "profitability.gross_margin_pct")
 
     def _fmt(v, fmt=".1f", fallback="—"):
         try: return format(float(v), fmt) if v is not None else fallback
@@ -600,8 +1119,24 @@ def _select_decision(domain: str, ratios: dict, trends: dict,
     def _fmt_ccc(v): return str(round(v)) if v is not None else "—"
     def _fmt_pct(v): return (f"{v:+.1f}%" if v is not None else "—")
 
+    def _fmt_pct_num(v: Any) -> str:
+        if v is None:
+            return "—"
+        try:
+            return f"{float(v):+.1f}"
+        except (TypeError, ValueError):
+            return "—"
+
+    def _pp_delta(row: dict) -> str:
+        d = row.get("delta_vs_roll_6m")
+        if d is None:
+            return "—"
+        try:
+            return f"{float(d):+.2f}"
+        except (TypeError, ValueError):
+            return "—"
+
     # ── Estimate annual revenue from ratios for impact calculation ────────────
-    # Use net_profit / net_margin_pct to back-calculate revenue
     rev_annual = None
     if nm is not None and nm > 0:
         np_val = _get(ratios, "profitability", "net_profit", "value")
@@ -627,23 +1162,39 @@ def _select_decision(domain: str, ratios: dict, trends: dict,
         return "significant cash"
 
     key = None
-    kwargs = {}
+    kwargs: dict[str, Any] = {}
 
     if domain == "liquidity":
         if cr is not None and cr < 1.0:
             key = "liq_immediate_cashflow"
             kwargs = {"cr": _fmt_cr(cr)}
         else:
+            # Always attach numeric + vs-baseline context; material_weak flags urgency in scoring
             key = "liq_strengthen_working_capital"
-            kwargs = {}
+            kwargs = {
+                "cr": _fmt_cr(cr),
+                "qr": _fmt_cr(qr),
+                "wc": _fmt(wc, ".0f"),
+                "cr_roll6m": _fmt_cr(cr_d.get("rolling_avg_6m")),
+                "delta_cr_vs_roll6m": _pp_delta(cr_d),
+            }
 
     elif domain == "profitability":
         if nm is not None and nm < 8:
             key = "prof_margin_recovery"
-            kwargs = {"nm": _fmt_nm(nm), "per_pp": _per_pp()}
+            kwargs = {
+                "nm": _fmt_nm(nm),
+                "per_pp": _per_pp(),
+                "nm_roll6m": _fmt_nm(nm_d.get("rolling_avg_6m")),
+                "delta_nm_vs_roll6m": _pp_delta(nm_d),
+            }
         else:
             key = "prof_cost_structure_review"
-            kwargs = {"gm": _fmt_gm(gm)}
+            kwargs = {
+                "gm": _fmt_gm(gm),
+                "gm_roll6m": _fmt_gm(gm_d.get("rolling_avg_6m")),
+                "delta_gm_vs_roll6m": _pp_delta(gm_d),
+            }
 
     elif domain == "efficiency":
         if ccc is not None and ccc > 60:
@@ -658,12 +1209,48 @@ def _select_decision(domain: str, ratios: dict, trends: dict,
         kwargs = {"de": _fmt_de(de)}
 
     elif domain == "growth":
-        if rev_dir in ("up", "stable") and (rev_ytd or 0) > 5:
+        mag_ok = False
+        if rev_ytd is not None and abs(float(rev_ytd)) >= 3:
+            mag_ok = True
+        if yoy_rev is not None and abs(float(yoy_rev)) >= 5:
+            mag_ok = True
+        if cagr is not None and abs(float(cagr)) >= 6:
+            mag_ok = True
+        if rev_roll is not None and abs(float(rev_roll)) >= 1.5:
+            mag_ok = True
+        if last_mom is not None and abs(float(last_mom)) >= 4:
+            mag_ok = True
+
+        ytd_eff = rev_ytd
+        if ytd_eff is None and yoy_rev is not None:
+            ytd_eff = float(yoy_rev)
+
+        gkw = {
+            "rev_roll_3m": _fmt_pct_num(rev_roll),
+            "yoy_rev_pct": _fmt_pct_num(yoy_rev),
+            "cagr_rev_pct": _fmt_pct_num(cagr),
+            "rev_dir": rev_dir,
+        }
+        if last_mom is not None and gkw["rev_roll_3m"] == "—":
+            gkw["rev_roll_3m"] = _fmt_pct_num(last_mom)
+
+        if rev_dir in ("up", "stable") and ytd_eff is not None and float(ytd_eff) > 5:
             key = "growth_margin_expansion"
-            kwargs = {"rev_ytd": _fmt_pct(rev_ytd)}
-        else:
+            kwargs = {"rev_ytd": _fmt_pct(float(ytd_eff))}
+        elif mag_ok and rev_dir in ("up", "stable", "insufficient_data"):
             key = "growth_revenue_acceleration"
-            kwargs = {}
+            kwargs = dict(gkw)
+        elif rev_dir in ("up", "stable"):
+            key = "growth_margin_expansion"
+            eff = ytd_eff if ytd_eff is not None else rev_roll if rev_roll is not None else last_mom
+            if eff is None:
+                eff = 0.0
+            kwargs = {"rev_ytd": _fmt_pct(float(eff))}
+        else:
+            if not mag_ok:
+                return None
+            key = "growth_revenue_acceleration"
+            kwargs = dict(gkw)
 
     if not key:
         return None
@@ -732,33 +1319,82 @@ def _linked_causes_for_domain(domain: str, alerts: list) -> list[dict]:
     return linked[:5]
 
 
-def _decision_source_metrics(domain: str, ratios: dict, trends: dict) -> list[dict]:
+def _depth_row_to_source_entry(metric_name: str, row: dict) -> dict[str, Any]:
+    out: dict[str, Any] = {"metric": metric_name, "value": row.get("latest")}
+    if row.get("rolling_avg_6m") is not None:
+        out["rolling_avg_6m"] = row["rolling_avg_6m"]
+    if row.get("rolling_avg_3m") is not None:
+        out["rolling_avg_3m"] = row["rolling_avg_3m"]
+    if row.get("delta_vs_roll_6m") is not None:
+        out["delta_vs_roll_6m"] = row["delta_vs_roll_6m"]
+    if row.get("yoy_change_pct") is not None:
+        out["yoy_change_pct"] = row["yoy_change_pct"]
+    if row.get("z_vs_roll6_excl_latest") is not None:
+        out["z_vs_roll6_excl_latest"] = row["z_vs_roll6_excl_latest"]
+    if row.get("percentile_in_window") is not None:
+        out["percentile_in_window"] = row["percentile_in_window"]
+    return out
+
+
+def _decision_source_metrics(
+    domain: str,
+    ratios: dict,
+    trends: dict,
+    depth_ctx: Optional[dict] = None,
+) -> list[dict]:
     """Deterministic metric bundle tied to the decision domain (for audit / UI)."""
     sm: list[dict] = []
+    dep = depth_ctx or {}
+
     if domain == "liquidity":
         for m in ("current_ratio", "quick_ratio", "working_capital"):
             v = _get(ratios, "liquidity", m, "value")
             if v is not None:
                 sm.append({"metric": m, "value": v})
+        cr_row = depth_get(dep, "liquidity.current_ratio")
+        if cr_row.get("latest") is not None or cr_row.get("rolling_avg_6m") is not None:
+            sm.append(_depth_row_to_source_entry("current_ratio_depth", cr_row))
     elif domain == "profitability":
         for m in ("net_margin_pct", "gross_margin_pct", "operating_margin_pct", "net_profit"):
             v = _get(ratios, "profitability", m, "value")
             if v is not None:
                 sm.append({"metric": m, "value": v})
+        for path, label in (
+            ("profitability.net_margin_pct", "net_margin_pct_depth"),
+            ("profitability.gross_margin_pct", "gross_margin_pct_depth"),
+        ):
+            row = depth_get(dep, path)
+            if row.get("latest") is not None or row.get("rolling_avg_6m") is not None:
+                sm.append(_depth_row_to_source_entry(label, row))
     elif domain == "efficiency":
         for m in ("dso_days", "dpo_days", "ccc_days", "inventory_turnover"):
             v = _get(ratios, "efficiency", m, "value")
             if v is not None:
                 sm.append({"metric": m, "value": v})
+        ccc_row = depth_get(dep, "efficiency.ccc_days")
+        if ccc_row.get("latest") is not None or ccc_row.get("rolling_avg_6m") is not None:
+            sm.append(_depth_row_to_source_entry("ccc_days_depth", ccc_row))
     elif domain == "leverage":
         for m in ("debt_to_equity", "debt_ratio_pct"):
             v = _get(ratios, "leverage", m, "value")
             if v is not None:
                 sm.append({"metric": m, "value": v})
+        de_row = depth_get(dep, "leverage.debt_to_equity")
+        if de_row.get("latest") is not None or de_row.get("rolling_avg_6m") is not None:
+            sm.append(_depth_row_to_source_entry("debt_to_equity_depth", de_row))
     elif domain == "growth":
         ry = _get(trends, "revenue", "ytd_vs_prior")
         if ry is not None:
             sm.append({"metric": "revenue_ytd_vs_prior_pct", "value": ry})
+        rr = _get(trends, "revenue", "rolling_3m")
+        if rr is not None:
+            sm.append({"metric": "revenue_rolling_3m_mom_avg_pct", "value": rr})
+        yoy = _get(trends, "revenue", "yoy_change")
+        if yoy is not None:
+            sm.append({"metric": "revenue_yoy_change_pct", "value": yoy})
+        cg = _get(trends, "revenue", "cagr_pct")
+        if cg is not None:
+            sm.append({"metric": "revenue_cagr_pct", "value": cg})
     rd = _get(trends, "revenue", "direction")
     if rd and rd != "insufficient_data":
         sm.append({"metric": "revenue_trend_direction", "value": rd})
@@ -766,6 +1402,23 @@ def _decision_source_metrics(domain: str, ratios: dict, trends: dict) -> list[di
     if nd and nd != "insufficient_data":
         sm.append({"metric": "net_profit_trend_direction", "value": nd})
     return sm
+
+
+def _evidence_delta_slice(domain: str, depth_ctx: dict) -> dict[str, Any]:
+    path = {
+        "liquidity": "liquidity.current_ratio",
+        "profitability": "profitability.net_margin_pct",
+        "efficiency": "efficiency.ccc_days",
+        "leverage": "leverage.debt_to_equity",
+        "growth": "profitability.net_margin_pct",
+    }.get(domain, "")
+    row = depth_get(depth_ctx or {}, path)
+    return {
+        "metric_path": path,
+        "delta_vs_roll_6m": row.get("delta_vs_roll_6m"),
+        "delta_vs_roll_3m": row.get("delta_vs_roll_3m"),
+        "z_vs_roll6_excl_latest": row.get("z_vs_roll6_excl_latest"),
+    }
 
 
 def _confidence(domain_score: int, health: int, n_periods: int) -> int:
@@ -832,6 +1485,98 @@ def _causal_params_for_decision(
     return params
 
 
+def _profit_story_fragment(key: Optional[str], lang: str, params: dict) -> str:
+    if not key or key not in _DT:
+        return ""
+    entry = _DT[key]
+    loc = entry.get(lang) or entry.get("en") or {}
+    text = str(loc.get("rationale") or "")
+    try:
+        return text.format(**params)
+    except Exception:
+        return text
+
+
+def _effective_profit_story(analysis: Optional[dict]) -> Optional[dict]:
+    if not analysis:
+        return None
+    s = analysis.get("structured_profit_story")
+    if isinstance(s, dict) and s.get("summary_type") is not None:
+        return s
+    if analysis.get("structured_profit_bridge"):
+        return build_structured_profit_story_from_analysis(analysis)
+    return None
+
+
+def _should_bridge_back_reason(
+    eff_domain: str,
+    domain: str,
+    card_key: str,
+    summary_type: Optional[str],
+) -> bool:
+    if not summary_type or summary_type == "mixed":
+        return False
+    if eff_domain == "profitability" and card_key in (
+        "prof_margin_recovery",
+        "prof_cost_structure_review",
+        PARADOX_GROWTH_MARGIN_KEY,
+    ):
+        return True
+    if domain == "growth" and card_key == "growth_margin_expansion":
+        return summary_type in ("healthy_growth", "profit_recovery")
+    return False
+
+
+def _attach_profit_bridge_to_decision(
+    card: dict,
+    template_params: dict[str, Any],
+    analysis: Optional[dict],
+    domain: str,
+    eff_domain: str,
+    lang: str,
+) -> dict[str, Any]:
+    """Attach bridge + story to evidence; prepend bridge-backed rationale for applicable cards."""
+    story = _effective_profit_story(analysis)
+    ev = card.get("evidence")
+    if not isinstance(ev, dict):
+        return template_params
+
+    if analysis:
+        for k in (
+            "structured_profit_bridge",
+            "structured_profit_bridge_interpretation",
+            "structured_profit_bridge_meta",
+        ):
+            v = analysis.get(k)
+            if v is not None:
+                ev[k] = v
+    if story is not None:
+        ev["structured_profit_story"] = story
+
+    st = story.get("summary_type") if isinstance(story, dict) else None
+    if not story or not _should_bridge_back_reason(
+        eff_domain, domain, str(card.get("key") or ""), st
+    ):
+        return template_params
+
+    wparams = story.get("what_changed_params") or {}
+    yparams = story.get("why_params") or {}
+    aparams = story.get("action_params") or {}
+    parts = [
+        _profit_story_fragment(story.get("what_changed_key"), lang, wparams),
+        _profit_story_fragment(story.get("why_key"), lang, yparams),
+        _profit_story_fragment(story.get("action_key"), lang, aparams),
+    ]
+    bridge_block = " ".join(p for p in parts if p).strip()
+    if bridge_block:
+        orig = card.get("reason") or ""
+        card["reason"] = f"{bridge_block}\n\nContext: {orig}".strip()
+
+    merged = dict(template_params)
+    merged["bridge_story_summary_type"] = st
+    return merged
+
+
 def _causal_item_for_decision(card: dict, template_params: dict[str, Any]) -> dict:
     tk = str(card.get("key") or "")
     domain = str(card.get("domain") or "")
@@ -873,6 +1618,7 @@ def build_cfo_decisions(
     top_n: int = 3,
     analysis: Optional[dict] = None,
     branch_context: Optional[dict] = None,
+    prior_decision_fingerprints: Optional[list] = None,
 ) -> dict:
     """
     Build top-N CFO-level prioritized decisions from Phase 21/23 intelligence.
@@ -883,6 +1629,10 @@ def build_cfo_decisions(
         lang:         "en" | "ar" | "tr"
         n_periods:    number of periods in the analysis window (affects confidence)
         top_n:        how many decisions to return (default 3)
+        analysis:     output of run_analysis() — enables rolling baselines & growth MoM tail
+        branch_context: optional portfolio snapshot (2+ branches) for segmentation boost
+        prior_decision_fingerprints: optional list of prior ``_build_decision_fingerprint`` dicts;
+            suppresses a decision when key+domain match and tracked metrics are unchanged
 
     Returns:
         {
@@ -900,64 +1650,181 @@ def build_cfo_decisions(
     anomalies = intelligence.get("anomalies", [])
     health    = intelligence.get("health_score_v2", 50)
 
+    depth_ctx = build_ratio_depth_context(analysis)
+    trend_mag = _trend_mag_dict(trends)
+
     # ── Score every domain ─────────────────────────────────────────────────────
     domains = ["liquidity", "profitability", "efficiency", "leverage", "growth"]
     raw_scores: dict[str, int] = {}
     for d in domains:
-        raw_scores[d] = _score_domain(d, ratios, trends, alerts, anomalies)
+        raw_scores[d] = _score_domain(
+            d, ratios, trends, alerts, anomalies,
+            depth=depth_ctx,
+            trend_mag=trend_mag,
+        )
+
+    nm_company = _get(ratios, "profitability", "net_margin_pct", "value")
+    branch_seg = _branch_profitability_concentration(branch_context, nm_company)
+    if branch_seg:
+        raw_scores["profitability"] = min(100, raw_scores["profitability"] + 12)
 
     # ── Apply domain weights — liquidity always first if score >= 30 ───────────
-    liq_score = raw_scores["liquidity"]
     weighted: list[tuple[int, str]] = []
     for d in domains:
         s = raw_scores[d]
         w = DOMAIN_WEIGHTS.get(d, 10)
-        # If liquidity is critical, boost it above everything else
         if d == "liquidity" and s >= 30:
-            effective = s * (w / 35) * 1.4   # boost factor
+            effective = s * (w / 35) * 1.4
         else:
             effective = s * (w / 100)
         weighted.append((effective, d))
 
-    # Sort descending by effective priority
     weighted.sort(key=lambda x: -x[0])
 
-    # ── Build decision cards for top domains ───────────────────────────────────
     decisions: list[dict] = []
     causal_items: list[dict] = []
-    for eff_score, domain in weighted[:top_n]:
-        selected = _select_decision(domain, ratios, trends, health, lang)
-        if selected is None:
-            continue
-        card, template_params = selected
-        raw = raw_scores[domain]
+    skipped_stale = 0
+
+    # ── Growth vs profit paradox (Phase 5C): rank above generic cost-structure cards
+    paradox_pack = _try_paradox_growth_negative_om_pack(analysis, ratios, lang)
+    if paradox_pack:
+        _pc, _tp, paradox_fp_pre, _psm = paradox_pack
+        if prior_decision_fingerprints and _fingerprint_is_stale(
+            paradox_fp_pre, prior_decision_fingerprints
+        ):
+            paradox_pack = None
+            skipped_stale += 1
+        else:
+            weighted.insert(0, (1_000_000.0, _PARADOX_DOMAIN_TOKEN))
+
+    # ── Build decision cards (walk ranked domains until top_n emitted) ──────────
+    pool_i = 0
+    trend_mag_block = {
+        "revenue_rolling_3m_mom_avg_pct": trend_mag.get("rev_roll_3m"),
+        "net_profit_rolling_3m_mom_avg_pct": trend_mag.get("np_roll_3m"),
+        "revenue_yoy_change_pct": trend_mag.get("rev_yoy"),
+        "net_profit_yoy_change_pct": trend_mag.get("np_yoy"),
+        "revenue_cagr_pct": trend_mag.get("rev_cagr"),
+        "revenue_ytd_vs_prior_pct": trend_mag.get("rev_ytd"),
+    }
+
+    while len(decisions) < top_n and pool_i < len(weighted):
+        eff_score, domain = weighted[pool_i]
+        pool_i += 1
+
+        if domain == _PARADOX_DOMAIN_TOKEN:
+            if not paradox_pack:
+                continue
+            p_card, template_params, fp, paradox_sm = paradox_pack
+            card = dict(p_card)
+            card["source_metrics"] = paradox_sm
+        else:
+            selected = _select_decision(
+                domain, ratios, trends, health, lang,
+                depth_ctx=depth_ctx,
+                analysis=analysis,
+            )
+            if selected is None:
+                continue
+            card, template_params = selected
+            if (
+                card.get("key") == "prof_cost_structure_review"
+                and any(d.get("key") == PARADOX_GROWTH_MARGIN_KEY for d in decisions)
+            ):
+                continue
+            fp = _build_decision_fingerprint(
+                card["key"], domain, ratios, depth_ctx,
+            )
+            if prior_decision_fingerprints and _fingerprint_is_stale(
+                fp, prior_decision_fingerprints,
+            ):
+                skipped_stale += 1
+                continue
+
+        if domain == _PARADOX_DOMAIN_TOKEN:
+            raw = min(100, raw_scores.get("profitability", 55) + 35)
+        else:
+            raw = raw_scores[domain]
         card["priority"]        = len(decisions) + 1
-        card["urgency"]         = _urgency(raw)
-        card["impact_level"]    = _impact_level(domain, raw)
+        if domain == _PARADOX_DOMAIN_TOKEN:
+            card["urgency"] = "high"
+            card["impact_level"] = "high"
+            card["action_type"] = "paradox_growth_negative_operating_margin"
+        else:
+            card["urgency"] = _urgency(raw)
+            card["impact_level"] = _impact_level(domain, raw)
         card["timeframe"]       = _timeframe(raw)
         card["time_horizon"]    = card["timeframe"]
         card["confidence"]      = _confidence(raw, health, n_periods)
         card["priority_score"]  = round(eff_score, 1)
-        # Phase 25 schema aliases
         card["reason"]          = card.pop("rationale", "")
         card["expected_effect"] = card.pop("impact", "")
         card["expected_impact"] = card["expected_effect"]
         card["action"]          = card.get("action", "")
-        card["source_metrics"]  = _decision_source_metrics(domain, ratios, trends)
+        if domain != _PARADOX_DOMAIN_TOKEN:
+            card["source_metrics"] = _decision_source_metrics(
+                domain, ratios, trends, depth_ctx,
+            )
         card["decision_title"]  = card.get("title", "")
-        card["linked_causes"]   = _linked_causes_for_domain(domain, alerts)
+        eff_domain = "profitability" if domain == _PARADOX_DOMAIN_TOKEN else domain
+        card["linked_causes"]   = _linked_causes_for_domain(eff_domain, alerts)
+
+        seg = branch_seg if eff_domain == "profitability" else None
+        if seg:
+            card["branch_id"] = seg["branch_id"]
+            card["branch_name"] = seg["branch_name"]
+            card["revenue_contribution_pct"] = seg["revenue_contribution_pct"]
+            template_params = dict(template_params)
+            template_params.setdefault("branch_name", seg["branch_name"])
+            template_params.setdefault("branch_net_margin_pct", seg["branch_net_margin_pct"])
+            template_params.setdefault("company_net_margin_pct", seg["company_net_margin_pct"])
+            template_params.setdefault("branch_revenue_share_pct", seg["revenue_contribution_pct"])
+
+        ps = depth_ctx.get("period_span") if depth_ctx else None
         card["evidence"]        = {
             "health_score_v2": health,
             "domain_urgency_score": raw,
             "source_metrics": card["source_metrics"],
             "linked_alerts": [x.get("alert_id") for x in card["linked_causes"]],
+            "period_span": ps,
+            "baseline": {
+                "rolling_6m_mean_label": "Trailing mean of last ≤6 periods (see source_metrics *_depth rows)",
+                "ratio_depth_metrics": depth_ctx.get("metrics") if depth_ctx else {},
+            },
+            "current": {
+                "as_of_period": (ps or {}).get("to_period"),
+            },
+            "delta": _evidence_delta_slice(eff_domain, depth_ctx),
+            "financial_paradox": (
+                {"type": "growth_vs_negative_operating_margin"}
+                if card.get("key") == PARADOX_GROWTH_MARGIN_KEY
+                else None
+            ),
+            "trend_magnitude": trend_mag_block,
+            "segmentation": seg,
+            "repeat_control": {
+                "fingerprint": fp,
+                "suppressed_as_stale": False,
+                "prior_fingerprints_supplied": bool(prior_decision_fingerprints),
+            },
         }
+        if card.get("scope") is None and seg:
+            card["scope"] = "branch"
+        elif card.get("scope") is None:
+            card["scope"] = "company"
+
+        template_params = _attach_profit_bridge_to_decision(
+            card, template_params, analysis, domain, eff_domain, lang,
+        )
+
         decisions.append(card)
         causal_items.append(_causal_item_for_decision(card, template_params))
 
     top_focus = decisions[0]["domain"] if decisions else ""
-
     top_domain = decisions[0]["domain"] if decisions else ""
+    fin_paradox_summary = None
+    if any(d.get("key") == PARADOX_GROWTH_MARGIN_KEY for d in decisions):
+        fin_paradox_summary = "growth_vs_negative_operating_margin"
 
     recommendations = _build_actionable_recommendations(
         intelligence,
@@ -977,5 +1844,10 @@ def build_cfo_decisions(
             "top_focus_domain": top_domain,
             "health_score":     health,
             "total":            len(decisions),
+            "financial_paradox": fin_paradox_summary,
+            "repeat_control": {
+                "skipped_stale_repeats": skipped_stale,
+                "prior_fingerprints_supplied": bool(prior_decision_fingerprints),
+            },
         },
     }

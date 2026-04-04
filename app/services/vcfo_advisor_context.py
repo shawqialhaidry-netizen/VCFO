@@ -23,23 +23,6 @@ def _safe(fn, default=None):
         return default
 
 
-def _merge_advisor_causal_items(flat: list | None) -> list:
-    """Dedup by causal item id; input order preserved (CFO domain → narrative → AI heuristic)."""
-    seen: set[str] = set()
-    out: list = []
-    for it in flat or []:
-        if not isinstance(it, dict):
-            continue
-        uid = str(it.get("id") or "")
-        if not uid:
-            uid = f"_:{len(seen)}"
-        if uid in seen:
-            continue
-        seen.add(uid)
-        out.append(it)
-    return out
-
-
 def build_advisor_context(
     company_id:   str,
     db,
@@ -178,13 +161,15 @@ def build_advisor_context(
         {"status": "UNKNOWN", "warnings": [], "errors": []}
     ) if windowed else {"status": "NO_DATA"}
 
-    # ── Shared CFO domain decisions + phase43 narrative causal (Wave 2B) ───────
-    causal_items_merged: list = []
+    # ── Canonical CFO decisions (same engine as GET /executive) ────────────────
     _lang_ai = lang if lang in ("en", "ar", "tr") else lang
     _lang_cfo = _lang_ai if _lang_ai in ("en", "ar", "tr") else "en"
 
+    dec_pack: dict = {}
+
     if windowed and analysis:
         def _pack_cfo_domain():
+            from app.api.analysis import _branch_context_for_cfo_decisions
             from app.services.period_aggregation import build_annual_layer
             from app.services.fin_intelligence import build_intelligence
             from app.services.alerts_engine import build_alerts
@@ -193,64 +178,71 @@ def build_advisor_context(
             annual = build_annual_layer(windowed)
             intel = build_intelligence(analysis, annual, company.currency or "")
             alerts = build_alerts(intel, lang=_lang_cfo).get("alerts", [])
+            branch_ctx_dec = _branch_context_for_cfo_decisions(db, company_id)
             return build_cfo_decisions(
                 intel,
                 alerts,
                 lang=_lang_cfo,
                 n_periods=len(periods) if periods else 3,
                 analysis=analysis,
-                branch_context=None,
+                branch_context=branch_ctx_dec,
             )
 
-        dec_pack = _safe(_pack_cfo_domain, {})
-        causal_items_merged.extend(dec_pack.get("causal_items") or [])
+        dec_pack = _safe(_pack_cfo_domain, {}) or {}
 
-        def _narrative_causal():
-            from app.services.root_cause_engine import build_root_causes
-            from app.services.anomaly_engine import detect_anomalies
-            from app.services.narrative_builder import build_narratives
-
-            exp_ratio = round(exp / rev * 100, 2) if rev else None
-            cogs_ratio = round(cogs / rev * 100, 2) if rev else None
-            _p43_metrics = {
-                "net_margin_pct": nm,
-                "total_cost_ratio_pct": er,
-                "cogs_ratio_pct": cogs_ratio,
-                "expense_ratio": exp_ratio,
-            }
-
-            def _lv_s(series):
-                return next((x for x in reversed(series or []) if x is not None), None)
-
-            _tr = analysis.get("trends") or {}
-            _p43_trends = {
-                "revenue_mom": _lv_s(_tr.get("revenue", {}).get("mom_pct", [])),
-                "net_profit_mom": _lv_s(_tr.get("net_profit", {}).get("mom_pct", [])),
-                "opex_mom_pct": _lv_s(_tr.get("expenses", {}).get("mom_pct", [])),
-                "cogs_ratio_mom": _lv_s(_tr.get("cogs", {}).get("mom_pct", [])),
-                "net_margin_mom": _lv_s(_tr.get("net_margin", {}).get("mom_pct", [])),
-            }
-            rc = build_root_causes(_p43_metrics, _p43_trends, lang=_lang_cfo)
-            anom = detect_anomalies(_p43_metrics, _p43_trends, lang=_lang_cfo)
-            narr = build_narratives(rc, anom, lang=_lang_cfo)
-            return list(getattr(narr, "causal_items", []) or [])
-
-        causal_items_merged.extend(_safe(_narrative_causal, []))
-
-    # ── AI CFO heuristic decisions (legacy rationale + causal row) ────────────
+    # Legacy AI-CFO heuristic pack (isolated — not merged into primary causal/decisions)
     from app.services.ai_cfo_engine import build_company_decision
+    from app.services.causal_realize import realize_causal_items
+
     snapshot = {"revenue": w_rev, "net_profit": w_np, "net_margin_pct": nm, "expense_ratio": er}
-    cfo_decisions_ctx = _safe(
+    legacy_ai_cfo_decision = _safe(
         lambda: build_company_decision(company.name, analysis, snapshot, period),
         {"decisions": [], "causal_items": [], "risk_score": 50, "priority": "UNKNOWN"},
     ) if analysis else {"decisions": [], "causal_items": [], "risk_score": 50, "priority": "UNKNOWN"}
 
-    causal_items_merged.extend(cfo_decisions_ctx.get("causal_items") or [])
-    causal_items_final = _merge_advisor_causal_items(causal_items_merged)
+    # Same merge path as executive realized causal (no deep_intel / profit_intel here)
+    from app.api.analysis import _merge_causal_sources_for_realize
 
-    from app.services.causal_realize import realize_causal_items
+    merged_causal_templates = _merge_causal_sources_for_realize(dec_pack or None, None, None)
+    realized_causal_advisor = realize_causal_items(merged_causal_templates, _lang_cfo)
 
-    realized_causal_advisor = realize_causal_items(causal_items_final, _lang_cfo)
+    _raw_cfo_causal = (dec_pack or {}).get("causal_items") or []
+    _realized_cfo_only = realize_causal_items(_raw_cfo_causal, _lang_cfo)
+    decisions_for_ctx: list[dict] = []
+    for i, dec in enumerate((dec_pack or {}).get("decisions") or []):
+        row = dict(dec)
+        if i < len(_realized_cfo_only):
+            r = _realized_cfo_only[i]
+            row["causal_realized"] = {
+                "id": r.get("id"),
+                "change_text": r.get("change_text") or "",
+                "cause_text": r.get("cause_text") or "",
+                "action_text": r.get("action_text") or "",
+            }
+        decisions_for_ctx.append(row)
+
+    def _urgency_to_priority(u: str | None) -> str:
+        ul = (u or "low").lower()
+        if ul == "high":
+            return "HIGH"
+        if ul == "medium":
+            return "MEDIUM"
+        return "LOW"
+
+    _first = decisions_for_ctx[0] if decisions_for_ctx else {}
+    _hs = ((dec_pack or {}).get("summary") or {}).get("health_score")
+    if _hs is None:
+        _hs = 50
+
+    cfo_decisions_ctx = {
+        "decisions": decisions_for_ctx,
+        "causal_items": merged_causal_templates,
+        "recommendations": (dec_pack or {}).get("recommendations") or [],
+        "decisions_summary": (dec_pack or {}).get("summary") or {},
+        "domain_scores": (dec_pack or {}).get("domain_scores") or {},
+        "risk_score": int(_hs) if isinstance(_hs, (int, float)) else 50,
+        "priority": _urgency_to_priority(_first.get("urgency")),
+    }
 
     # ── Branch context ────────────────────────────────────────────────────────
     branch_ctx: dict = {}
@@ -293,6 +285,9 @@ def build_advisor_context(
         }
     except Exception as e:
         logger.warning("branch context: %s", e)
+
+    _br0 = (cfo_decisions_ctx.get("decisions") or [{}])[0]
+    _board_top_action = _br0.get("title") or _br0.get("domain") or "OPTIMIZE"
 
     # ── Assemble full context ─────────────────────────────────────────────────
     return {
@@ -359,14 +354,30 @@ def build_advisor_context(
                 }
                 for s in windowed
             ],
+            "structured_income_statement": analysis.get("structured_income_statement"),
+            "structured_income_statement_meta": analysis.get("structured_income_statement_meta"),
+            "structured_income_statement_variance": analysis.get("structured_income_statement_variance"),
+            "structured_income_statement_margin_variance": analysis.get(
+                "structured_income_statement_margin_variance"
+            ),
+            "structured_income_statement_variance_meta": analysis.get(
+                "structured_income_statement_variance_meta"
+            ),
+            "structured_profit_bridge": analysis.get("structured_profit_bridge"),
+            "structured_profit_bridge_interpretation": analysis.get(
+                "structured_profit_bridge_interpretation"
+            ),
+            "structured_profit_bridge_meta": analysis.get("structured_profit_bridge_meta"),
+            "structured_profit_story": analysis.get("structured_profit_story"),
         },
 
         "cashflow":   cashflow_ctx,
         "branches":   branch_ctx,
         "validation": validation_ctx,
         "decisions":  cfo_decisions_ctx,
-        "causal_items": causal_items_final,
+        "causal_items": merged_causal_templates,
         "realized_causal_items": realized_causal_advisor,
+        "legacy_ai_cfo_decision": legacy_ai_cfo_decision,
 
         # ── Spec-mandated key aliases ─────────────────────────────────────────
         # "executive" = decisions + analysis (same data, different label)
@@ -382,7 +393,7 @@ def build_advisor_context(
         "board_report": {
             "period":           period,
             "health_summary":   cfo_decisions_ctx.get("priority", "UNKNOWN"),
-            "top_action":       (cfo_decisions_ctx.get("decisions") or [{}])[0].get("action_type", "OPTIMIZE"),
+            "top_action":       _board_top_action,
             "risk_score":       cfo_decisions_ctx.get("risk_score"),
             "summary_available": True,
         },

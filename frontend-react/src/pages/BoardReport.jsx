@@ -7,6 +7,7 @@
  */
 import { useState, useEffect, useCallback } from 'react'
 import { usePeriodScope } from '../context/PeriodScopeContext.jsx'
+import { buildAnalysisQuery } from '../utils/buildAnalysisQuery.js'
 import { useLang }        from '../context/LangContext.jsx'
 import { useCompany }     from '../context/CompanyContext.jsx'
 import {
@@ -17,6 +18,9 @@ import {
   formatDays,
 } from '../utils/numberFormat.js'
 import CmdServerText from '../components/CmdServerText.jsx'
+import DecisionCausalBlock from '../components/DecisionCausalBlock.jsx'
+import StructuredFinancialLayers from '../components/StructuredFinancialLayers.jsx'
+import { decisionStableKey, hasAnyCausal } from '../utils/decisionCausal.js'
 
 const API = '/api/v1'
 function auth() {
@@ -260,6 +264,57 @@ function Toolbar({tr,companyName,period,isBranch}){
   )
 }
 
+// ── Causal section: CFO structured_decisions (causal_realized) primary; realized list if no decisions ──
+function boardCausalSectionRows(data) {
+  const sd = data?.structured_decisions
+  if (Array.isArray(sd) && sd.length) {
+    const rows = []
+    let anyFallback = false
+    for (const d of sd.slice(0, 12)) {
+      const cr = d.causal_realized
+      const id = decisionStableKey(d) || d.domain || d.key || rows.length
+      if (hasAnyCausal(cr)) {
+        const imp = d.impact != null ? String(d.impact).trim() : ''
+        rows.push({
+          id,
+          mode: 'causal',
+          causal_realized: cr,
+          impact: imp || null,
+        })
+        continue
+      }
+      const reason = String(d.reason || '').trim()
+      const title = String(d.title || '').trim()
+      const one = reason || title
+      if (one) {
+        anyFallback = true
+        rows.push({ id, mode: 'fallback', fallbackText: one })
+      }
+    }
+    return rows.length
+      ? { variant: 'structured', rows, anyFallback }
+      : { variant: 'none', rows: [], anyFallback: false }
+  }
+  const rc = data?.realized_causal_items
+  if (Array.isArray(rc) && rc.length) {
+    return {
+      variant: 'realized',
+      anyFallback: false,
+      rows: rc.slice(0, 12).map((it, i) => ({
+        id: it.id != null ? `rc:${it.id}` : `rc:${i}`,
+        mode: 'causal',
+        causal_realized: {
+          change_text: it.change_text,
+          cause_text: it.cause_text,
+          action_text: it.action_text,
+        },
+        impact: null,
+      })),
+    }
+  }
+  return { variant: 'none', rows: [], anyFallback: false }
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 export default function BoardReport(){
   const {tr,lang}=useLang()
@@ -268,25 +323,32 @@ export default function BoardReport(){
   const [branches,setBranches]=useState(null)
   const [loading,setLoading]=useState(false)
   const [err,setErr]=useState(null)
-  const { window: win, setWindow: setWin } = usePeriodScope()
+  const { window: win, setWindow: setWin, toQueryString, isIncompleteCustom } = usePeriodScope()
   const [branchId,setBranchId]=useState('')
+  const [consolidate] = useState(false)
 
   useEffect(()=>{injectPCSS()},[])
 
   const load=useCallback(async()=>{
     if(!selectedId) return
+    if (isIncompleteCustom()) return
+    const qsBoard = buildAnalysisQuery(toQueryString, {
+      lang, window: win, consolidate, branch_id: branchId || undefined,
+    })
+    const qsCmp = buildAnalysisQuery(toQueryString, { lang, window: win, consolidate })
+    if (qsBoard === null) return
     setLoading(true);setErr(null)
     try{
       const [rr,br]=await Promise.all([
-        fetch(`${API}/analysis/${selectedId}/board-report?lang=${lang||'en'}&window=${win}${branchId?'&branch_id='+branchId:''}`,{headers:auth()}),
-        fetch(`${API}/companies/${selectedId}/branch-comparison?lang=${lang||'en'}&window=${win}`,{headers:auth()}),
+        fetch(`${API}/analysis/${selectedId}/board-report?${qsBoard}`,{headers:auth()}),
+        fetch(`${API}/companies/${selectedId}/branch-comparison?${qsCmp}`,{headers:auth()}),
       ])
       if(!rr.ok){setErr(tr('err_http_status',{status:rr.status}));return}
       setData(await rr.json())
       if(br.ok){const bj=await br.json();if(bj.has_data)setBranches(bj)}
     }catch(e){setErr(e.message)}
     finally{setLoading(false)}
-  },[selectedId,lang,win,branchId])
+  },[selectedId,lang,win,branchId,consolidate,toQueryString,isIncompleteCustom])
 
   useEffect(()=>{load()},[load])
 
@@ -322,6 +384,7 @@ export default function BoardReport(){
   const expDeep=deep?.expense_intelligence||{}
   const expDrivers=expDeep?.top_drivers||[]
   const expAnoms=expDeep?.anomalies||[]
+  const boardCausal = boardCausalSectionRows(data)
 
   // Period-windowed averages (display only — no recalc)
   const revAvg = periodAvg(revSeries)
@@ -378,10 +441,38 @@ export default function BoardReport(){
         )}
 
         {/* §1 Executive Summary */}
-        {summary&&<>
-          <SDiv n={1} title={tr('board_summary')} accent={T.accent}/>
-          <Sec accent={T.accent}><p style={{fontSize:14,color:T.text2,lineHeight:1.8,margin:0}}>{summary}</p></Sec>
-        </>}
+        {(summary || data.analysis?.structured_profit_story?.what_changed_key) && (
+          <>
+            <SDiv n={1} title={tr('board_summary')} accent={T.accent} />
+            <Sec accent={T.accent}>
+              {summary ? (
+                <p style={{ fontSize: 14, color: T.text2, lineHeight: 1.8, margin: 0 }}>{summary}</p>
+              ) : null}
+              {data.analysis?.structured_profit_story?.what_changed_key ? (
+                <div style={{ marginTop: summary ? 18 : 0 }}>
+                  <div
+                    style={{
+                      fontSize: 10,
+                      fontWeight: 800,
+                      color: T.accent,
+                      textTransform: 'uppercase',
+                      letterSpacing: '.08em',
+                      marginBottom: 10,
+                    }}
+                  >
+                    {tr('board_profit_story_heading')}
+                  </div>
+                  <StructuredFinancialLayers
+                    data={data.analysis}
+                    tr={tr}
+                    lang={lang}
+                    variant="board"
+                  />
+                </div>
+              ) : null}
+            </Sec>
+          </>
+        )}
 
         {/* §2 Financial Snapshot */}
         <SDiv n={2} title={tr('board_snapshot')} accent={T.violet}/>
@@ -511,35 +602,33 @@ export default function BoardReport(){
           </div>
         </>}
 
-        {/* §4.75 Realized causal items only (same pipeline as Command Center / Analysis) */}
-        {Array.isArray(data?.realized_causal_items) && data.realized_causal_items.length > 0 ? (
+        {/* §4.75 Causal narrative: structured_decisions.causal_realized (+ impact); reason/title only if causal missing */}
+        {boardCausal.variant !== 'none' ? (
           <>
             <SDiv n={4.75} title={tr('board_financial_brain')} accent={T.blue}/>
             <Sec accent={T.blue}>
+              {boardCausal.variant === 'structured' && boardCausal.anyFallback ? (
+                <p style={{ fontSize: 10, color: T.text3, margin: '0 0 10px', lineHeight: 1.45 }}>
+                  {tr('drill_intel_tab_fallback_hint')}
+                </p>
+              ) : null}
               <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, color: T.text2, lineHeight: 1.55 }}>
-                {data.realized_causal_items.slice(0, 12).map((it, i) => (
+                {boardCausal.rows.map((it, i) => (
                   <li key={it.id || i} style={{ marginBottom: 12 }}>
-                    {it.change_text ? (
-                      <p style={{ margin: '0 0 6px' }}>
-                        <CmdServerText lang={lang} tr={tr} style={{ color: 'inherit' }}>
-                          {it.change_text}
-                        </CmdServerText>
-                      </p>
-                    ) : null}
-                    {it.cause_text ? (
-                      <p style={{ margin: '0 0 6px' }}>
-                        <CmdServerText lang={lang} tr={tr} style={{ color: 'inherit' }}>
-                          {it.cause_text}
-                        </CmdServerText>
-                      </p>
-                    ) : null}
-                    {it.action_text ? (
+                    {it.mode === 'fallback' ? (
                       <p style={{ margin: 0 }}>
                         <CmdServerText lang={lang} tr={tr} style={{ color: 'inherit' }}>
-                          {it.action_text}
+                          {it.fallbackText}
                         </CmdServerText>
                       </p>
-                    ) : null}
+                    ) : (
+                      <DecisionCausalBlock
+                        causal_realized={it.causal_realized}
+                        impact={it.impact}
+                        lang={lang}
+                        tr={tr}
+                      />
+                    )}
                   </li>
                 ))}
               </ul>

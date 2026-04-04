@@ -1,7 +1,6 @@
 /**
  * CommandCenter.jsx — Command Center orchestrator (state, fetch, drill, chrome).
- * Main body: CommandCenterDashboardGrid — full-width primary (optional in grid), desktop split
- * (~68% KPIs + insights + narrative / ~32% health + branch + decisions + alerts), row5 secondary.
+ * Main body: CommandCenterPhase1Layout — context rail → story + primary decision → health/flow/branch → collapsed details.
  */
 import { useState, useCallback, useEffect, useRef } from 'react'
 import '../styles/commandCenterMotion.css'
@@ -31,17 +30,19 @@ function pickExpenseCausalRow(items) {
 }
 import { CLAMP_FADE_MASK_SHORT } from '../utils/serverTextUi.js'
 import CmdServerText from '../components/CmdServerText.jsx'
-import PeriodSelector from '../components/PeriodSelector.jsx'
-import UniversalScopeSelector from '../components/UniversalScopeSelector.jsx'
 import ExecutiveNarrativeStrip from '../components/ExecutiveNarrativeStrip.jsx'
+import StructuredFinancialLayers from '../components/StructuredFinancialLayers.jsx'
 import {
   KeySignalsSection,
   BranchIntelligenceSection,
   DecisionsSection,
-  keySignalsShowsInefficientBranch,
 } from '../components/CommandCenterUnifiedSections.jsx'
 import ExpenseInsightsSection from '../components/ExpenseInsightsSection.jsx'
-import CommandCenterDashboardGrid from '../components/CommandCenterDashboardGrid.jsx'
+import CommandCenterPhase1Layout from '../components/CommandCenterPhase1Layout.jsx'
+import CommandCenterContextRail from '../components/CommandCenterContextRail.jsx'
+import CommandCenterHealthComposite from '../components/CommandCenterHealthComposite.jsx'
+import CommandCenterMiniPnlFlow from '../components/CommandCenterMiniPnlFlow.jsx'
+import CommandCenterBranchStrip from '../components/CommandCenterBranchStrip.jsx'
 import AiCfoPanel from '../components/AiCfoPanel.jsx'
 import DrillIntelligenceBlock from '../components/DrillIntelligenceBlock.jsx'
 import { buildDrillIntelligence } from '../utils/buildDrillIntelligence.js'
@@ -156,8 +157,44 @@ function KpiMainNumber({ raw, mode, isHero, compact, na, signedTone, lang }) {
   )
 }
 
-function PrimaryDecisionHero({ resolution, impacts, tr, lang, causes, allDecisions, onOpen, realizedCausalItems }) {
+function PrimaryDecisionHero({
+  resolution,
+  impacts,
+  tr,
+  lang,
+  causes,
+  allDecisions,
+  onOpen,
+  realizedCausalItems,
+  onOpenFullAnalysis,
+}) {
   if (!resolution) return null
+
+  const analysisLink =
+    onOpenFullAnalysis != null ? (
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation()
+          onOpenFullAnalysis()
+        }}
+        style={{
+          marginTop: 12,
+          padding: '8px 0 0',
+          border: 'none',
+          borderTop: '1px solid rgba(148,163,184,0.14)',
+          background: 'transparent',
+          color: T.accent,
+          fontSize: 12,
+          fontWeight: 800,
+          cursor: 'pointer',
+          width: '100%',
+          textAlign: 'inherit',
+        }}
+      >
+        {strictT(tr, lang, 'open_analysis')} →
+      </button>
+    ) : null
 
   const fmtQuantImpact = (v) => {
     if (v == null || !Number.isFinite(Number(v))) return '—'
@@ -184,13 +221,7 @@ function PrimaryDecisionHero({ resolution, impacts, tr, lang, causes, allDecisio
     const numTone = hasSav ? 'cmd-hero-impact-pos' : pri === 'high' ? 'cmd-hero-impact-neg' : 'cmd-hero-impact-neu'
 
     return (
-      <button
-        type="button"
-        onClick={() =>
-          ec
-            ? onOpen('causal_item', ec, {})
-            : onOpen('expense_v2', ex, {})
-        }
+      <div
         className={[
           'cmd-primary-hero',
           'cmd-hero',
@@ -201,24 +232,49 @@ function PrimaryDecisionHero({ resolution, impacts, tr, lang, causes, allDecisio
         style={{
           width: '100%',
           textAlign: 'start',
-          cursor: 'pointer',
           color: T.text1,
           display: 'block',
           opacity: isBaseline ? 0.92 : 1,
           transition: 'transform 0.18s ease, box-shadow 0.18s ease, opacity 0.18s ease',
         }}
-        onMouseEnter={(e) => {
-          if (!hoverLift) return
-          e.currentTarget.style.transform = 'translateY(-2px)'
-          e.currentTarget.style.boxShadow = CMD_PRIMARY_SHADOW_HOVER
-        }}
-        onMouseLeave={(e) => {
-          if (!hoverLift) return
-          e.currentTarget.style.transform = ''
-          e.currentTarget.style.boxShadow = ''
-        }}
       >
-        <div className="cmd-primary-hero-inner">
+        <button
+          type="button"
+          onClick={() =>
+            ec
+              ? onOpen('causal_item', ec, {})
+              : onOpen('expense_v2', ex, {})
+          }
+          style={{
+            width: '100%',
+            textAlign: 'start',
+            cursor: 'pointer',
+            color: 'inherit',
+            display: 'block',
+            background: 'transparent',
+            border: 'none',
+            padding: 0,
+            font: 'inherit',
+            transition: 'transform 0.18s ease, box-shadow 0.18s ease',
+          }}
+          onMouseEnter={(e) => {
+            if (!hoverLift) return
+            const root = e.currentTarget.closest('.cmd-primary-hero')
+            if (root) {
+              root.style.transform = 'translateY(-2px)'
+              root.style.boxShadow = CMD_PRIMARY_SHADOW_HOVER
+            }
+          }}
+          onMouseLeave={(e) => {
+            if (!hoverLift) return
+            const root = e.currentTarget.closest('.cmd-primary-hero')
+            if (root) {
+              root.style.transform = ''
+              root.style.boxShadow = ''
+            }
+          }}
+        >
+          <div className="cmd-primary-hero-inner">
           <div className="cmd-hero-eyebrow-wrap">
             <span className="cmd-hero-eyebrow">
               {strictT(tr, lang, isBaseline ? 'cmd_primary_baseline_eyebrow' : 'cmd_primary_decision_label')}
@@ -265,7 +321,9 @@ function PrimaryDecisionHero({ resolution, impacts, tr, lang, causes, allDecisio
             </div>
           </div>
         </div>
-      </button>
+        </button>
+        {analysisLink}
+      </div>
     )
   }
 
@@ -288,36 +346,62 @@ function PrimaryDecisionHero({ resolution, impacts, tr, lang, causes, allDecisio
   }
 
   return (
-    <button
-      type="button"
-      onClick={() =>
-        cr.change_text || cr.action_text
-          ? onOpen('causal_item', cr, { causes, decisions: allDecisions })
-          : onOpen('decision', decision, { causes, decisions: allDecisions })
-      }
+    <div
       className="cmd-primary-hero cmd-hero cmd-hero--accent cmd-primary-intro cmd-level-1"
       style={{
         width: '100%',
         textAlign: 'start',
-        cursor: 'pointer',
         color: T.text1,
         display: 'block',
         transition: 'transform 0.18s ease, box-shadow 0.18s ease',
       }}
-      onMouseEnter={(e) => {
-        e.currentTarget.style.transform = 'translateY(-2px)'
-        e.currentTarget.style.boxShadow = CMD_PRIMARY_SHADOW_HOVER
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.transform = ''
-        e.currentTarget.style.boxShadow = ''
-      }}
     >
-      <div className="cmd-primary-hero-inner">
+      <button
+        type="button"
+        onClick={() =>
+          cr.change_text || cr.action_text
+            ? onOpen('causal_item', cr, { causes, decisions: allDecisions })
+            : onOpen('decision', decision, { causes, decisions: allDecisions })
+        }
+        style={{
+          width: '100%',
+          textAlign: 'start',
+          cursor: 'pointer',
+          color: 'inherit',
+          display: 'block',
+          background: 'transparent',
+          border: 'none',
+          padding: 0,
+          font: 'inherit',
+          transition: 'transform 0.18s ease, box-shadow 0.18s ease',
+        }}
+        onMouseEnter={(e) => {
+          const root = e.currentTarget.closest('.cmd-primary-hero')
+          if (root) {
+            root.style.transform = 'translateY(-2px)'
+            root.style.boxShadow = CMD_PRIMARY_SHADOW_HOVER
+          }
+        }}
+        onMouseLeave={(e) => {
+          const root = e.currentTarget.closest('.cmd-primary-hero')
+          if (root) {
+            root.style.transform = ''
+            root.style.boxShadow = ''
+          }
+        }}
+      >
+        <div className="cmd-primary-hero-inner">
         <div className="cmd-hero-eyebrow-wrap">
           <span className="cmd-hero-eyebrow">{strictT(tr, lang, 'cmd_primary_decision_label')}</span>
         </div>
-        <div className="cmd-hero-title" style={CLAMP_FADE_MASK_SHORT}>
+        {decision.domain || decision.action_type ? (
+          <div className="cmd-muted-foreign" style={{ fontSize: 10, fontWeight: 700, marginTop: 4, letterSpacing: '.04em' }}>
+            <CmdServerText lang={lang} tr={tr} as="span">
+              {String(decision.action_type || decision.domain || '').trim()}
+            </CmdServerText>
+          </div>
+        ) : null}
+        <div className="cmd-hero-title" style={{ ...CLAMP_FADE_MASK_SHORT, marginTop: 6 }}>
           <CmdServerText lang={lang} tr={tr} as="span">
             {String(cr.change_text || cr.action_text || '').trim() || strictT(tr, lang, 'cmd_na_short')}
           </CmdServerText>
@@ -357,28 +441,8 @@ function PrimaryDecisionHero({ resolution, impacts, tr, lang, causes, allDecisio
           </div>
         </div>
       </div>
-    </button>
-  )
-}
-
-function DataQualityBanner({ validation, lang, tr }) {
-  if (!validation) return null
-  const { consistent, warnings = [], has_errors, has_info } = validation
-  if (consistent === true && !has_info) return null
-  const color = has_errors ? T.red : T.text2
-  const bg = has_errors ? 'rgba(248,113,113,0.06)' : 'rgba(255,255,255,0.04)'
-  const bdr = NEU_BD
-  return (
-    <div style={{display:'flex',flexWrap:'wrap',alignItems:'center',gap:8,
-      padding:'8px 16px',borderRadius:10,textAlign:'left',
-      background:bg,border:bdr}}>
-      <span style={{fontSize:12}}>{has_errors?'⚠':'ℹ'}</span>
-      <span style={{fontSize:12,fontWeight:800,color,letterSpacing:'.05em',textTransform:'uppercase'}}>
-        {has_errors ? strictT(tr, lang, 'dq_warning_title') : strictT(tr, lang, 'dq_notice_title')}
-      </span>
-      {warnings.map((w,i)=>(
-        <span key={i} style={{fontSize:12,color:T.text3}}>· {strictT(tr, lang, `dq_${w.code}`)}</span>
-      ))}
+      </button>
+      {analysisLink}
     </div>
   )
 }
@@ -2011,9 +2075,17 @@ export default function CommandCenter() {
         expense_decisions_v2:     d.expense_decisions_v2 ?? [],
         expense_intelligence:     d.expense_intelligence ?? null,
         realized_causal_items:    d.realized_causal_items ?? [],
+        structured_income_statement: d.structured_income_statement ?? null,
+        structured_income_statement_variance: d.structured_income_statement_variance ?? null,
+        structured_income_statement_margin_variance:
+          d.structured_income_statement_margin_variance ?? null,
+        structured_income_statement_variance_meta:
+          d.structured_income_statement_variance_meta ?? null,
+        structured_profit_bridge: d.structured_profit_bridge ?? null,
+        structured_profit_story: d.structured_profit_story ?? null,
       })
       try {
-        const fqs = buildAnalysisQuery(scopeQS, { lang, window: win, consolidate: false })
+        const fqs = buildAnalysisQuery(scopeQS, { lang, window: win, consolidate })
         if (fqs !== null) {
           const fr = await authFetch(`${API}/analysis/${selectedId}/forecast?${fqs}`, { headers: auth() })
           if (fr.ok) { const fj = await fr.json(); if (fj?.data) setFcData(fj.data) }
@@ -2039,7 +2111,6 @@ export default function CommandCenter() {
   const status = intel?.status ?? (health!=null ? health>=80?'excellent':health>=60?'good':health>=40?'warning':'risk' : 'neutral')
   const kpis   = main?.kpi_block?.kpis || {}
   const period = main?.intelligence?.latest_period || main?.periods?.slice(-1)[0]
-  const dupIneffBranch = keySignalsShowsInefficientBranch(main?.comparative_intelligence, narrative, tr, lang)
   const expenseIntel = main?.expense_intelligence
 
   const primaryResolution =
@@ -2091,7 +2162,6 @@ export default function CommandCenter() {
         ? `h-cfo-${primaryResolution.decision?.key || primaryResolution.decision?.domain || 'd'}`
         : 'h-none'
 
-  const showPairedTop = !!primaryResolution
   const healthPanelProps = {
     tr,
     lang,
@@ -2103,9 +2173,9 @@ export default function CommandCenter() {
     onRefresh: load,
     periodCount: main?.periods?.length,
     scopeLabel: main?.scope_label,
-    healthHeadline: narrative?.healthHeadline,
-    actionPrefix: narrative?.actionPrefix,
-    actionLine: narrative?.actionLine,
+    healthHeadline: null,
+    actionPrefix: null,
+    actionLine: null,
     onDrillAnalysis: () => drillAnalysis('overview'),
   }
 
@@ -2207,246 +2277,235 @@ export default function CommandCenter() {
         </aside>
 
         <div className="cmd-page-main">
-          <div className="cmd-page-header">
-            <header>
-              <div className="cmd-page-title">{strictT(tr, lang, 'nav_command_center')}</div>
-              <div className="cmd-page-subtitle">
-                <span style={{ color: T.text2, fontWeight: 600 }}>{selectedCompany?.name || '—'}</span>
-                <span className="cmd-muted-foreign" style={{ marginLeft: 8 }}>
-                  · {strictT(tr, lang, 'cmd_page_sub')}
-                </span>
-              </div>
-            </header>
-            <div className="cmd-tool-bar">
-              <div className="cmd-tool-bar__group">
-                <PeriodSelector window={win} setWindow={setWin} disabled={loading} />
-              </div>
-              <div className="cmd-tool-bar__group">
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 0,
-                    background: T.card,
-                    border: `1px solid ${T.border}`,
-                    borderRadius: 8,
-                    overflow: 'hidden',
-                    flexShrink: 0,
-                  }}
-                >
-                  {[
-                    { v: false, l: strictT(tr, lang, 'company_uploads') },
-                    { v: true, l: strictT(tr, lang, 'branch_consolidation') },
-                  ].map((opt) => (
-                    <button
-                      key={String(opt.v)}
-                      type="button"
-                      onClick={() => setConsolidate(opt.v)}
-                      style={{
-                        padding: '8px 14px',
-                        fontSize: 11,
-                        fontWeight: 600,
-                        border: 'none',
-                        cursor: 'pointer',
-                        background: consolidate === opt.v ? T.accent : 'transparent',
-                        color: consolidate === opt.v ? '#000' : T.text2,
-                        transition: 'all .15s',
-                        whiteSpace: 'nowrap',
-                      }}
-                    >
-                      {opt.l}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div className="cmd-tool-bar__group cmd-tool-bar__group--grow">
-                <UniversalScopeSelector
+          <div className={main ? `${dashEnterCls} cmd-stack-major`.trim() : 'cmd-stack-major'}>
+            <CommandCenterPhase1Layout
+              key={primaryHeroKey}
+              contextRail={
+                <CommandCenterContextRail
                   tr={tr}
                   lang={lang}
+                  companyName={selectedCompany?.name}
+                  window={win}
+                  setWindow={setWin}
+                  loading={loading}
+                  consolidate={consolidate}
+                  setConsolidate={setConsolidate}
                   ps={ps}
                   psUpdate={psUpdate}
-                  onApply={load}
-                  activeLabel={psActiveLabel()}
+                  onScopeApply={load}
+                  scopeActiveLabel={psActiveLabel()}
                   allPeriods={main?.all_periods || []}
+                  validation={main?.pipeline_validation}
                 />
-              </div>
-              {loading ? (
-                <div className="cmd-tool-bar__group">
-                  <div
-                    style={{
-                      width: 14,
-                      height: 14,
-                      border: `2px solid ${T.border}`,
-                      borderTopColor: T.accent,
-                      borderRadius: '50%',
-                      animation: 'spin .8s linear infinite',
-                    }}
+              }
+              heroLeft={
+                main ? (
+                  main.structured_profit_story?.what_changed_key ? (
+                    <StructuredFinancialLayers data={main} tr={tr} lang={lang} variant="command" />
+                  ) : (
+                    <div
+                      style={{
+                        background: 'var(--bg-panel)',
+                        borderRadius: 13,
+                        padding: '18px 18px',
+                        borderTop: '2px solid rgba(0,212,170,0.35)',
+                        border: '1px solid var(--border)',
+                      }}
+                    >
+                      <div
+                        style={{
+                          fontSize: 11,
+                          fontWeight: 800,
+                          letterSpacing: '.08em',
+                          textTransform: 'uppercase',
+                          color: 'var(--accent)',
+                          marginBottom: 10,
+                        }}
+                      >
+                        {strictT(tr, lang, 'sfl_title_story')}
+                      </div>
+                      <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.5, margin: 0 }}>
+                        {strictT(tr, lang, 'cmd_cc_story_empty')}
+                      </p>
+                    </div>
+                  )
+                ) : null
+              }
+              heroRight={
+                main && primaryResolution ? (
+                  <PrimaryDecisionHero
+                    resolution={primaryResolution}
+                    impacts={impacts}
+                    tr={tr}
+                    lang={lang}
+                    causes={causes}
+                    allDecisions={decs}
+                    onOpen={open}
+                    realizedCausalItems={main?.realized_causal_items}
+                    onOpenFullAnalysis={() => drillAnalysis('overview')}
                   />
-                </div>
-              ) : null}
-            </div>
-          </div>
-
-          <div className={main ? `${dashEnterCls} cmd-stack-major`.trim() : 'cmd-stack-major'}>
-          <DataQualityBanner validation={main?.pipeline_validation} lang={lang} tr={tr} />
-
-          <CommandCenterDashboardGrid
-            key={primaryHeroKey}
-            supportingDemoted={!!primaryResolution}
-            primaryHero={null}
-            rowTopHealth={showPairedTop ? <HealthScorePanel {...healthPanelProps} pairedLayout /> : null}
-            rowTopHero={
-              showPairedTop ? (
-                <PrimaryDecisionHero
-                  resolution={primaryResolution}
-                  impacts={impacts}
+                ) : null
+              }
+              secondaryHealth={
+                main ? (
+                  <CommandCenterHealthComposite
+                    healthPanel={<HealthScorePanel {...healthPanelProps} pairedLayout={false} />}
+                    intelligence={intel}
+                    tr={tr}
+                    lang={lang}
+                    onSelectDomain={(panelType, payload) => open(panelType, payload, { causes, decisions: decs })}
+                  />
+                ) : null
+              }
+              secondaryFlow={main ? <CommandCenterMiniPnlFlow data={main} tr={tr} lang={lang} /> : null}
+              secondaryBranch={
+                <CommandCenterBranchStrip
+                  comparativeIntel={main?.comparative_intelligence}
                   tr={tr}
                   lang={lang}
-                  causes={causes}
-                  allDecisions={decs}
-                  onOpen={open}
-                  realizedCausalItems={main?.realized_causal_items}
+                  onOpenBranches={() => navigate('/branches')}
                 />
-              ) : null
-            }
-            row1Health={showPairedTop ? null : <HealthScorePanel {...healthPanelProps} />}
-            row1Narrative={
-              <ExecutiveNarrativeStrip
-                narrative={narrative}
-                tr={tr}
-                lang={lang}
-                compact={false}
-                onOpenFullAnalysis={() => drillAnalysis('overview')}
-              />
-            }
-            rowDomainHealth={
-              main && intel ? (
-                <DomainGrid
-                  intelligence={intel}
-                  tr={tr}
-                  lang={lang}
-                  onSelect={open}
-                  rootCauses={causes}
-                  decisions={decs}
-                  alerts={alerts}
-                  secondary={false}
-                />
-              ) : null
-            }
-            row2Kpis={
-              main ? (
-                <ExecutiveKpiRow
-                  kpis={kpis}
-                  cashflow={main?.cashflow || {}}
-                  main={main}
-                  tr={tr}
-                  lang={lang}
-                  alerts={alerts}
-                  onSelect={open}
-                  ctxLabel={ctxLabel}
-                  hideTitle
-                  layout="command"
-                  supportingOnly={!!primaryResolution}
-                />
-              ) : null
-            }
-            row3Signals={
-              <KeySignalsSection
-                financialBrain={null}
-                comparativeIntel={main?.comparative_intelligence}
-                alerts={alerts}
-                narrative={narrative}
-                tr={tr}
-                lang={lang}
-                main={main}
-                intel={intel}
-                expenseIntel={expenseIntel}
-                onOpenAnalysis={(tab) => drillAnalysis(tab)}
-                visualTier={primaryResolution ? 3 : 2}
-              />
-            }
-            row3Branch={
-              <BranchIntelligenceSection
-                comparativeIntel={main?.comparative_intelligence}
-                tr={tr}
-                lang={lang}
-                narrative={narrative}
-                duplicateIneffBranchName={dupIneffBranch}
-                onOpenBranches={() => navigate('/branches')}
-                onOpenBranchChart={() => open('branch_compare', {}, {})}
-                onBranchRankClick={(b) =>
-                  navigate('/branches', {
-                    state: {
-                      focusBranchId: b?.branch_id,
-                      focusBranchName: b?.branch_name,
-                    },
-                  })
-                }
-                visualTier={primaryResolution ? 3 : 2}
-              />
-            }
-            row4Expense={
-              <ExpenseInsightsSection
-                expenseIntel={expenseIntel}
-                tr={tr}
-                lang={lang}
-                period={expenseIntel?.period || period}
-                embedded
-                onDrillExpense={() => drillAnalysis('profitability')}
-                visualTier={primaryResolution ? 3 : 2}
-              />
-            }
-            row4Decisions={
-              <DecisionsSection
-                key={
-                  primaryResolution
-                    ? primaryResolution.kind === 'expense'
-                      ? `pd-${primaryResolution.expense?.decision_id || 'x'}`
-                      : `pd-${primaryResolution.decision?.key || primaryResolution.decision?.domain || 'cfo'}`
-                    : 'dec-section'
-                }
-                expenseDecisionsV2={main?.expense_decisions_v2}
-                expenseIntel={expenseIntel}
-                realizedCausalItems={main?.realized_causal_items}
-                tr={tr}
-                lang={lang}
-                onOpenDecision={(d) => open('causal_item', d, {})}
-                visualTier={primaryResolution ? 3 : 2}
-                defaultCollapsed={!!primaryResolution}
-                omitDecisionIds={omitPrimaryExpenseId}
-                omitCausalIds={omitCausalIds}
-              />
-            }
-            secondaryTitle={
-              <div className="cmd-section-label" style={{ color: T.text3, letterSpacing: '.1em' }}>
-                {strictT(tr, lang, 'cmd_secondary_section')}
-              </div>
-            }
-            secondarySubtitle={
-              <div
-                className="cmd-card-section-subtitle cmd-card-section-subtitle--t3"
-                style={{ textAlign: 'left', marginTop: 0 }}
-              >
-                {strictT(tr, lang, 'cmd_secondary_section_sub')}
-              </div>
-            }
-            sidebarAlerts={
-              Array.isArray(alerts) && alerts.length > 0 ? (
-                <AlertsBar alerts={alerts} tr={tr} lang={lang} onSelect={open} secondary />
-              ) : null
-            }
-            secondaryBlock={
-              <SecondaryInsightsGrid
-                fcData={fcData}
-                alerts={alerts}
-                tr={tr}
-                lang={lang}
-                navigate={navigate}
-                drillAnalysis={drillAnalysis}
-                onSelect={open}
-              />
-            }
-          />
+              }
+              collapsed={
+                <>
+                  <details className="cmd-phase1-details">
+                    <summary>{strictT(tr, lang, 'cmd_cc_collapsed_snapshot')}</summary>
+                    <div className="cmd-phase1-details-body">
+                      {main ? (
+                        <ExecutiveKpiRow
+                          kpis={kpis}
+                          cashflow={main?.cashflow || {}}
+                          main={main}
+                          tr={tr}
+                          lang={lang}
+                          alerts={alerts}
+                          onSelect={open}
+                          ctxLabel={ctxLabel}
+                          hideTitle={false}
+                          layout="command"
+                          supportingOnly={false}
+                        />
+                      ) : null}
+                    </div>
+                  </details>
+                  <details className="cmd-phase1-details">
+                    <summary>{strictT(tr, lang, 'cmd_cc_collapsed_signals')}</summary>
+                    <div className="cmd-phase1-details-body">
+                      <div
+                        style={{
+                          display: 'grid',
+                          gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+                          gap: 14,
+                        }}
+                      >
+                        <KeySignalsSection
+                          financialBrain={null}
+                          comparativeIntel={main?.comparative_intelligence}
+                          alerts={alerts}
+                          narrative={narrative}
+                          tr={tr}
+                          lang={lang}
+                          main={main}
+                          intel={intel}
+                          expenseIntel={expenseIntel}
+                          onOpenAnalysis={(tab) => drillAnalysis(tab)}
+                          visualTier={2}
+                        />
+                        <ExpenseInsightsSection
+                          expenseIntel={expenseIntel}
+                          tr={tr}
+                          lang={lang}
+                          period={expenseIntel?.period || period}
+                          embedded
+                          onDrillExpense={() => drillAnalysis('profitability')}
+                          visualTier={2}
+                        />
+                      </div>
+                    </div>
+                  </details>
+                  <details className="cmd-phase1-details">
+                    <summary>{strictT(tr, lang, 'cmd_cc_collapsed_domains')}</summary>
+                    <div className="cmd-phase1-details-body">
+                      {main && intel ? (
+                        <DomainGrid
+                          intelligence={intel}
+                          tr={tr}
+                          lang={lang}
+                          onSelect={open}
+                          rootCauses={causes}
+                          decisions={decs}
+                          alerts={alerts}
+                          secondary={false}
+                        />
+                      ) : null}
+                    </div>
+                  </details>
+                  <details className="cmd-phase1-details">
+                    <summary>{strictT(tr, lang, 'cmd_cc_collapsed_more')}</summary>
+                    <div className="cmd-phase1-details-body">
+                      <DecisionsSection
+                        key={
+                          primaryResolution
+                            ? primaryResolution.kind === 'expense'
+                              ? `pd-${primaryResolution.expense?.decision_id || 'x'}`
+                              : `pd-${primaryResolution.decision?.key || primaryResolution.decision?.domain || 'cfo'}`
+                            : 'dec-section'
+                        }
+                        expenseDecisionsV2={main?.expense_decisions_v2}
+                        expenseIntel={expenseIntel}
+                        realizedCausalItems={main?.realized_causal_items}
+                        tr={tr}
+                        lang={lang}
+                        onOpenDecision={(d) => open('causal_item', d, {})}
+                        visualTier={2}
+                        defaultCollapsed={false}
+                        omitDecisionIds={omitPrimaryExpenseId}
+                        omitCausalIds={omitCausalIds}
+                      />
+                      {Array.isArray(alerts) && alerts.length > 0 ? (
+                        <div style={{ marginTop: 14 }}>
+                          <AlertsBar alerts={alerts} tr={tr} lang={lang} onSelect={open} secondary />
+                        </div>
+                      ) : null}
+                    </div>
+                  </details>
+                  <details className="cmd-phase1-details">
+                    <summary>{strictT(tr, lang, 'cmd_cc_collapsed_narrative')}</summary>
+                    <div className="cmd-phase1-details-body">
+                      <ExecutiveNarrativeStrip
+                        narrative={narrative}
+                        tr={tr}
+                        lang={lang}
+                        compact={false}
+                        onOpenFullAnalysis={() => drillAnalysis('overview')}
+                      />
+                    </div>
+                  </details>
+                </>
+              }
+              footerSecondary={
+                <>
+                  <div className="cmd-section-label" style={{ color: T.text3, letterSpacing: '.1em' }}>
+                    {strictT(tr, lang, 'cmd_secondary_section')}
+                  </div>
+                  <div
+                    className="cmd-card-section-subtitle cmd-card-section-subtitle--t3"
+                    style={{ textAlign: 'left', marginTop: 0 }}
+                  >
+                    {strictT(tr, lang, 'cmd_secondary_section_sub')}
+                  </div>
+                  <SecondaryInsightsGrid
+                    fcData={fcData}
+                    alerts={alerts}
+                    tr={tr}
+                    lang={lang}
+                    navigate={navigate}
+                    drillAnalysis={drillAnalysis}
+                    onSelect={open}
+                  />
+                </>
+              }
+            />
           </div>
         </div>
       </div>

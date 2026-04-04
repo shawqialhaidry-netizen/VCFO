@@ -30,6 +30,7 @@ from app.models.user import User
 from app.services.account_classifier import classify_dataframe
 from app.services.expense_intelligence_engine import build_expense_intelligence_bundle
 from app.services.financial_statements import build_statements, statements_to_dict
+from app.services.structured_income_statement import attach_structured_income_statement
 from app.services.scope_resolver import ResolvedScope, resolve_financial_scope
 
 # ---------------------------------------------------------------------------
@@ -148,6 +149,7 @@ def _build_period_statements_from_uploads(company_id: str, uploads: list[TrialBa
         fs = build_statements(classified, company_id=company_id, period=period, tb_type=tb_type)
         d = statements_to_dict(fs)
         d["period"] = period
+        attach_structured_income_statement(d)
         stmts.append(d)
     return stmts
 

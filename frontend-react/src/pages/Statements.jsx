@@ -15,6 +15,7 @@ import { useNavigate, useLocation } from 'react-router-dom'
 import { useLang }        from '../context/LangContext.jsx'
 import { strictT } from '../utils/strictI18n.js'
 import CmdServerText from '../components/CmdServerText.jsx'
+import StructuredFinancialLayers from '../components/StructuredFinancialLayers.jsx'
 import { useCompany }     from '../context/CompanyContext.jsx'
 import { usePeriodScope } from '../context/PeriodScopeContext.jsx'
 import { buildAnalysisQuery } from '../utils/buildAnalysisQuery.js'
@@ -470,7 +471,6 @@ function DataQualityBanner({validation,lang,tr}) {
 // ══════════════════════════════════════════════════════════════════════════════
 export default function Statements() {
   const { tr, lang } = useLang()
-  const ctxLabel = () => kpiContextLabel({ window: 'ALL', ps: ps||{}, latestPeriod: data?.meta?.periods?.slice(-1)[0] || '', lang, tr })
   const { selectedId, selectedCompany } = useCompany()
   const { params: ps, toQueryString:scopeQS, setResolved, isIncompleteCustom, window: win } = usePeriodScope()
   const navigate = useNavigate()
@@ -484,6 +484,15 @@ export default function Statements() {
   const [tab,     setTab]     = useState('income')
   const [panel,   setPanel]   = useState(null)
   const [cmpMode, setCmpMode] = useState('mom') // mom | yoy | prior_ytd
+
+  const ctxLabel = () =>
+    kpiContextLabel({
+      window: win,
+      ps: ps || {},
+      latestPeriod: data?.meta?.periods?.slice(-1)[0] || '',
+      lang,
+      tr,
+    })
 
   useEffect(()=>{ if(location.state?.focus) setTab(location.state.focus) },[location.state])
 
@@ -503,7 +512,7 @@ export default function Statements() {
     finally{setLoading(false)}
     // Phase 6.4: forecast — read-only, silent fail
     try {
-      const qs2 = buildAnalysisQuery(scopeQS, { lang, window: win, consolidate: false })
+      const qs2 = buildAnalysisQuery(scopeQS, { lang, window: win, consolidate })
       if(qs2 !== null) {
         const fr = await fetch(`${API}/analysis/${selectedId}/forecast?${qs2}`,{headers:auth()})
         if(fr.ok){ const fj=await fr.json(); if(fj?.data) setFcData(fj.data) }
@@ -818,7 +827,9 @@ export default function Statements() {
             INCOME STATEMENT TAB — with comparison + linked analysis
         ════════════════════════════════════════════════════════════ */}
         {tab==='income'&&(
-          <div style={{display:'grid',gridTemplateColumns:'1fr 300px',gap:14}}>
+          <div style={{display:'flex',flexDirection:'column',gap:14}}>
+            <StructuredFinancialLayers data={d} tr={tr} lang={lang} variant="statements" />
+            <div style={{display:'grid',gridTemplateColumns:'1fr 300px',gap:14}}>
             <Card>
               <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:12}}>
                 <SectionHead label={tr('stmt_section_is')} color='var(--accent)' sub={period}/>
@@ -886,6 +897,7 @@ export default function Statements() {
               {insights.filter(x=>x.domain==='profitability'||x.domain==='growth').slice(0,2).map((ins,i)=>(
                 <InsightCard key={i} ins={ins} onClick={()=>setPanel(ins)} lang={l} tr={tr}/>
               ))}
+            </div>
             </div>
           </div>
         )}

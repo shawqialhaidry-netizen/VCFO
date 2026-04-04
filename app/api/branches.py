@@ -2056,6 +2056,7 @@ def get_company_executive(
     from app.services.period_aggregation import build_annual_layer
     from app.services.expense_engine    import build_expense_intelligence
     from app.i18n                       import translate as _t
+    from app.api.analysis import _build_consolidated_statements, _build_period_statements
     import itertools
 
     safe_lang = lang if lang in ("en","ar","tr") else "en"

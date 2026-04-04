@@ -1159,16 +1159,16 @@ function ExpenseBreakdown({ items, total, lang = 'en' }) {
 // ══════════════════════════════════════════════════════════════════════════════
 //  Branch Panel
 // ══════════════════════════════════════════════════════════════════════════════
-function BranchPanel({companyId,tr}) {
+function BranchPanel({companyId,tr,consolidate}) {
   const { lang } = useLang()
   const { toQueryString, window: win } = usePeriodScope()
   const [d,setD]=useState(null)
   useEffect(()=>{
     if (!companyId) return
-    const qs = buildAnalysisQuery(toQueryString, { lang, window: win, consolidate: false })
+    const qs = buildAnalysisQuery(toQueryString, { lang, window: win, consolidate })
     if (qs === null) return
     fetch(`${API}/companies/${companyId}/branch-comparison?${qs}`, { headers: getAuthHeaders() }).then(r=>r.json()).then(setD).catch(()=>{})
-  },[companyId, lang, win, toQueryString])
+  },[companyId, lang, win, toQueryString, consolidate])
   if (!d) return <div style={{height:50,display:'flex',alignItems:'center',justifyContent:'center'}}><div style={{width:16,height:16,border:`2px solid ${BG.border}`,borderTopColor:C.accent,borderRadius:'50%',animation:'spin .8s linear infinite'}}/></div>
   if (!d.has_data) return (
     <div style={{padding:'24px',textAlign:'center',border:`1px dashed ${BG.border}`,borderRadius:10}}>
@@ -1222,7 +1222,7 @@ function DataQualityBanner({ validation, lang, tr }) {
 // ══════════════════════════════════════════════════════════════════════════════
 //  TAB 1: Overview
 // ══════════════════════════════════════════════════════════════════════════════
-function OverviewTab({data,tr,lang,onKpiClick}) {
+function OverviewTab({data,tr,lang,onKpiClick,consolidate}) {
   const d = data?.data || {}
   const meta = data?.meta || {}
   const s=d.kpi_block?.series||{}, p=d.kpi_block?.periods||[], k=d.kpi_block?.kpis||{}
@@ -1292,7 +1292,7 @@ function OverviewTab({data,tr,lang,onKpiClick}) {
           </div>
         </Panel>
         <Panel title={tr('top_branches')} noPad>
-          <div style={{padding:'0 14px 12px'}}><BranchPanel companyId={data?.company_id} tr={tr}/></div>
+          <div style={{padding:'0 14px 12px'}}><BranchPanel companyId={data?.company_id} tr={tr} consolidate={consolidate}/></div>
         </Panel>
       </div>
     </div>
@@ -1653,12 +1653,13 @@ function ProfitabilityTab({ data, tr, ctxLabel, lang }) {
 
 // ══════════════════════════════════════════════════════════════════════════════
 //  TAB 5: AI Decisions
+//  QUARANTINE NOTE: Canonical CFO decisions + causal_realized live on GET /executive (this page's `data`).
+//  DecisionIntelPanel below is Phase-19 POST /analysis/{id}/decisions (scenario ranker) only — not a second
+//  executive brain. DecisionsPanelV2 (decisions_v2 tab) uses GET /analysis/{id}/decisions with executive-aligned
+//  causal augmentation; prefer Command Center / Analysis for the primary narrative.
 // ══════════════════════════════════════════════════════════════════════════════
 function DecisionsTab({data,tSig,tSub,tr,selectedId,lang}) {
   const d = data?.data || {}
-  // DecisionIntelPanel fetches its own decision data independently via /decisions endpoint.
-  // The canonical /executive decisions array (d.decisions) powers the risk snapshot.
-  // Legacy /analysis decision object shape (insights/warnings/recommendations/forecast) removed.
   return (
     <div style={{display:'flex',flexDirection:'column',gap:14}}>
       <DecisionIntelPanel tr={tr} selectedId={selectedId} data={data} lang={lang}/>
@@ -1870,7 +1871,8 @@ function WhatIfPanel({data,tr,selectedId}) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-//  Phase 16 — Decision Intelligence Panel
+//  Phase 16 — Decision Intelligence Panel  (POST /analysis/{id}/decisions — scenario ranker only)
+//  Does not consume GET /decisions or executive; kept for what-if style scenario comparison.
 // ══════════════════════════════════════════════════════════════════════════════
 function DecisionIntelPanel({tr, selectedId, data, lang}) {
   const { toQueryString: decScopeQS, toBodyFields: decScopeBody, window: win } = usePeriodScope()
@@ -2982,6 +2984,7 @@ function FinIntelPanel({tr, selectedId, lang, data}) {
 // ══════════════════════════════════════════════════════════════════════════════
 //  Phase 25 — Decisions Panel V2 (CFO Decision Engine)
 // ══════════════════════════════════════════════════════════════════════════════
+// GET /analysis/{id}/decisions — CFO engine + causal_realized parity with executive (Repair Step 3).
 function DecisionsPanelV2({tr, selectedId, lang}) {
   const { toQueryString: decQS, window: win } = usePeriodScope()
   const [result,  setResult]  = useState(null)
@@ -3388,7 +3391,7 @@ function RootCausesPanel({tr, selectedId, lang}) {
 // ══════════════════════════════════════════════════════════════════════════════
 //  Phase 27 — Forecast Panel
 // ══════════════════════════════════════════════════════════════════════════════
-function ForecastPanel({tr, selectedId, lang}) {
+function ForecastPanel({tr, selectedId, lang, consolidate}) {
   const { toQueryString: fcQS, window: win } = usePeriodScope()
   const [result,    setResult]    = useState(null)
   const [loading,   setLoading]   = useState(false)
@@ -3402,7 +3405,7 @@ function ForecastPanel({tr, selectedId, lang}) {
 
   async function run() {
     if (!selectedId) return
-    const qs = buildAnalysisQuery(fcQS, { lang, window: win, consolidate: false })
+    const qs = buildAnalysisQuery(fcQS, { lang, window: win, consolidate })
     if (qs === null) { setErr(tr('fc_custom_scope_hint')); return }
     setLoading(true); setErr(null)
     try {
@@ -3916,7 +3919,7 @@ export default function Dashboard() {
       .catch(e => setError(e.message))
       .finally(() => setLoading(false))
     // Phase 6.4: fetch forecast alongside main load — read-only, no calc
-    const fqs = buildAnalysisQuery(psScopeQS, { lang, window: win, consolidate: false })
+    const fqs = buildAnalysisQuery(psScopeQS, { lang, window: win, consolidate })
     if (fqs !== null) {
       fetch(`${API}/analysis/${selectedId}/forecast?${fqs}`, { headers: getAuthHeaders() })
         .then(r => r.ok ? r.json() : null)
@@ -4212,7 +4215,7 @@ export default function Dashboard() {
       {data&&(
         <>
           <TabNav tabs={tabs} active={tab} onChange={setTab}/>
-          {tab==='overview'      && <OverviewTab      data={data} tr={tr} lang={lang} onKpiClick={kpiType=>setModal(kpiType)}/>}
+          {tab==='overview'      && <OverviewTab      data={data} tr={tr} lang={lang} onKpiClick={kpiType=>setModal(kpiType)} consolidate={consolidate}/>}
           {tab==='expenses'      && <ExpenseTab       data={data} tr={tr} lang={lang}/>}
           {tab==='variance'      && <VarianceTab      data={data} tr={tr} lang={lang}/>}
           {tab==='profitability' && <ProfitabilityTab data={data} tr={tr} ctxLabel={ctxLabel} lang={lang}/>}
@@ -4223,7 +4226,7 @@ export default function Dashboard() {
           {tab==='intelligence'  && <FinIntelPanel         tr={tr} selectedId={selectedId} lang={lang} data={data}/>}
           {tab==='decisions_v2'  && <DecisionsPanelV2     tr={tr} selectedId={selectedId} lang={lang}/>}
           {tab==='root_causes'   && <RootCausesPanel      tr={tr} selectedId={selectedId} lang={lang}/>}
-          {tab==='forecast'      && <ForecastPanel        tr={tr} selectedId={selectedId} lang={lang}/>}
+          {tab==='forecast'      && <ForecastPanel        tr={tr} selectedId={selectedId} lang={lang} consolidate={consolidate}/>}
           {tab==='portfolio'     && <PortfolioPanel       tr={tr} lang={lang} companyId={selectedId}/>}
         </>
       )}

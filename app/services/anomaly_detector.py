@@ -62,10 +62,10 @@ def detect_anomalies(
     periods    = analysis_trends.get("periods", [])
     rev_ser    = analysis_trends.get("revenue_series",    [])
     np_ser     = analysis_trends.get("net_profit_series", [])
-    rev_mom    = analysis_trends.get("revenue_mom",       [])
-    np_mom     = analysis_trends.get("net_profit_mom",    [])
+    rev_mom    = analysis_trends.get("revenue_mom_pct") or analysis_trends.get("revenue_mom",       [])
+    np_mom     = analysis_trends.get("net_profit_mom_pct") or analysis_trends.get("net_profit_mom",    [])
     gm_ser     = analysis_trends.get("gross_margin_series", [])
-    gm_mom     = analysis_trends.get("gross_margin_mom",    [])
+    gm_mom     = analysis_trends.get("gross_margin_mom_pct") or analysis_trends.get("gross_margin_mom",    [])
 
     if len(periods) < MIN_PERIODS:
         return anomalies

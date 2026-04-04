@@ -21,6 +21,16 @@ from app.core.security import get_current_user
 from app.models.company import Company
 from app.models.trial_balance import TrialBalanceUpload
 from app.services.financial_statements import build_statements, statements_to_dict
+from app.services.structured_income_statement import (
+    attach_structured_income_statement,
+    build_structured_income_statement_bundle,
+)
+from app.services.structured_income_statement_variance import (
+    build_structured_income_statement_variance_bundle_from_window,
+)
+from app.services.structured_profit_bridge import (
+    build_structured_profit_bridge_bundle_from_window,
+)
 from app.services.analysis_engine import run_analysis
 from app.services.time_intelligence import build_kpi_block, filter_periods
 from app.services.intelligence_engine import run_intelligence
@@ -180,6 +190,40 @@ def _merge_causal_sources_for_realize(
     return _dedupe_causal_items_by_id(flat)
 
 
+def _augment_cfo_decision_pack_for_api(
+    dec_pack: dict | None,
+    safe_lang: str,
+    *,
+    deep_intel: dict | None = None,
+    profit_intel: dict | None = None,
+) -> tuple[list[dict], list[dict], list[dict]]:
+    """
+    Align GET /decisions and board-report CFO payloads with GET /executive:
+    - decisions[] gain causal_realized (CFO causal row only, same index as executive)
+    - realized_causal_items = realize(merged CFO + optional deep/profit templates)
+    - causal_items = merged template rows (deduped)
+    """
+    from app.services.causal_realize import realize_causal_items
+
+    merged_templates = _merge_causal_sources_for_realize(dec_pack, deep_intel, profit_intel)
+    realized_causal_items = realize_causal_items(merged_templates, safe_lang)
+    raw_cfo = (dec_pack or {}).get("causal_items") or []
+    realized_per_dec = realize_causal_items(raw_cfo, safe_lang)
+    decisions_for_api: list[dict] = []
+    for i, dec in enumerate((dec_pack or {}).get("decisions") or []):
+        row = dict(dec)
+        if i < len(realized_per_dec):
+            r = realized_per_dec[i]
+            row["causal_realized"] = {
+                "id": r.get("id"),
+                "change_text": r.get("change_text") or "",
+                "cause_text": r.get("cause_text") or "",
+                "action_text": r.get("action_text") or "",
+            }
+        decisions_for_api.append(row)
+    return decisions_for_api, realized_causal_items, merged_templates
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _load_df(record: TrialBalanceUpload):
@@ -220,12 +264,16 @@ def _branch_context_for_cfo_decisions(db: Session, company_id: str) -> Optional[
                 npv = float(bf.net_profit or 0)
                 nm = round(npv / rev * 100, 2) if rev else None
                 snapshots.append({
+                    "branch_id": b.id,
                     "name": b.name or str(b.id),
                     "revenue": rev,
                     "net_margin_pct": nm,
                 })
         if len(snapshots) < 2:
             return None
+        total_rev = sum(s["revenue"] for s in snapshots) or 1.0
+        for s in snapshots:
+            s["revenue_share_pct"] = round(s["revenue"] / total_rev * 100.0, 2)
         leader = max(snapshots, key=lambda x: x["revenue"])
         weakest = min(
             snapshots,
@@ -233,12 +281,16 @@ def _branch_context_for_cfo_decisions(db: Session, company_id: str) -> Optional[
         )
         return {
             "revenue_leader": {
+                "branch_id": leader["branch_id"],
                 "name": leader["name"],
                 "revenue": leader["revenue"],
+                "revenue_share_pct": leader.get("revenue_share_pct"),
             },
             "weakest": {
+                "branch_id": weakest["branch_id"],
                 "name": weakest["name"],
                 "net_margin_pct": float(weakest["net_margin_pct"] or 0),
+                "revenue_share_pct": weakest.get("revenue_share_pct"),
             },
         }
     except Exception:
@@ -372,6 +424,7 @@ def _build_consolidated_statements(company_id: str, db) -> list[dict]:
             },
             "balance_sheet": _consolidate_bs(a["total_assets"], np_),
         }
+        attach_structured_income_statement(stmt)
         stmts.append(stmt)
 
     return stmts
@@ -457,6 +510,7 @@ def _build_single_branch_statements(branch_id: str, company_id: str, db) -> list
             },
             "balance_sheet": _consolidate_bs(ta, np_),
         })
+        attach_structured_income_statement(result[-1])
 
     return result
 
@@ -521,6 +575,7 @@ def _build_period_statements(company_id: str, uploads: list) -> list[dict]:
             d.setdefault("balance_sheet", {})
             d["balance_sheet"]["pre_closing_tb"] = False
 
+        attach_structured_income_statement(d)
         stmts.append(d)
     return stmts
 
@@ -2678,6 +2733,21 @@ def get_board_report(
                               "net_profit":_mt("net_profit_series","net_profit_mom_pct")},
             "anomalies":     _anomalies,
             "narratives":    _narratives,
+            "structured_income_statement": _analysis.get("structured_income_statement"),
+            "structured_income_statement_meta": _analysis.get("structured_income_statement_meta"),
+            "structured_income_statement_variance": _analysis.get("structured_income_statement_variance"),
+            "structured_income_statement_margin_variance": _analysis.get(
+                "structured_income_statement_margin_variance"
+            ),
+            "structured_income_statement_variance_meta": _analysis.get(
+                "structured_income_statement_variance_meta"
+            ),
+            "structured_profit_bridge": _analysis.get("structured_profit_bridge"),
+            "structured_profit_bridge_interpretation": _analysis.get(
+                "structured_profit_bridge_interpretation"
+            ),
+            "structured_profit_bridge_meta": _analysis.get("structured_profit_bridge_meta"),
+            "structured_profit_story": _analysis.get("structured_profit_story"),
         }
     except HTTPException:
         raise
@@ -2927,9 +2997,13 @@ def get_board_report(
         except Exception as _de_exc:
             logger.warning("board-report CFO decisions assembly failed: %s", _de_exc)
 
-        _board_merged_causal = _merge_causal_sources_for_realize(
-            _dec_pack_board or None, _di_board or None, None
+        _dec_board_aug, _, _board_merged_causal = _augment_cfo_decision_pack_for_api(
+            _dec_pack_board or None,
+            safe_lang,
+            deep_intel=_di_board or None,
+            profit_intel=None,
         )
+        _dec_board = _dec_board_aug
         report = build_board_report(
             analysis_dict,
             executive_dict,
@@ -3961,11 +4035,21 @@ def get_cfo_decisions_v2(
         logger.error("get_cfo_decisions_v2 error for %s: %s", company_id, _e, exc_info=True)
         raise HTTPException(status_code=500, detail=f"Decision engine error: {_e}")
 
+    decisions_aug, realized_list, merged_templates = _augment_cfo_decision_pack_for_api(
+        result, safe_lang, deep_intel=None, profit_intel=None
+    )
+    data_payload = {
+        **result,
+        "decisions": decisions_aug,
+        "causal_items": merged_templates,
+        "realized_causal_items": realized_list,
+    }
+
     return {
         "status":       "success",
         "company_id":   company_id,
         "company_name": company.name,
-        "data":         result,
+        "data":         data_payload,
         "meta": {
             "scope":             resolved_scope,
             "period_count":      analysis.get("period_count", 0),
@@ -4545,6 +4629,10 @@ def get_executive(
         "data_source":  "branch_consolidation" if consolidate else "direct_uploads",
 
         "data": {
+            **build_structured_income_statement_bundle(windowed[-1]),
+            **build_structured_income_statement_variance_bundle_from_window(windowed),
+            **build_structured_profit_bridge_bundle_from_window(windowed),
+            "structured_profit_story": analysis.get("structured_profit_story"),
             # ── Health ────────────────────────────────────────────────────────
             "health_score_v2":   intelligence.get("health_score_v2"),
             "status":            intelligence.get("status"),

@@ -319,6 +319,7 @@ export default function Branches() {
   const [activeTab, setActiveTab] = useState('list')              // 'list' | 'intelligence'
   const [intel, setIntel] = useState(null)
   const [intelLoading, setIntelLoading] = useState(false)
+  const [consolidateBranchesIntel] = useState(false)
 
   // ── Fetch branches ────────────────────────────────────────────────────────
   const load = useCallback(async () => {
@@ -383,7 +384,7 @@ const loadIntel = useCallback(async () => {
 
   setIntelLoading(true);
   try {
-    const qs = buildAnalysisQuery(toQueryString, { lang, window: brWindow, consolidate: false })
+    const qs = buildAnalysisQuery(toQueryString, { lang, window: brWindow, consolidate: consolidateBranchesIntel })
     if (qs === null) return
     const r = await fetch(
       `${API}/companies/${companyId}/branch-intelligence?${qs}`,
@@ -399,7 +400,7 @@ const loadIntel = useCallback(async () => {
   } finally {
     setIntelLoading(false);
   }
-}, [companyId, lang, brWindow, toQueryString]);
+}, [companyId, lang, brWindow, toQueryString, consolidateBranchesIntel]);
 
 useEffect(() => {
   if (activeTab !== 'intelligence') return;
@@ -927,6 +928,7 @@ function IntelligencePanel({ intel, loading }) {
 function BranchAnalysisPanel({ branch, onClose, window: brWindow }) {
   const { tr, lang } = useLang()
   const { toQueryString } = usePeriodScope()
+  const [consolidate] = useState(false)
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState(null)
@@ -937,7 +939,7 @@ function BranchAnalysisPanel({ branch, onClose, window: brWindow }) {
     setLoading(true);
     setErr(null);
   
-    const qs = buildAnalysisQuery(toQueryString, { lang, window: brWindow, consolidate: false })
+    const qs = buildAnalysisQuery(toQueryString, { lang, window: brWindow, consolidate })
     if (qs === null) {
       setErr('Invalid period scope')
       setLoading(false)
@@ -956,7 +958,7 @@ function BranchAnalysisPanel({ branch, onClose, window: brWindow }) {
         setLoading(false);
       });
   
-    }, [branch, brWindow, lang, toQueryString]);
+    }, [branch, brWindow, lang, toQueryString, consolidate]);
 
   // formatCompact / formatPct imported from numberFormat.js
   const clr  = v => v == null ? 'var(--text-muted)' : v >= 0 ? 'var(--green)' : 'var(--red)'

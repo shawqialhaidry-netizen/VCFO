@@ -1,14 +1,8 @@
 /**
- * Analysis.jsx — Phase 32.8
- * Complete financial analysis + decision-support screen.
+ * Analysis.jsx — Phase 2 spine (Overview)
  *
- * Answers: What is wrong? Why? What to do? What impact?
- *
- * Structure:
- *   Header strip  — health + 3 KPIs with inline explanation
- *   Top Issues    — alerts + weak ratios + negative trends (top 3)
- *   Opportunities — strong signals + positive impacts (top 3)
- *   Tabs          — Overview / Profitability / Liquidity / Efficiency / Decisions / Alerts
+ * Reading order: summary band → tabs → (Overview) structured spine + right rail → collapsed support.
+ * Other tabs keep domain drill + ratio/cause content; data quality banner shows when not on Overview.
  *
  * Data: single /executive fetch — no duplicate calculations.
  */
@@ -18,7 +12,12 @@ import { buildExecutiveNarrative } from '../utils/buildExecutiveNarrative.js'
 import { selectPrimaryDecision } from '../utils/selectPrimaryDecision.js'
 import { buildDrillIntelligence } from '../utils/buildDrillIntelligence.js'
 import CmdServerText from '../components/CmdServerText.jsx'
+import DecisionCausalBlock from '../components/DecisionCausalBlock.jsx'
+import { causalTriple, decisionStableKey, hasAnyCausal } from '../utils/decisionCausal.js'
 import DrillIntelligenceBlock from '../components/DrillIntelligenceBlock.jsx'
+import StructuredFinancialLayers, {
+  formatStructuredProfitStoryForPrompt,
+} from '../components/StructuredFinancialLayers.jsx'
 import { useNavigate, useLocation } from 'react-router-dom'
 import DrillBackBar from '../components/DrillBackBar.jsx'
 import { useLang }    from '../context/LangContext.jsx'
@@ -224,63 +223,74 @@ function RatioRow({label,value,status,explain}) {
 
 function IssueCard({issue,tr,lang,onOpen}) {
   const sc = urgC[issue.severity]||'var(--text-secondary)'
+  const d = issue.decision
+  const showCausal = d && hasAnyCausal(d.causal_realized)
   return (
-    <div onClick={()=>issue.decision&&onOpen(issue.decision)}
+    <div onClick={()=>d&&onOpen(d)}
       style={{background:'var(--bg-elevated)',border:`1px solid ${sc}20`,
         borderLeft:`3px solid ${sc}`,borderRadius:9,padding:'12px 14px',marginBottom:8,
-        cursor:issue.decision?'pointer':'default',transition:'background .15s'}}
-      onMouseEnter={e=>{if(issue.decision)e.currentTarget.style.background='var(--bg-panel)'}}
+        cursor:d?'pointer':'default',transition:'background .15s'}}
+      onMouseEnter={e=>{if(d)e.currentTarget.style.background='var(--bg-panel)'}}
       onMouseLeave={e=>{e.currentTarget.style.background='var(--bg-elevated)'}}>
       <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:5,flexWrap:'wrap'}}>
         <Badge label={tr(`urgency_${issue.severity}`)} color={sc}/>
         <span style={{fontSize:12,fontWeight:700,color:'#ffffff',flex:1}}>
           <CmdServerText lang={lang} tr={tr}>{issue.title}</CmdServerText>
         </span>
-        {issue.decision&&<span style={{fontSize:9,color:'var(--accent)',opacity:.8}}>→ {tr('exec_actions')}</span>}
+        {d&&<span style={{fontSize:9,color:'var(--accent)',opacity:.8}}>→ {tr('exec_actions')}</span>}
       </div>
-      <p style={{fontSize:11,color:'var(--text-secondary)',margin:0,lineHeight:1.6}}>
-        <CmdServerText lang={lang} tr={tr}>
-          {issue.decision?.causal_realized
-            ? String(
-                issue.decision.causal_realized.cause_text ||
-                  issue.decision.causal_realized.action_text ||
-                  issue.decision.causal_realized.change_text ||
-                  '',
-              ).trim() || issue.reason
-            : issue.reason}
-        </CmdServerText>
-      </p>
+      {showCausal ? (
+        <DecisionCausalBlock
+          causal_realized={d.causal_realized}
+          impact={d.impact}
+          lang={lang}
+          tr={tr}
+          changeProps={{ fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.6 }}
+          causeProps={{ fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.6 }}
+          actionProps={{ fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.6 }}
+          impactProps={{ fontSize: 10, color: 'var(--text-muted)', lineHeight: 1.5 }}
+        />
+      ) : (
+        <p style={{fontSize:11,color:'var(--text-secondary)',margin:0,lineHeight:1.6}}>
+          <CmdServerText lang={lang} tr={tr}>{issue.reason}</CmdServerText>
+        </p>
+      )}
     </div>
   )
 }
 
 function OpportunityCard({opp,tr,lang,onOpen}) {
   const dc = domC[opp.domain]||'var(--accent)'
-  const reasonShow =
-    opp.decision?.causal_realized
-      ? String(
-          opp.decision.causal_realized.cause_text ||
-            opp.decision.causal_realized.action_text ||
-            opp.decision.causal_realized.change_text ||
-            '',
-        ).trim() || opp.reason
-      : opp.reason
+  const dec = opp.decision
+  const titleText = dec
+    ? String(dec.decision_title || dec.title || tr(`domain_${dec.domain}_simple`) || dec.domain)
+    : opp.title
+  const showCausal = dec && hasAnyCausal(dec.causal_realized)
   return (
-    <div onClick={()=>opp.decision&&onOpen(opp.decision)}
+    <div onClick={()=>dec&&onOpen(dec)}
       style={{background:'var(--bg-elevated)',border:'1px solid rgba(52,211,153,.18)',
         borderLeft:'3px solid var(--green)',borderRadius:9,padding:'12px 14px',marginBottom:8,
-        cursor:opp.decision?'pointer':'default',transition:'background .15s'}}
-      onMouseEnter={e=>{if(opp.decision)e.currentTarget.style.background='var(--bg-panel)'}}
+        cursor:dec?'pointer':'default',transition:'background .15s'}}
+      onMouseEnter={e=>{if(dec)e.currentTarget.style.background='var(--bg-panel)'}}
       onMouseLeave={e=>{e.currentTarget.style.background='var(--bg-elevated)'}}>
       <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:5,flexWrap:'wrap'}}>
         <Badge label={tr(`domain_${opp.domain}_simple`)} color={dc}/>
         <span style={{fontSize:12,fontWeight:700,color:'#ffffff',flex:1}}>
-          <CmdServerText lang={lang} tr={tr}>{opp.title}</CmdServerText>
+          <CmdServerText lang={lang} tr={tr}>{titleText}</CmdServerText>
         </span>
       </div>
-      <p style={{fontSize:11,color:'var(--text-secondary)',margin:0,lineHeight:1.6}}>
-        <CmdServerText lang={lang} tr={tr}>{reasonShow}</CmdServerText>
-      </p>
+      {showCausal ? (
+        <DecisionCausalBlock
+          causal_realized={dec.causal_realized}
+          impact={dec.impact}
+          lang={lang}
+          tr={tr}
+          changeProps={{ fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.6 }}
+          causeProps={{ fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.6 }}
+          actionProps={{ fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.6 }}
+          impactProps={{ fontSize: 10, color: 'var(--text-muted)', lineHeight: 1.5 }}
+        />
+      ) : null}
       {opp.impact_value&&(
         <div style={{marginTop:6,fontSize:11,fontWeight:800,color:'var(--green)',fontFamily:'var(--font-mono)'}}>{opp.impact_value} {tr('impact_expected')}</div>
       )}
@@ -309,17 +319,22 @@ function DecCard({dec,tr,lang,impacts,onOpen}) {
           ⏱ <CmdServerText lang={lang} tr={tr}>{dec.timeframe}</CmdServerText>
         </span>
       </div>
-      <div style={{fontSize:13,fontWeight:700,color:'#ffffff',marginBottom:4}}>
-        <CmdServerText lang={lang} tr={tr}>
-          {String(dec.causal_realized?.change_text || dec.causal_realized?.action_text || '').trim() || '—'}
-        </CmdServerText>
-      </div>
-      <div style={{fontSize:11,color:'var(--text-secondary)',lineHeight:1.5,marginBottom:imp?.value?6:0,
-        display:'-webkit-box',WebkitLineClamp:2,WebkitBoxOrient:'vertical',overflow:'hidden'}}>
-        <CmdServerText lang={lang} tr={tr}>
-          {String(dec.causal_realized?.cause_text || dec.causal_realized?.action_text || '').trim() || '—'}
-        </CmdServerText>
-      </div>
+      {hasAnyCausal(dec.causal_realized) ? (
+        <DecisionCausalBlock
+          causal_realized={dec.causal_realized}
+          impact={dec.impact}
+          lang={lang}
+          tr={tr}
+          changeProps={{ fontSize: 13, fontWeight: 700, color: '#ffffff', lineHeight: 1.35 }}
+          causeProps={{ fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.5,
+            display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}
+          actionProps={{ fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.5 }}
+          impactProps={{ fontSize: 10, color: 'var(--text-muted)', lineHeight: 1.45 }}
+          wrapperStyle={{ marginBottom: imp?.value ? 6 : 0 }}
+        />
+      ) : (
+        <div style={{ fontSize: 13, fontWeight: 700, color: '#ffffff', marginBottom: imp?.value ? 6 : 0 }}>—</div>
+      )}
       {imp?.value&&(
         <div style={{display:'inline-flex',alignItems:'center',gap:4,
           background:`${uc}12`,border:`1px solid ${uc}25`,borderRadius:20,padding:'2px 9px'}}>
@@ -407,7 +422,9 @@ function DecisionPanel({dec,impacts,tr,lang,onClose}) {
         <div style={{flex:1,overflowY:'auto',padding:'20px'}}>
           <div style={{fontSize:17,fontWeight:800,color:'#ffffff',lineHeight:1.3,marginBottom:8}}>
             <CmdServerText lang={lang} tr={tr}>
-              {String(dec.causal_realized?.change_text || dec.causal_realized?.action_text || '').trim() || '—'}
+              {String(dec.causal_realized?.change_text || '').trim()
+                || String(dec.reason || dec.title || '').trim()
+                || '—'}
             </CmdServerText>
           </div>
           <div style={{display:'flex',gap:6,flexWrap:'wrap',marginBottom:20}}>
@@ -417,20 +434,26 @@ function DecisionPanel({dec,impacts,tr,lang,onClose}) {
               ? formatPctForLang(Number(dec.confidence), 0, lang)
               : '—'} color='var(--text-secondary)'/>
           </div>
-          <Sec label={tr('exec_why')} color='var(--red)'>
-            <p style={{fontSize:12,color:'var(--text-secondary)',lineHeight:1.75,margin:0}}>
+          {hasAnyCausal(dec.causal_realized) ? (
+            <DecisionCausalBlock
+              causal_realized={dec.causal_realized}
+              impact={dec.impact}
+              hideChange
+              lang={lang}
+              tr={tr}
+              changeProps={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.75 }}
+              causeProps={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.75 }}
+              actionProps={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.75 }}
+              impactProps={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.75 }}
+              wrapperStyle={{ marginBottom: 8 }}
+            />
+          ) : (
+            <p style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.75, margin: '0 0 16px' }}>
               <CmdServerText lang={lang} tr={tr}>
-                {String(dec.causal_realized?.cause_text || '').trim() || '—'}
+                {String(dec.reason || dec.title || '').trim() || '—'}
               </CmdServerText>
             </p>
-          </Sec>
-          <Sec label={tr('exec_actions')} color={dc}>
-            <p style={{fontSize:12,color:'var(--text-secondary)',lineHeight:1.75,margin:0}}>
-              <CmdServerText lang={lang} tr={tr}>
-                {String(dec.causal_realized?.action_text || '').trim() || '—'}
-              </CmdServerText>
-            </p>
-          </Sec>
+          )}
           {imp?.value&&(
             <Sec label={tr('impact_expected_label')} color='var(--green)'>
               <div style={{background:'rgba(52,211,153,.06)',borderRadius:9,padding:'12px 14px',border:'1px solid rgba(52,211,153,.2)'}}>
@@ -468,72 +491,89 @@ function DecisionPanel({dec,impacts,tr,lang,onClose}) {
   )
 }
 
-// ── Derive top issues / opportunities ─────────────────────────────────────────
+function _issueReasonLine(decision, fallback) {
+  if (!decision?.causal_realized) return fallback
+  const { change, cause, action } = causalTriple(decision.causal_realized)
+  const line = [change, cause, action].filter(Boolean).join(' · ')
+  return line || fallback
+}
+
 function deriveIssues(alerts, causes, decs, tr) {
   const issues = []
   const seen = new Set()
   alerts.filter(a=>a.severity==='high').slice(0,2).forEach(a => {
     if (seen.has(a.title)) return; seen.add(a.title)
-    issues.push({ id:a.id||a.title, title:a.title, reason:a.message, severity:'high',
-      decision: decs.find(d=>d.domain===a.impact||d.domain===a.domain)||null })
+    const decision = decs.find(d=>d.domain===a.impact||d.domain===a.domain)||null
+    issues.push({ id:a.id||a.title, title:a.title, reason: _issueReasonLine(decision, a.message), severity:'high',
+      decision })
   })
   causes.filter(c=>c.impact==='high').slice(0,2).forEach(c => {
     if (seen.has(c.id)||issues.length>=3) return; seen.add(c.id)
+    const decision = decs.find(d=>d.domain===c.domain)||null
+    const desc = (c.description||'').trim()
+    const descShort = desc.length>120 ? desc.slice(0,120) : desc
     issues.push({ id:c.id, title:c.title,
-      reason:(c.description||'').length>120?(c.description||'').slice(0,120):(c.description||''),
-      severity:'high', decision: decs.find(d=>d.domain===c.domain)||null })
+      reason: _issueReasonLine(decision, descShort),
+      severity:'high', decision })
   })
   if (issues.length<3) {
     alerts.filter(a=>a.severity==='medium'&&!seen.has(a.title)).slice(0,3-issues.length).forEach(a => {
       seen.add(a.title)
-      issues.push({ id:a.id||a.title, title:a.title, reason:a.message, severity:'medium', decision:null })
+      const decision = decs.find(d=>d.domain===a.impact||d.domain===a.domain)||null
+      issues.push({ id:a.id||a.title, title:a.title, reason: _issueReasonLine(decision, a.message), severity:'medium', decision })
     })
   }
   return issues.slice(0,3)
 }
 
-function deriveOpportunities(decs, causes, impacts, trends, ratios, tr, lang) {
+function deriveOpportunities(decs, _causes, impacts, trends, ratios, tr, lang) {
   const opps = []
+  const used = new Set()
+
+  function pushFromDecision(dec, extra = {}) {
+    if (!dec || !hasAnyCausal(dec.causal_realized)) return
+    const k = decisionStableKey(dec)
+    if (used.has(k)) return
+    used.add(k)
+    opps.push({
+      domain: dec.domain,
+      title: String(dec.decision_title || dec.title || tr(`domain_${dec.domain}_simple`) || dec.domain),
+      decision: dec,
+      impact_value: extra.impact_value ?? null,
+      derived: true,
+    })
+  }
+
   const ytdRev = trends?.revenue?.ytd_vs_prior
   const revDir = trends?.revenue?.direction
-  if (revDir==='up'||ytdRev>5) {
-    const gDec = decs.find(d=>d.domain==='growth')
-    const gc = gDec?.causal_realized || {}
-    const gtxt = String(gc.change_text || gc.cause_text || gc.action_text || '').trim()
-    opps.push({ domain:'growth',
-      title: tr('opp_revenue_momentum'),
-      reason: gtxt
-        || (ytdRev>0
-          ? tr('opp_revenue_momentum_reason_yoy', { pct: formatPctForLang(ytdRev, 1, lang) })
-          : tr('opp_revenue_momentum_reason_trend')),
-      impact_value: null, decision: gDec||null })
+  const gDec = decs.find(d => d.domain === 'growth')
+  if (gDec && hasAnyCausal(gDec.causal_realized) && (revDir === 'up' || ytdRev > 5)) {
+    pushFromDecision(gDec)
   }
-  const sorted = Object.values(impacts||{}).filter(x=>x?.impact?.value>0)
-    .sort((a,b)=>(b.impact.value||0)-(a.impact.value||0))
-  sorted.slice(0,2).forEach(item => {
-    if (opps.length>=3) return
-    const dec = decs.find(d=>d.key===item.decision_key||d.domain===item.domain)
-    if (!dec) return
+
+  const sorted = Object.values(impacts || {}).filter(x => x?.impact?.value > 0)
+    .sort((a, b) => (b.impact.value || 0) - (a.impact.value || 0))
+  sorted.forEach(item => {
+    if (opps.length >= 3) return
+    const dec = decs.find(d => d.key === item.decision_key || d.domain === item.domain)
+    if (!dec || !hasAnyCausal(dec.causal_realized)) return
     const v = item.impact.value
-    const cr = dec.causal_realized || {}
-    const reasonTxt = String(cr.cause_text || cr.action_text || cr.change_text || '').trim()
-    opps.push({ domain:item.domain||dec.domain,
-      title: tr(`dec_short_${dec.domain}`),
-      reason: reasonTxt || '—',
-      impact_value: `+${formatCompactForLang(v, lang)}`, decision: dec })
+    pushFromDecision(dec, { impact_value: `+${formatCompactForLang(v, lang)}` })
   })
-  if (opps.length<3) {
-    const allR = {...(ratios.profitability||{}),...(ratios.liquidity||{})}
-    const good = Object.entries(allR).find(([,r])=>r?.status==='good')
+
+  if (opps.length < 3) {
+    const allR = { ...(ratios.profitability || {}), ...(ratios.liquidity || {}) }
+    const good = Object.entries(allR).find(([, r]) => r?.status === 'good')
     if (good) {
-      const [k,r] = good
-      opps.push({ domain:'profitability',
-        title: tr('opp_strong_ratio'),
-        reason: tr('opp_strong_ratio_reason', { metric: tr(k) }),
-        impact_value: null, decision: null })
+      const [k] = good
+      const dom =
+        /current|quick|working|liquidity/i.test(k) ? 'liquidity' : 'profitability'
+      const dec = decs.find(d => d.domain === dom)
+      if (dec && hasAnyCausal(dec.causal_realized)) pushFromDecision(dec)
     }
   }
-  return opps.slice(0,3)
+
+  return opps.slice(0, 3)
 }
 
 
@@ -639,7 +679,7 @@ export default function Analysis({ routeDefaultTab = null } = {}) {
     } catch(e) { setErr(e.message) }
     // Phase 6.4: forecast — silent fail
     try {
-      const fqs = buildAnalysisQuery(scopeQS, { lang, window: win, consolidate: false })
+      const fqs = buildAnalysisQuery(scopeQS, { lang, window: win, consolidate })
       if (fqs !== null) {
         const fr = await fetch(`${API}/analysis/${selectedId}/forecast?${fqs}`, {headers:auth()})
         if (fr.ok) { const fj = await fr.json(); if (fj?.data) setFcData(fj.data) }
@@ -744,6 +784,29 @@ export default function Analysis({ routeDefaultTab = null } = {}) {
     [drillExtra, tr, lang],
   )
 
+  const summaryBullets = useMemo(() => {
+    if (!data) return []
+    const fromStory = formatStructuredProfitStoryForPrompt(d?.structured_profit_story, tr)
+      .split('\n')
+      .map((s) => s.trim())
+      .filter(Boolean)
+    if (fromStory.length >= 3) return fromStory.slice(0, 3)
+    const pr = drillBundle?.primaryResolution
+    const extra = []
+    if (pr?.kind === 'cfo' && pr.decision) {
+      const { change, cause, action } = causalTriple(pr.decision.causal_realized)
+      extra.push(...[change, cause, action].filter(Boolean))
+    } else if (pr?.kind === 'expense' && pr.expense?.title) {
+      extra.push(String(pr.expense.title))
+    }
+    const merged = [...fromStory]
+    for (const x of extra) {
+      if (merged.length >= 3) break
+      if (x && !merged.includes(x)) merged.push(x)
+    }
+    return merged.slice(0, 3)
+  }, [data, d, tr, drillBundle])
+
   const kpiExplain = {
     revenue:    kpis.revenue?.mom_pct!=null
       ? (kpis.revenue.mom_pct>0
@@ -778,7 +841,14 @@ export default function Analysis({ routeDefaultTab = null } = {}) {
   return (
     <div className="" style={{padding:'18px 26px',display:'flex',flexDirection:'column',
       gap:14,minHeight:'calc(100vh - 62px)',background:'var(--bg-void)'}}>
-      <style>{`@keyframes slideIn{from{transform:translateX(100%);opacity:0}to{transform:translateX(0);opacity:1}}@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+      <style>{`
+        @keyframes slideIn{from{transform:translateX(100%);opacity:0}to{transform:translateX(0);opacity:1}}
+        @keyframes spin{to{transform:rotate(360deg)}}
+        .analysis-phase2-overview{display:grid;grid-template-columns:minmax(0,1fr) minmax(260px,300px);gap:16px;align-items:start}
+        @media (max-width:1100px){.analysis-phase2-overview{grid-template-columns:1fr}}
+        .analysis-phase2-details > summary{list-style:none;cursor:pointer}
+        .analysis-phase2-details > summary::-webkit-details-marker{display:none}
+      `}</style>
 
       <DrillBackBar detailLabel={tr('nav_drill_analysis')} />
 
@@ -848,110 +918,54 @@ export default function Analysis({ routeDefaultTab = null } = {}) {
         border:'1px solid var(--red)',borderRadius:9,fontSize:12,color:'var(--red)'}}>⚠ {err}</div>}
       {loading&&!data&&(
         <div style={{display:'flex',flexDirection:'column',gap:12,paddingTop:8}}>
-          {/* Header skeleton */}
-          <div style={{display:'grid',gridTemplateColumns:'auto 1fr 1fr 1fr',gap:10}}>
-            <div style={{background:'var(--bg-panel)',borderRadius:13,padding:16,minWidth:110}}>
-              <div className="skeleton" style={{width:80,height:80,borderRadius:'50%'}}/>
-            </div>
-            {[1,2,3].map(i=>(
-              <div key={i} style={{background:'var(--bg-panel)',borderRadius:13,padding:'14px 16px'}}>
-                <div className="skeleton skeleton-text" style={{width:'60%',marginBottom:10}}/>
-                <div className="skeleton skeleton-num" style={{marginBottom:8}}/>
-                <div className="skeleton" style={{height:28,width:'100%',borderRadius:4}}/>
-              </div>
-            ))}
+          <div style={{background:'var(--bg-panel)',borderRadius:13,padding:16,minHeight:72}}>
+            <div className="skeleton skeleton-text" style={{width:'45%',marginBottom:10}}/>
+            <div className="skeleton" style={{height:14,width:'85%',borderRadius:4}}/>
           </div>
-          {/* Issues + Opportunities skeleton */}
-          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:14}}>
-            {[1,2].map(i=>(
-              <div key={i} style={{background:'var(--bg-panel)',borderRadius:13,padding:'16px'}}>
-                <div className="skeleton skeleton-text" style={{width:'40%',marginBottom:14}}/>
-                {[1,2,3].map(j=>(
-                  <div key={j} style={{marginBottom:8}}>
-                    <div className="skeleton skeleton-text" style={{width:'90%',marginBottom:5}}/>
-                    <div className="skeleton skeleton-text" style={{width:'70%'}}/>
-                  </div>
-                ))}
-              </div>
-            ))}
+          <div className="analysis-phase2-overview">
+            <div style={{background:'var(--bg-panel)',borderRadius:13,minHeight:260,padding:16}}>
+              <div className="skeleton skeleton-text" style={{width:'40%',marginBottom:14}}/>
+              <div className="skeleton" style={{height:140,borderRadius:8}}/>
+            </div>
+            <div style={{background:'var(--bg-panel)',borderRadius:13,minHeight:180,padding:16}}>
+              <div className="skeleton skeleton-text" style={{width:'70%',marginBottom:12}}/>
+              <div className="skeleton" style={{height:56,borderRadius:8,marginBottom:8}}/>
+              <div className="skeleton" style={{height:56,borderRadius:8}}/>
+            </div>
           </div>
         </div>
       )}
 
-      {data&&<DataQualityBanner validation={validation} lang={lang} tr={tr}/>}
+      {data && (
+        <div style={{
+          display:'flex',flexWrap:'wrap',gap:16,alignItems:'flex-start',
+          padding:'14px 18px',background:'var(--bg-panel)',border:'1px solid var(--border)',
+          borderRadius:13,borderTop:`2px solid ${hc}`,
+        }}>
+          <div style={{display:'flex',alignItems:'center',gap:12,minWidth:88,flexShrink:0}}>
+            <div style={{fontFamily:'var(--font-mono)',fontSize:26,fontWeight:800,color:hc,lineHeight:1}}>{health??'—'}</div>
+            <div>
+              <div style={{fontSize:9,color:'var(--text-secondary)'}}>/100</div>
+              <div style={{fontSize:11,fontWeight:700,color:hc}}>{tr(`status_${status}_simple`)}</div>
+            </div>
+          </div>
+          <ul style={{margin:0,paddingLeft:18,flex:1,minWidth:200,fontSize:12,color:'var(--text-secondary)',lineHeight:1.55}}>
+            {summaryBullets.length===0 ? (
+              <li style={{listStyle:'none',marginLeft:-18,fontStyle:'italic',color:'var(--text-muted)'}}>
+                {tr('analysis_summary_no_bullets')}
+              </li>
+            ) : summaryBullets.map((b,i)=>(
+              <li key={i}><CmdServerText lang={lang} tr={tr}>{b}</CmdServerText></li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {data && tab !== 'overview' && (
+        <DataQualityBanner validation={validation} lang={lang} tr={tr} />
+      )}
+
       {data&&(<>
-        {/* Health + KPI strip */}
-        <div style={{display:'grid',gridTemplateColumns:'auto 1fr 1fr 1fr',gap:10,alignItems:'stretch'}}>
-          <Card style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',minWidth:110,borderTop:`2px solid ${hc}`}}>
-            <div style={{fontFamily:'var(--font-mono)',fontSize:36,fontWeight:800,color:hc,lineHeight:1}}>{health??'—'}</div>
-            <div style={{fontSize:9,color:'var(--text-secondary)',marginTop:4}}>/100</div>
-            <div style={{fontSize:10,fontWeight:700,color:hc,marginTop:6,textAlign:'center'}}>{tr(`status_${status}_simple`)}</div>
-          </Card>
-          <MetricCard label={kpiLabel(tr('fc_revenue'), ctxLabel(), tr)} value={formatCompactForLang(kpis.revenue?.value, lang)} fullValue={formatFullForLang(kpis.revenue?.value, lang)}
-            lang={lang} tr={tr} momWord={tr('mom_label')}
-            mom={kpis.revenue?.mom_pct} spark={series.revenue?.slice(-10)} color='var(--accent)' explain={kpiExplain.revenue}
-            insight={(() => {
-              const dir = trends?.revenue?.direction
-              return dir === 'up' ? tr('trend_up')
-                : dir === 'down' ? tr('trend_down')
-                : dir === 'stable' ? tr('trend_stable')
-                : null
-            })()}
-            cause={(() => {
-              const dec = (d?.decisions || []).find((x) => x.domain === 'growth')
-              const t = String(dec?.causal_realized?.change_text || dec?.causal_realized?.cause_text || '').trim()
-              return t ? t.slice(0, 60) : null
-            })()}
-            forecast={kpiForecast('revenue', fcData, tr, (v) => formatCompactForLang(v, lang), lang)}/>
-          <MetricCard label={kpiLabel(tr('fc_net_profit'), ctxLabel(), tr)} value={formatCompactForLang(kpis.net_profit?.value, lang)} fullValue={formatFullForLang(kpis.net_profit?.value, lang)}
-            lang={lang} tr={tr} momWord={tr('mom_label')}
-            mom={kpis.net_profit?.mom_pct} spark={series.net_profit?.slice(-10)} color='var(--green)' explain={kpiExplain.net_profit}
-            insight={(() => {
-              const st = ratios?.profitability?.net_margin_pct?.status
-              return st ? tr(`kpi_margin_badge_${st}`) : null
-            })()}
-            cause={(() => {
-              const gm = ratios?.profitability?.gross_margin_pct
-              return gm?.value != null ? tr('dash_gross_margin_line', { value: formatPctForLang(gm.value, 1, lang) }) : null
-            })()}
-            forecast={kpiForecast('net_profit', fcData, tr, (v) => formatCompactForLang(v, lang), lang)}/>
-          <MetricCard label={tr('net_margin')} value={formatPctForLang(kpis.net_margin?.value, 1, lang)}
-            lang={lang} tr={tr} momWord={tr('mom_label')}
-            mom={kpis.net_margin?.mom_pct} color='var(--violet)' explain={kpiExplain.margin}
-            insight={(()=>{const ins=(d?.statements?.insights||[]).find(i=>i.key==='strong_gross_margin');return ins?ins.message.split('. ')[0]:null})()}
-            cause={(() => {
-              const dec = (d?.decisions || []).find((x) => x.domain === 'profitability')
-              const t = String(dec?.causal_realized?.change_text || dec?.causal_realized?.cause_text || '').trim()
-              return t ? t.slice(0, 60) : null
-            })()}/>
-        </div>
-
-        {drillExtra ? (
-          <DrillIntelligenceBlock
-            {...analysisDrillLines('overview')}
-            tr={tr}
-            lang={lang}
-          />
-        ) : null}
-
-        {/* TOP ISSUES + OPPORTUNITIES — always visible */}
-        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:14}}>
-          <Card style={{borderTop:'2px solid var(--red)'}}>
-            <SectionHead label={tr('analysis_top_issues')} count={issues.length} color='var(--red)'
-              sub={tr('analysis_top_issues_sub')}/>
-            {issues.length===0
-              ?<p style={{fontSize:12,color:'var(--text-secondary)',fontStyle:'italic'}}>{tr('analysis_no_critical_issues')}</p>
-              :issues.map((iss,i)=><IssueCard key={i} issue={iss} tr={tr} lang={lang} onOpen={setSelDec}/>)}
-          </Card>
-          <Card style={{borderTop:'2px solid var(--green)'}}>
-            <SectionHead label={tr('analysis_top_opps')} count={opps.length} color='var(--green)'
-              sub={tr('analysis_top_opps_sub')}/>
-            {opps.length===0
-              ?<p style={{fontSize:12,color:'var(--text-secondary)',fontStyle:'italic'}}>{tr('analysis_more_data_required')}</p>
-              :opps.map((opp,i)=><OpportunityCard key={i} opp={opp} tr={tr} lang={lang} onOpen={setSelDec}/>)}
-          </Card>
-        </div>
-
         {/* Tabs */}
         <div style={{display:'flex',gap:4,background:'var(--bg-elevated)',borderRadius:10,padding:3,width:'fit-content',flexWrap:'wrap'}}>
           {TABS.map(t=>(
@@ -966,57 +980,194 @@ export default function Analysis({ routeDefaultTab = null } = {}) {
           ))}
         </div>
 
-        {/* OVERVIEW */}
+        {/* OVERVIEW — spine + rail + collapsed support */}
         {tab==='overview'&&(
-          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:14}}>
-            <Card>
-              <SectionHead label={tr('exec_action_strip')} count={decs.length} color='var(--red)'
-                sub={tr('exec_action_strip_sub')}/>
-              {decs.length===0?<p style={{fontSize:12,color:'var(--text-secondary)'}}>—</p>
-                :decs.slice(0,3).map((dec,i)=><DecCard key={i} dec={dec} tr={tr} lang={lang} impacts={impacts} onOpen={setSelDec}/>)}
-            </Card>
-            <Card>
-              <SectionHead label={tr('exec_root_causes')} count={causes.filter(c=>c.impact==='high').length} color='var(--amber)'
-                sub={tr('exec_root_causes_sub')}/>
-              {causes.length===0?<p style={{fontSize:12,color:'var(--text-secondary)'}}>—</p>
-                :causes.slice(0,4).map((c,i)=><CauseCard key={i} cause={c} lang={lang} tr={tr}/>)}
-            </Card>
-            <Card>
-              <SectionHead label={tr('exec_breakdown')} color='var(--accent)'
-                sub={tr('exec_breakdown_sub')}/>
-              {Object.keys(liq).length>0&&<>
-                <div style={{fontSize:10,fontWeight:700,color:'var(--text-secondary)',marginBottom:6,textTransform:'uppercase',letterSpacing:'.06em'}}>{tr('liquidity')}</div>
-                {liq.current_ratio&&<RatioRow label={tr('current_ratio')} value={formatMultipleForLang(liq.current_ratio.value, 2, lang)} status={liq.current_ratio.status}
-                  explain={liq.current_ratio.value>=1.5 ? tr('liq_sufficient') : tr('liq_needs_improvement')}/>}
-                {liq.quick_ratio&&<RatioRow label={tr('quick_ratio')} value={formatMultipleForLang(liq.quick_ratio.value, 2, lang)} status={liq.quick_ratio.status}/>}
-              </>}
-              {Object.keys(prof).length>0&&<>
-                <div style={{fontSize:10,fontWeight:700,color:'var(--text-secondary)',marginTop:10,marginBottom:6,textTransform:'uppercase',letterSpacing:'.06em'}}>{tr('profitability')}</div>
-                {prof.net_margin_pct&&<RatioRow label={tr('net_margin')} value={formatPctForLang(prof.net_margin_pct.value, 1, lang)} status={prof.net_margin_pct.status}/>}
-                {prof.gross_margin_pct&&<RatioRow label={tr('gross_margin')} value={formatPctForLang(prof.gross_margin_pct.value, 1, lang)} status={prof.gross_margin_pct.status}/>}
-              </>}
-            </Card>
-            <Card>
-              <SectionHead label={tr('cashflow_operating')} color='var(--blue)'
-                sub={tr('cashflow_operating_sub')}/>
-              <div style={{fontFamily:'var(--font-mono)',fontSize:26,fontWeight:800,
-                color:cashflow.operating_cashflow>=0?'var(--green)':'var(--red)',direction:'ltr',marginBottom:6}}>
-                {formatCompactForLang(cashflow.operating_cashflow, lang)}
+          <div style={{display:'flex',flexDirection:'column',gap:14}}>
+            <div className="analysis-phase2-overview">
+              <div style={{minWidth:0}}>
+                <StructuredFinancialLayers data={d} tr={tr} lang={lang} variant="analysis_spine" />
               </div>
-              {cashflow.operating_cashflow_mom!=null&&(
-                <div style={{fontSize:11,color:clr(cashflow.operating_cashflow_mom),marginBottom:8}}>
-                  {formatSignedPctForLang(Number(cashflow.operating_cashflow_mom), 1, lang)}{' '}
-                  {tr('mom_short')}
+              <aside style={{display:'flex',flexDirection:'column',gap:12,minWidth:0}}>
+                <Card style={{padding:'12px 14px'}}>
+                  <SectionHead label={tr('analysis_rail_scope')} color="var(--text-secondary)" />
+                  <p style={{fontSize:12,color:'#ffffff',margin:'6px 0 2px',fontWeight:700}}>{selectedCompany?.name||'—'}</p>
+                  <p style={{fontSize:11,color:'var(--text-secondary)',margin:0}}>
+                    {periods.at(-1)||'—'}{currency ? ` · ${currency}` : ''}
+                  </p>
+                  <p style={{fontSize:10,color:'var(--text-muted)',margin:'6px 0 0'}}>
+                    {consolidate ? tr('branch_consolidation') : tr('company_uploads')}
+                  </p>
+                  {data?.meta?.scope != null && (
+                    <p style={{fontSize:10,color:'var(--text-muted)',margin:'4px 0 0',lineHeight:1.4}}>
+                      {typeof data.meta.scope === 'string'
+                        ? data.meta.scope
+                        : (data.meta.scope?.label ?? '')}
+                    </p>
+                  )}
+                </Card>
+                <DataQualityBanner validation={validation} lang={lang} tr={tr} />
+                <Card>
+                  <SectionHead label={tr('exec_action_strip')} count={Math.min(decs.length, 3)} color='var(--red)'
+                    sub={tr('exec_action_strip_sub')}/>
+                  {decs.length===0 ? <p style={{fontSize:12,color:'var(--text-secondary)'}}>—</p>
+                    : decs.slice(0,3).map((dec) => (
+                      <DecCard key={decisionStableKey(dec)} dec={dec} tr={tr} lang={lang} impacts={impacts} onOpen={setSelDec} />
+                    ))}
+                </Card>
+                <Card>
+                  <SectionHead label={tr('exec_root_causes')} count={causes.filter(c=>c.impact==='high').length} color='var(--amber)'
+                    sub={tr('exec_root_causes_sub')}/>
+                  {causes.length===0 ? <p style={{fontSize:12,color:'var(--text-secondary)'}}>—</p>
+                    : causes.slice(0,3).map((c,i)=><CauseCard key={i} cause={c} lang={lang} tr={tr}/>)}
+                </Card>
+                <Card style={{padding:'12px 14px'}}>
+                  <SectionHead label={tr('analysis_rail_links')} color="var(--accent)" />
+                  <div style={{display:'flex',flexDirection:'column',gap:8,marginTop:4}}>
+                    <button type="button" onClick={()=>navigate('/statements',{state:{focus:'cashflow'}})}
+                      style={{padding:'7px 12px',borderRadius:8,border:'1px solid var(--border)',
+                        background:'var(--bg-elevated)',color:'#aab4c3',fontSize:11,fontWeight:600,cursor:'pointer',textAlign:'left'}}>
+                      {tr('nav_statements')} →
+                    </button>
+                    <button type="button" onClick={()=>navigate('/board-report')}
+                      style={{padding:'7px 12px',borderRadius:8,border:'1px solid var(--border)',
+                        background:'var(--bg-elevated)',color:'#aab4c3',fontSize:11,fontWeight:600,cursor:'pointer',textAlign:'left'}}>
+                      {tr('nav_board_report')} →
+                    </button>
+                    <button type="button" onClick={()=>navigate('/branches')}
+                      style={{padding:'7px 12px',borderRadius:8,border:'1px solid var(--border)',
+                        background:'var(--bg-elevated)',color:'#aab4c3',fontSize:11,fontWeight:600,cursor:'pointer',textAlign:'left'}}>
+                      {tr('nav_branches')} →
+                    </button>
+                  </div>
+                </Card>
+              </aside>
+            </div>
+
+            <details className="analysis-phase2-details" style={{
+              borderRadius:12,border:'1px solid var(--border)',background:'rgba(255,255,255,0.02)',padding:'10px 14px',
+            }}>
+              <summary style={{fontSize:12,fontWeight:800,color:'var(--text-secondary)'}}>
+                {tr('analysis_collapsed_support_title')}
+              </summary>
+              <div style={{marginTop:14,display:'flex',flexDirection:'column',gap:14}}>
+                {drillExtra ? (
+                  <DrillIntelligenceBlock {...analysisDrillLines('overview')} tr={tr} lang={lang} />
+                ) : null}
+                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:14}}>
+                  <Card style={{borderTop:'2px solid var(--red)'}}>
+                    <SectionHead label={tr('analysis_top_issues')} count={issues.length} color='var(--red)'
+                      sub={tr('analysis_top_issues_sub')}/>
+                    {issues.length===0
+                      ? <p style={{fontSize:12,color:'var(--text-secondary)',fontStyle:'italic'}}>{tr('analysis_no_critical_issues')}</p>
+                      : issues.map((iss) => (
+                        <IssueCard
+                          key={iss.decision ? decisionStableKey(iss.decision) : iss.id}
+                          issue={iss}
+                          tr={tr}
+                          lang={lang}
+                          onOpen={setSelDec}
+                        />
+                      ))}
+                  </Card>
+                  <Card style={{borderTop:'2px solid var(--green)'}}>
+                    <SectionHead label={tr('analysis_top_opps')} count={opps.length} color='var(--green)'
+                      sub={tr('analysis_top_opps_sub')}/>
+                    {opps.length===0
+                      ? <p style={{fontSize:12,color:'var(--text-secondary)',fontStyle:'italic'}}>{tr('analysis_more_data_required')}</p>
+                      : opps.map((opp) => (
+                        <OpportunityCard
+                          key={opp.decision ? decisionStableKey(opp.decision) : `${opp.domain}:${opp.title}`}
+                          opp={opp}
+                          tr={tr}
+                          lang={lang}
+                          onOpen={setSelDec}
+                        />
+                      ))}
+                  </Card>
                 </div>
-              )}
-              <p style={{fontSize:11,color:'var(--text-secondary)',lineHeight:1.5,marginBottom:10}}>
-                {cashflow.operating_cashflow>=0 ? tr('cashflow_positive') : tr('cashflow_negative')}
-              </p>
-              <button onClick={()=>navigate('/statements',{state:{focus:'cashflow'}})}
-                style={{padding:'5px 12px',borderRadius:7,border:'1px solid var(--border)',background:'var(--bg-elevated)',color:'#aab4c3',fontSize:11,cursor:'pointer'}}>
-                {tr('nav_statements')} →
-              </button>
-            </Card>
+                <div style={{display:'grid',gridTemplateColumns:'auto 1fr 1fr 1fr',gap:10,alignItems:'stretch'}}>
+                  <Card style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',minWidth:100,borderTop:`2px solid ${hc}`}}>
+                    <div style={{fontFamily:'var(--font-mono)',fontSize:28,fontWeight:800,color:hc,lineHeight:1}}>{health??'—'}</div>
+                    <div style={{fontSize:9,color:'var(--text-secondary)',marginTop:4}}>/100</div>
+                  </Card>
+                  <MetricCard label={kpiLabel(tr('fc_revenue'), ctxLabel(), tr)} value={formatCompactForLang(kpis.revenue?.value, lang)} fullValue={formatFullForLang(kpis.revenue?.value, lang)}
+                    lang={lang} tr={tr} momWord={tr('mom_label')}
+                    mom={kpis.revenue?.mom_pct} spark={series.revenue?.slice(-10)} color='var(--accent)' explain={kpiExplain.revenue}
+                    insight={(() => {
+                      const dir = trends?.revenue?.direction
+                      return dir === 'up' ? tr('trend_up')
+                        : dir === 'down' ? tr('trend_down')
+                        : dir === 'stable' ? tr('trend_stable')
+                        : null
+                    })()}
+                    cause={(() => {
+                      const dec = (d?.decisions || []).find((x) => x.domain === 'growth')
+                      const t = String(dec?.causal_realized?.change_text || dec?.causal_realized?.cause_text || '').trim()
+                      return t ? t.slice(0, 60) : null
+                    })()}
+                    forecast={kpiForecast('revenue', fcData, tr, (v) => formatCompactForLang(v, lang), lang)}/>
+                  <MetricCard label={kpiLabel(tr('fc_net_profit'), ctxLabel(), tr)} value={formatCompactForLang(kpis.net_profit?.value, lang)} fullValue={formatFullForLang(kpis.net_profit?.value, lang)}
+                    lang={lang} tr={tr} momWord={tr('mom_label')}
+                    mom={kpis.net_profit?.mom_pct} spark={series.net_profit?.slice(-10)} color='var(--green)' explain={kpiExplain.net_profit}
+                    insight={(() => {
+                      const st = ratios?.profitability?.net_margin_pct?.status
+                      return st ? tr(`kpi_margin_badge_${st}`) : null
+                    })()}
+                    cause={(() => {
+                      const gm = ratios?.profitability?.gross_margin_pct
+                      return gm?.value != null ? tr('dash_gross_margin_line', { value: formatPctForLang(gm.value, 1, lang) }) : null
+                    })()}
+                    forecast={kpiForecast('net_profit', fcData, tr, (v) => formatCompactForLang(v, lang), lang)}/>
+                  <MetricCard label={tr('net_margin')} value={formatPctForLang(kpis.net_margin?.value, 1, lang)}
+                    lang={lang} tr={tr} momWord={tr('mom_label')}
+                    mom={kpis.net_margin?.mom_pct} color='var(--violet)' explain={kpiExplain.margin}
+                    insight={(()=>{const ins=(d?.statements?.insights||[]).find(i=>i.key==='strong_gross_margin');return ins?ins.message.split('. ')[0]:null})()}
+                    cause={(() => {
+                      const dec = (d?.decisions || []).find((x) => x.domain === 'profitability')
+                      const t = String(dec?.causal_realized?.change_text || dec?.causal_realized?.cause_text || '').trim()
+                      return t ? t.slice(0, 60) : null
+                    })()}/>
+                </div>
+                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:14}}>
+                  <Card>
+                    <SectionHead label={tr('exec_breakdown')} color='var(--accent)'
+                      sub={tr('exec_breakdown_sub')}/>
+                    {Object.keys(liq).length>0&&<>
+                      <div style={{fontSize:10,fontWeight:700,color:'var(--text-secondary)',marginBottom:6,textTransform:'uppercase',letterSpacing:'.06em'}}>{tr('liquidity')}</div>
+                      {liq.current_ratio&&<RatioRow label={tr('current_ratio')} value={formatMultipleForLang(liq.current_ratio.value, 2, lang)} status={liq.current_ratio.status}
+                        explain={liq.current_ratio.value>=1.5 ? tr('liq_sufficient') : tr('liq_needs_improvement')}/>}
+                      {liq.quick_ratio&&<RatioRow label={tr('quick_ratio')} value={formatMultipleForLang(liq.quick_ratio.value, 2, lang)} status={liq.quick_ratio.status}/>}
+                    </>}
+                    {Object.keys(prof).length>0&&<>
+                      <div style={{fontSize:10,fontWeight:700,color:'var(--text-secondary)',marginTop:10,marginBottom:6,textTransform:'uppercase',letterSpacing:'.06em'}}>{tr('profitability')}</div>
+                      {prof.net_margin_pct&&<RatioRow label={tr('net_margin')} value={formatPctForLang(prof.net_margin_pct.value, 1, lang)} status={prof.net_margin_pct.status}/>}
+                      {prof.gross_margin_pct&&<RatioRow label={tr('gross_margin')} value={formatPctForLang(prof.gross_margin_pct.value, 1, lang)} status={prof.gross_margin_pct.status}/>}
+                    </>}
+                  </Card>
+                  <Card>
+                    <SectionHead label={tr('cashflow_operating')} color='var(--blue)'
+                      sub={tr('cashflow_operating_sub')}/>
+                    <div style={{fontFamily:'var(--font-mono)',fontSize:26,fontWeight:800,
+                      color:cashflow.operating_cashflow>=0?'var(--green)':'var(--red)',direction:'ltr',marginBottom:6}}>
+                      {formatCompactForLang(cashflow.operating_cashflow, lang)}
+                    </div>
+                    {cashflow.operating_cashflow_mom!=null&&(
+                      <div style={{fontSize:11,color:clr(cashflow.operating_cashflow_mom),marginBottom:8}}>
+                        {formatSignedPctForLang(Number(cashflow.operating_cashflow_mom), 1, lang)}{' '}
+                        {tr('mom_short')}
+                      </div>
+                    )}
+                    <p style={{fontSize:11,color:'var(--text-secondary)',lineHeight:1.5,marginBottom:10}}>
+                      {cashflow.operating_cashflow>=0 ? tr('cashflow_positive') : tr('cashflow_negative')}
+                    </p>
+                    <button type="button" onClick={()=>navigate('/statements',{state:{focus:'cashflow'}})}
+                      style={{padding:'5px 12px',borderRadius:7,border:'1px solid var(--border)',background:'var(--bg-elevated)',color:'#aab4c3',fontSize:11,cursor:'pointer'}}>
+                      {tr('nav_statements')} →
+                    </button>
+                  </Card>
+                </div>
+              </div>
+            </details>
           </div>
         )}
 
@@ -1076,7 +1227,7 @@ export default function Analysis({ routeDefaultTab = null } = {}) {
                 <Card>
                   <SectionHead label={tr('exec_actions')} color='var(--accent)'/>
                   {decs.filter(d=>d.domain==='profitability').map((dec,i)=>(
-                    <DecCard key={i} dec={dec} tr={tr} lang={lang} impacts={impacts} onOpen={setSelDec}/>
+                    <DecCard key={decisionStableKey(dec)} dec={dec} tr={tr} lang={lang} impacts={impacts} onOpen={setSelDec}/>
                   ))}
                 </Card>
               )}
@@ -1129,7 +1280,7 @@ export default function Analysis({ routeDefaultTab = null } = {}) {
                 <Card>
                   <SectionHead label={tr('exec_actions')} color='var(--accent)'/>
                   {decs.filter(d=>d.domain==='liquidity').map((dec,i)=>(
-                    <DecCard key={i} dec={dec} tr={tr} lang={lang} impacts={impacts} onOpen={setSelDec}/>
+                    <DecCard key={decisionStableKey(dec)} dec={dec} tr={tr} lang={lang} impacts={impacts} onOpen={setSelDec}/>
                   ))}
                 </Card>
               )}
@@ -1198,7 +1349,7 @@ export default function Analysis({ routeDefaultTab = null } = {}) {
                 <Card>
                   <SectionHead label={tr('exec_actions')} color='var(--accent)'/>
                   {decs.filter(d=>['efficiency','leverage'].includes(d.domain)).map((dec,i)=>(
-                    <DecCard key={i} dec={dec} tr={tr} lang={lang} impacts={impacts} onOpen={setSelDec}/>
+                    <DecCard key={decisionStableKey(dec)} dec={dec} tr={tr} lang={lang} impacts={impacts} onOpen={setSelDec}/>
                   ))}
                 </Card>
               )}
@@ -1223,7 +1374,7 @@ export default function Analysis({ routeDefaultTab = null } = {}) {
                   ) : null}
                 </Card>
               )
-              :decs.map((dec,i)=><DecCard key={i} dec={dec} tr={tr} lang={lang} impacts={impacts} onOpen={setSelDec}/>)}
+              :decs.map((dec) => <DecCard key={decisionStableKey(dec)} dec={dec} tr={tr} lang={lang} impacts={impacts} onOpen={setSelDec} />)}
           </div>
         )}
 

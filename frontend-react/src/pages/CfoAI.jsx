@@ -15,12 +15,14 @@ import { useLang }    from '../context/LangContext.jsx'
 import { usePeriodScope } from '../context/PeriodScopeContext.jsx'
 import { useCompany } from '../context/CompanyContext.jsx'
 import { buildAnalysisQuery } from '../utils/buildAnalysisQuery.js'
+import { causalTriple, hasAnyCausal } from '../utils/decisionCausal.js'
 import {
   formatCompactForLang,
   formatPctForLang,
   formatMultipleForLang,
   formatDays,
 } from '../utils/numberFormat.js'
+import { formatStructuredProfitStoryForPrompt } from '../components/StructuredFinancialLayers.jsx'
 
 const API = '/api/v1'
 function auth() {
@@ -92,6 +94,8 @@ function extractBranch(text, branches=[]) {
 function buildPrompt(c, lg, memory={}, tone='auto', tr) {
   if (!c) return tr('cfo_ai_prompt_no_data')
   const co=c.company||{}, d=c.dashboard||{}, s=c.statements||{}, an=c.analysis||{}
+  const profitStoryText =
+    formatStructuredProfitStoryForPrompt(an.structured_profit_story, tr) || '—'
   const cf=c.cashflow||{}, br=c.branches||{}, val=c.validation||{}, decs=c.decisions||{}
   const liq=an.liquidity||{}, eff=an.efficiency||{}
   const perPeriod=(an.periods_data||[]).map(p=>`${p.period}: إيراد=${formatCompactForLang(p.revenue, lg)} ربح=${formatCompactForLang(p.net_profit, lg)} هامش=${formatPctForLang(p.net_margin, 1, lg)}`).join(' | ')||'—'
@@ -101,9 +105,19 @@ function buildPrompt(c, lg, memory={}, tone='auto', tr) {
   if (val.approximation_detected) valBlock+=' | ⚠ نسبة التداول تقريبية'
   if (val.blocking) valBlock+=' | 🚫 مشكلة حرجة'
   const memStr=[memory.lastIntent&&`موضوع: ${memory.lastIntent}`,memory.lastBranch&&`فرع: ${memory.lastBranch}`].filter(Boolean).join(' · ')
-  const rcList = c.realized_causal_items || []
+  const decList = (decs.decisions || []).slice(0, 3)
   const decLines =
-    rcList.slice(0, 3).map((it, i) => `${i + 1}. ${String(it.change_text || it.action_text || '').trim()}`).join('\n') || '—'
+    decList
+      .map((d, i) => {
+        const head = String(d.action_type || d.domain || '').trim()
+        const t = causalTriple(d.causal_realized)
+        if (!hasAnyCausal(d.causal_realized)) return null
+        const body = [t.change, t.cause, t.action].filter(Boolean).join(' · ')
+        if (!body) return null
+        return `${i + 1}. ${head ? `[${head}] ` : ''}${body}`
+      })
+      .filter(Boolean)
+      .join('\n') || '—'
 
   const toneRule = {
     quick:    'أجب بإيجاز شديد — 3-4 أسطر فقط. الأرقام أولاً.',
@@ -128,6 +142,9 @@ ${memStr?`سياق سابق: ${memStr}`:''}
 إيراد: ${formatCompactForLang(d.revenue_latest, lg)} | ربح صافي: ${formatCompactForLang(d.np_latest, lg)} | ربح إجمالي: ${formatCompactForLang(d.gross_profit, lg)}
 COGS: ${formatCompactForLang(d.cogs, lg)} | مصاريف تشغيل: ${formatCompactForLang(d.expenses_opex, lg)}
 MoM إيراد: ${formatPctForLang(d.revenue_mom_pct, 1, lg)} (${d.revenue_direction||'?'}) | MoM ربح: ${formatPctForLang(d.net_profit_mom_pct, 1, lg)}
+
+━ ${tr('sfl_title_story')}:
+${profitStoryText}
 
 ━ هوامش:
 إجمالي: ${formatPctForLang(s.gross_margin_pct, 1, lg)} | صافي: ${formatPctForLang(s.net_margin_pct, 1, lg)} | تشغيلي: ${formatPctForLang(s.operating_margin_pct, 1, lg)}
@@ -394,6 +411,7 @@ export default function CfoAI() {
   const [loadingCtx, setLoadingCtx] = useState(false)
   const { window: window_, setWindow: setWindow_, toQueryString } = usePeriodScope()
   const [memory,     setMemory]     = useState({ lastIntent:null, lastBranch:null })
+  const [consolidate] = useState(false)
   const bottomRef = useRef()
   const inputRef  = useRef()
   const WINDOWS   = ['1M','3M','6M','ALL']
@@ -404,7 +422,7 @@ export default function CfoAI() {
     if (!selectedId) return
     setLoadingCtx(true)
     try {
-      const qs = buildAnalysisQuery(toQueryString, { lang, window: window_, consolidate: false })
+      const qs = buildAnalysisQuery(toQueryString, { lang, window: window_, consolidate })
       if (qs === null) return
       const r = await fetch(`${API}/analysis/${selectedId}/advisor-context?${qs}`, { headers:auth() })
       if (!r.ok) return
@@ -414,21 +432,20 @@ export default function CfoAI() {
 
       const co=j.company?.name||'', nm=j.statements?.net_margin_pct
       const rp=j.decisions?.priority||'?', vs=j.validation?.status||'PASS'
-      const dec=(j.decisions?.decisions||[])[0], hasLoss=(j.branches?.branches||[]).some(b=>b.is_loss)
-      const wk=j.branches?.weakest
+      const dec = (j.decisions?.decisions || [])[0]
+      const hasLoss = (j.branches?.branches || []).some(b => b.is_loss)
+      const decAction = dec?.action_type || dec?.domain || 'CFO'
+      const wk = j.branches?.weakest
       const marginStr = nm != null && Number.isFinite(Number(nm)) ? formatPctForLang(Number(nm), 1, lang) : '?'
-      const rc0 = (j.realized_causal_items || [])[0]
-      const causalWelcome = rc0
-        ? String(rc0.action_text || rc0.change_text || '').trim()
-        : ''
+      const cr = dec?.causal_realized
+      const trip = causalTriple(cr)
+      const structuredLine = [trip.change, trip.cause, trip.action].filter(Boolean).join(' · ')
 
       const validationBlock = vs !== 'PASS' ? tr('cfo_ai_welcome_val', { status: vs }) : ''
       const decBlock =
-        causalWelcome && dec
-          ? tr('cfo_ai_welcome_dec', { action: dec.action_type || 'CFO', rationale: causalWelcome })
-          : causalWelcome
-            ? tr('cfo_ai_welcome_dec', { action: 'CFO', rationale: causalWelcome })
-            : ''
+        dec && structuredLine
+          ? tr('cfo_ai_welcome_dec', { action: decAction, rationale: structuredLine })
+          : ''
       const lossBlock = hasLoss ? tr('cfo_ai_welcome_loss', { branch: wk }) : ''
       const welcome = tr('cfo_ai_welcome_main', {
         company: co,
@@ -444,7 +461,7 @@ export default function CfoAI() {
       setMessages([{ role:'assistant', content:welcome, suggestions:getSuggestions('executive_summary', tr) }])
     } catch(e) { console.error('CfoAI ctx:', e) }
     finally { setLoadingCtx(false) }
-  }, [selectedId, lang, window_, toQueryString, tr])
+  }, [selectedId, lang, window_, toQueryString, tr, consolidate])
 
   useEffect(() => { loadCtx() }, [loadCtx])
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior:'smooth' }) }, [messages])
@@ -484,7 +501,7 @@ export default function CfoAI() {
           message:     text,
           lang:        lang || 'ar',
           window:      window_,
-          consolidate: false,
+          consolidate,
           branch_id:   null,
           memory:      { lastIntent: memory.lastIntent, lastBranch: memory.lastBranch },
           history,

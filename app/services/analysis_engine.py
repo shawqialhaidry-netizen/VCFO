@@ -21,6 +21,15 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
+from app.services.structured_income_statement import build_structured_income_statement_bundle
+from app.services.structured_income_statement_variance import (
+    build_structured_income_statement_variance_bundle_from_window,
+)
+from app.services.structured_profit_bridge import (
+    build_structured_profit_bridge_bundle_from_window,
+)
+from app.services.structured_profit_story import build_structured_profit_story_from_analysis
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  Helpers
@@ -405,9 +414,21 @@ def run_analysis(
             }
     """
     if not period_statements:
+        _empty = build_structured_income_statement_bundle({})
+        _var_empty = build_structured_income_statement_variance_bundle_from_window([])
+        _bridge_empty = build_structured_profit_bridge_bundle_from_window([])
+        _story_stub = {**_bridge_empty, **_var_empty, "latest": None}
         return {
-            "ratios": {}, "latest": None,
-            "trends": {}, "period_count": 0, "periods": [],
+            "ratios": {},
+            "latest": None,
+            "trends": {},
+            "period_count": 0,
+            "periods": [],
+            "structured_income_statement": _empty["structured_income_statement"],
+            "structured_income_statement_meta": _empty["structured_income_statement_meta"],
+            **_var_empty,
+            **_bridge_empty,
+            "structured_profit_story": build_structured_profit_story_from_analysis(_story_stub),
         }
 
     ratios_by_period: dict[str, dict] = {}
@@ -424,10 +445,20 @@ def run_analysis(
     if latest_ratios is None and ratios_by_period:
         latest_ratios = list(ratios_by_period.values())[-1]
 
-    return {
+    _sis = build_structured_income_statement_bundle(latest_stmt)
+    _var = build_structured_income_statement_variance_bundle_from_window(period_statements)
+    _bridge = build_structured_profit_bridge_bundle_from_window(period_statements)
+
+    out = {
         "period_count": len(period_statements),
         "periods": [s.get("period", "") for s in period_statements],
         "latest": latest_ratios,
         "ratios": ratios_by_period,
         "trends": trends,
+        "structured_income_statement": _sis["structured_income_statement"],
+        "structured_income_statement_meta": _sis["structured_income_statement_meta"],
+        **_var,
+        **_bridge,
     }
+    out["structured_profit_story"] = build_structured_profit_story_from_analysis(out)
+    return out

@@ -17,6 +17,14 @@ Adds:
 from __future__ import annotations
 from typing import Optional
 from app.i18n import translate as _i18n_translate
+from app.services.structured_income_statement import build_structured_income_statement_bundle
+from app.services.structured_income_statement_variance import (
+    build_structured_income_statement_variance_bundle_from_window,
+)
+from app.services.structured_profit_bridge import (
+    build_structured_profit_bridge_bundle_from_window,
+)
+from app.services.structured_profit_story import build_structured_profit_story_from_window
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -123,7 +131,13 @@ def build_statement_bundle(
         lang = "en"
 
     if not windowed:
-        return {"available": False, "reason": "No period data"}
+        return {
+            "available": False,
+            "reason": "No period data",
+            **build_structured_income_statement_variance_bundle_from_window([]),
+            **build_structured_profit_bridge_bundle_from_window([]),
+            "structured_profit_story": build_structured_profit_story_from_window([]),
+        }
 
     latest = windowed[-1]
     prev   = windowed[-2] if len(windowed) >= 2 else None
@@ -376,6 +390,14 @@ def build_statement_bundle(
     sev_rank = {"high": 0, "medium": 1, "info": 2}
     insights.sort(key=lambda x: sev_rank.get(x["severity"], 3))
 
+    _sis = build_structured_income_statement_bundle(latest)
+    _var = build_structured_income_statement_variance_bundle_from_window(windowed)
+    _bridge = build_structured_profit_bridge_bundle_from_window(windowed)
+    _ratio_prof = (intelligence.get("ratios") or {}).get("profitability") or {}
+    _profit_story = build_structured_profit_story_from_window(
+        windowed, latest_profitability=_ratio_prof
+    )
+
     return {
         "available":       True,
         "period":          period,
@@ -385,4 +407,9 @@ def build_statement_bundle(
         "series":          series,
         "summary":         summary,
         "insights":        insights,
+        "structured_income_statement": _sis["structured_income_statement"],
+        "structured_income_statement_meta": _sis["structured_income_statement_meta"],
+        **_var,
+        **_bridge,
+        "structured_profit_story": _profit_story,
     }

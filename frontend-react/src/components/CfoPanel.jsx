@@ -262,6 +262,7 @@ export default function CfoPanel({ open, onClose }) {
   const [loading,  setLoading] = useState(false)
   const [d,        setD]       = useState(null)   // /executive data
   const [fcData,   setFcData]  = useState(null)   // /forecast data
+  const [consolidate] = useState(false)
   const inputRef    = useRef()
   const bottomRef   = useRef()
   const lastDomainRef = useRef(null)  // Phase 6.6: memory — last resolved domain
@@ -296,7 +297,7 @@ export default function CfoPanel({ open, onClose }) {
     } finally {
       setLoading(false)
     }
-  }, [selectedId, lang, win, toQueryString, d])
+  }, [selectedId, lang, win, toQueryString, d, consolidate])
 
   useEffect(() => {
     if (open) {

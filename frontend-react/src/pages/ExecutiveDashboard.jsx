@@ -1,6 +1,8 @@
 /**
  * ExecutiveDashboard.jsx — Phase 30
  * Decision-first executive screen.
+ * Data sources: GET /analysis/{id}/executive and GET /analysis/{id}/forecast only (no legacy aggregate /analysis).
+ * Alternate experiment tabs live on Dashboard.jsx; see QUARANTINE notes there for POST scenario ranker vs executive.
  * Hover = simple explanation. Click = deep panel.
  * Arabic = plain language, zero jargon.
  */
@@ -22,6 +24,7 @@ import {
 import { buildAnalysisQuery } from '../utils/buildAnalysisQuery.js'
 import { buildExecutiveNarrative } from '../utils/buildExecutiveNarrative.js'
 import ExecutiveNarrativeStrip from '../components/ExecutiveNarrativeStrip.jsx'
+import StructuredFinancialLayers from '../components/StructuredFinancialLayers.jsx'
 import { strictT, localizedMissingPlaceholder } from '../utils/strictI18n.js'
 import { CLAMP_FADE_MASK_SHORT } from '../utils/serverTextUi.js'
 import CmdServerText from '../components/CmdServerText.jsx'
@@ -994,14 +997,6 @@ export default function ExecutiveDashboard() {
   const { tr, lang }   = useLang()
   const { selectedId, selectedCompany } = useCompany()
   const { toQueryString: scopeQS, params: ps, window: win } = usePeriodScope()
-  const ctxLabel = () =>
-    kpiContextLabel({
-      window: 'ALL',
-      ps,
-      latestPeriod: main?.intelligence?.latest_period || '',
-      lang,
-      tr: (k) => strictT(tr, lang, k),
-    })
 
   const [intel,    setIntel]    = useState(null)
   const [decs,     setDecs]     = useState(null)
@@ -1018,6 +1013,14 @@ export default function ExecutiveDashboard() {
   const navigate = useNavigate()
   const [impacts, setImpacts] = useState({})
   const [narrative, setNarrative] = useState(null)
+  const ctxLabel = () =>
+    kpiContextLabel({
+      window: win,
+      ps,
+      latestPeriod: main?.intelligence?.latest_period || '',
+      lang,
+      tr: (k) => strictT(tr, lang, k),
+    })
   const [pType, setPType] = useState(null)
   const [pLoad, setPLoad] = useState(null)
   const [pXtra, setPXtra] = useState(null)
@@ -1063,10 +1066,18 @@ export default function ExecutiveDashboard() {
         intelligence:        { latest_period: j.meta?.periods?.slice(-1)[0] },
         pipeline_validation: j.meta?.pipeline_validation || null,
         scope_label:         j.meta?.scope?.label || null,
+        structured_income_statement: d.structured_income_statement ?? null,
+        structured_income_statement_variance: d.structured_income_statement_variance ?? null,
+        structured_income_statement_margin_variance:
+          d.structured_income_statement_margin_variance ?? null,
+        structured_income_statement_variance_meta:
+          d.structured_income_statement_variance_meta ?? null,
+        structured_profit_bridge: d.structured_profit_bridge ?? null,
+        structured_profit_story: d.structured_profit_story ?? null,
       })
       // Phase 6.4: forecast fetch
       try {
-        const fqs = buildAnalysisQuery(scopeQS, { lang, window: win, consolidate: false })
+        const fqs = buildAnalysisQuery(scopeQS, { lang, window: win, consolidate })
         if (fqs !== null) {
           const fr = await fetch(`${API}/analysis/${selectedId}/forecast?${fqs}`, { headers:auth() })
           if (fr.ok) { const fj = await fr.json(); if (fj?.data) setFcData(fj.data) }
@@ -1175,6 +1186,9 @@ export default function ExecutiveDashboard() {
 
       {/* FIX-4.3: Data quality banner */}
       <DataQualityBanner validation={main?.pipeline_validation} lang={lang} tr={tr}/>
+      {main ? (
+        <StructuredFinancialLayers data={main} tr={tr} lang={lang} variant="command" />
+      ) : null}
       <TopBar tr={tr} lang={lang} health={health} status={status}
         companyName={selectedCompany?.name}
         period={period} loading={loading} onRefresh={load}

@@ -527,6 +527,9 @@ def build_system_prompt(ctx: dict, lang: str = "ar", memory: Optional[dict] = No
     risk_score = decs.get("risk_score", "?")
     risk_prio  = decs.get("priority", "?")
     dec_list   = decs.get("decisions", [])
+    # Normalize CFO-engine urgency ("high") vs legacy priority ("HIGH") for quick-action logic callers
+    if isinstance(risk_prio, str) and risk_prio.islower():
+        risk_prio = risk_prio.upper()
 
     branch_lines = []
     for b in (br.get("branches") or [])[:6]:
@@ -572,8 +575,11 @@ def build_system_prompt(ctx: dict, lang: str = "ar", memory: Optional[dict] = No
 
     legacy_lines = []
     for i, d in enumerate(dec_list[:3], 1):
+        leg_txt = d.get("reason") or d.get("rationale") or ""
+        dom = d.get("domain") or d.get("action_type") or "?"
+        leg_pri = d.get("priority") or d.get("urgency") or "?"
         legacy_lines.append(
-            f"  {i}. action_type={d.get('action_type', '?')} priority={d.get('priority', '?')} | {d.get('rationale', '')}"
+            f"  {i}. domain={dom} priority={leg_pri} | {leg_txt}"
         )
     legacy_block = "\n".join(legacy_lines) if legacy_lines else ""
 
