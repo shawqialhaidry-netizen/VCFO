@@ -52,6 +52,7 @@ export default function CommandCenterContextRail({
 }) {
   return (
     <div
+      className="cmd-magic-rail"
       style={{
         display: 'flex',
         flexDirection: 'column',

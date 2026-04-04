@@ -33,6 +33,14 @@ export default function CommandCenterBranchStrip({
   const topIneff = eff[0]
   const ofRevBr = st(tr, lang, 'cmd_branch_of_rev')
   const momLab = st(tr, lang, 'cmd_row_mom_expense')
+  const rankTitle = st(tr, lang, 'cmd_branch_rank_title')
+
+  const effBars = (eff || [])
+    .filter((r) => r?.branch_name != null && r.expense_pct_of_revenue != null && Number.isFinite(Number(r.expense_pct_of_revenue)))
+    .slice(0, 4)
+  const maxEffPct = effBars.length
+    ? Math.max(...effBars.map((r) => Number(r.expense_pct_of_revenue)), 1e-9)
+    : 0
 
   const chips = []
   if (hiExp?.branch_name) {
@@ -71,18 +79,39 @@ export default function CommandCenterBranchStrip({
 
   return (
     <div
+      className="cmd-magic-branch-card"
       style={{
-        background: 'var(--bg-panel)',
-        border: `1px solid ${P.border}`,
-        borderRadius: 14,
         padding: '14px 14px',
-        borderTop: `2px solid rgba(59,158,255,0.35)`,
       }}
     >
       <div style={{ fontSize: 10, fontWeight: 800, color: P.text3, textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: 10 }}>
         {st(tr, lang, 'cmd_branch_intel')}
       </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {effBars.length >= 2 ? (
+        <div className="cmd-magic-branch-bar-row" aria-label={rankTitle}>
+          <div style={{ fontSize: 9, fontWeight: 800, color: P.text3, textTransform: 'uppercase', letterSpacing: '.08em' }}>{rankTitle}</div>
+          {effBars.map((r, i) => {
+            const pct = Number(r.expense_pct_of_revenue)
+            const w = Math.round((pct / maxEffPct) * 100)
+            return (
+              <div key={`${r.branch_name}-${i}`}>
+                <div className="cmd-magic-branch-bar-label">
+                  <span className="cmd-magic-branch-bar-name" title={String(r.branch_name)}>
+                    <CmdServerText lang={lang} tr={tr} as="span">
+                      {String(r.branch_name)}
+                    </CmdServerText>
+                  </span>
+                  <span style={{ fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>{formatPctForLang(pct, 1, lang)}</span>
+                </div>
+                <div className="cmd-magic-branch-bar">
+                  <div className="cmd-magic-branch-bar__fill" style={{ width: `${w}%` }} />
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      ) : null}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: effBars.length >= 2 ? 12 : 0 }}>
         {chips.slice(0, 3).map((c) => (
           <div
             key={c.k}

@@ -1,10 +1,12 @@
 /**
  * CommandCenter.jsx — Command Center orchestrator (state, fetch, drill, chrome).
- * Main body: CommandCenterPhase1Layout — context rail → story + primary decision → health/flow/branch → collapsed details.
+ * Main body: CommandCenterPhase1Layout — context rail → executive band (story | decision | health) → charts & bridge → icon tiles → footer.
  */
 import { useState, useCallback, useEffect, useRef } from 'react'
 import '../styles/commandCenterMotion.css'
 import '../styles/commandCenterStructure.css'
+import '../styles/commandCenterMagic.css'
+import '../styles/commandCenterPhase3.css'
 import { useCountUp } from '../hooks/useCountUp.js'
 import { useNavigate } from 'react-router-dom'
 import { useLang }        from '../context/LangContext.jsx'
@@ -41,8 +43,12 @@ import ExpenseInsightsSection from '../components/ExpenseInsightsSection.jsx'
 import CommandCenterPhase1Layout from '../components/CommandCenterPhase1Layout.jsx'
 import CommandCenterContextRail from '../components/CommandCenterContextRail.jsx'
 import CommandCenterHealthComposite from '../components/CommandCenterHealthComposite.jsx'
-import CommandCenterMiniPnlFlow from '../components/CommandCenterMiniPnlFlow.jsx'
-import CommandCenterBranchStrip from '../components/CommandCenterBranchStrip.jsx'
+import CommandCenterProfitPathBridge from '../components/CommandCenterProfitPathBridge.jsx'
+import {
+  CommandCenterBranchGroupedChart,
+  CommandCenterTripleTrendChart,
+} from '../components/CommandCenterPhase3Charts.jsx'
+import CommandCenterSecondaryTiles from '../components/CommandCenterSecondaryTiles.jsx'
 import AiCfoPanel from '../components/AiCfoPanel.jsx'
 import DrillIntelligenceBlock from '../components/DrillIntelligenceBlock.jsx'
 import { buildDrillIntelligence } from '../utils/buildDrillIntelligence.js'
@@ -280,35 +286,35 @@ function PrimaryDecisionHero({
               {strictT(tr, lang, isBaseline ? 'cmd_primary_baseline_eyebrow' : 'cmd_primary_decision_label')}
             </span>
           </div>
-          <div className="cmd-hero-title" style={CLAMP_FADE_MASK_SHORT}>
+          <div className="cmd-hero-title cmd-p3-decision-title" style={CLAMP_FADE_MASK_SHORT}>
             <CmdServerText lang={lang} tr={tr} as="span">
               {titleText}
             </CmdServerText>
           </div>
-          <div className={`cmd-hero-number cmd-data-num ${numTone}`.trim()}>
-            {hasSav ? <HeroExpenseSavings sav={sav} lang={lang} /> : '—'}
-          </div>
           {descText ? (
-            <p className="cmd-hero-desc">
-              <CmdServerText lang={lang} tr={tr} as="span">
-                {descText}
-              </CmdServerText>
-            </p>
+            <div className="cmd-magic-hero-cause">
+              <span className="cmd-magic-hero-k">{strictT(tr, lang, 'exec_why')}</span>
+              <p>
+                <CmdServerText lang={lang} tr={tr} as="span">
+                  {descText}
+                </CmdServerText>
+              </p>
+            </div>
           ) : null}
-          <div className="cmd-hero-actions">
-            {!isBaseline ? (
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: recLine ? 10 : 0 }}>
-                <Pill label={strictT(tr, lang, `priority_${pri}`)} critical={pri === 'high'} />
-              </div>
-            ) : null}
-            {recLine ? (
-              <div style={{ fontWeight: 600, marginBottom: 8 }}>
-                <span className="cmd-muted-foreign" style={{ display: 'block', marginBottom: 4 }}>
-                  {strictT(tr, lang, 'exec_actions')}
-                </span>
+          {recLine ? (
+            <div className="cmd-magic-hero-action">
+              <span className="cmd-magic-hero-k">{strictT(tr, lang, 'exec_actions')}</span>
+              <p>
                 <CmdServerText lang={lang} tr={tr} as="span">
                   {recLine}
                 </CmdServerText>
+              </p>
+            </div>
+          ) : null}
+          <div className="cmd-hero-actions">
+            {!isBaseline ? (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
+                <Pill label={strictT(tr, lang, `priority_${pri}`)} critical={pri === 'high'} />
               </div>
             ) : null}
             <div className="cmd-muted-foreign" style={{ marginTop: recLine || !isBaseline ? 4 : 0 }}>
@@ -320,6 +326,14 @@ function PrimaryDecisionHero({
               {!isBaseline ? ' →' : null}
             </div>
           </div>
+          {!isBaseline ? (
+            <div className="cmd-magic-impact-support">
+              <span className="cmd-magic-impact-label">{strictT(tr, lang, 'impact_expected_label')}</span>
+              <div className={`cmd-hero-number cmd-data-num cmd-magic-impact-num ${numTone}`.trim()}>
+                {hasSav ? <HeroExpenseSavings sav={sav} lang={lang} /> : '—'}
+              </div>
+            </div>
+          ) : null}
         </div>
         </button>
         {analysisLink}
@@ -401,23 +415,33 @@ function PrimaryDecisionHero({
             </CmdServerText>
           </div>
         ) : null}
-        <div className="cmd-hero-title" style={{ ...CLAMP_FADE_MASK_SHORT, marginTop: 6 }}>
+        <div className="cmd-hero-title cmd-p3-decision-title" style={{ ...CLAMP_FADE_MASK_SHORT, marginTop: 6 }}>
           <CmdServerText lang={lang} tr={tr} as="span">
             {String(cr.change_text || cr.action_text || '').trim() || strictT(tr, lang, 'cmd_na_short')}
           </CmdServerText>
         </div>
-        <div className={`cmd-hero-number cmd-data-num ${numTone}`.trim()}>
-          {hasQuant ? <HeroCfoImpactValue raw={imp.value} fmtQuantImpact={fmtQuantImpact} /> : '—'}
-        </div>
         {descText ? (
-          <p className="cmd-hero-desc">
-            <CmdServerText lang={lang} tr={tr} as="span">
-              {descText}
-            </CmdServerText>
-          </p>
+          <div className="cmd-magic-hero-cause">
+            <span className="cmd-magic-hero-k">{strictT(tr, lang, 'exec_why')}</span>
+            <p>
+              <CmdServerText lang={lang} tr={tr} as="span">
+                {descText}
+              </CmdServerText>
+            </p>
+          </div>
+        ) : null}
+        {recLine ? (
+          <div className="cmd-magic-hero-action">
+            <span className="cmd-magic-hero-k">{strictT(tr, lang, 'exec_actions')}</span>
+            <p>
+              <CmdServerText lang={lang} tr={tr} as="span">
+                {recLine}
+              </CmdServerText>
+            </p>
+          </div>
         ) : null}
         <div className="cmd-hero-actions">
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: recLine ? 10 : 0 }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
             <Pill label={strictT(tr, lang, `urgency_${decision.urgency}`)} critical={decision.urgency === 'high'} />
             {decision.impact_level ? (
               <Pill
@@ -426,20 +450,18 @@ function PrimaryDecisionHero({
               />
             ) : null}
           </div>
-          {recLine ? (
-            <div style={{ fontWeight: 600, marginBottom: 8 }}>
-              <span className="cmd-muted-foreign" style={{ display: 'block', marginBottom: 4 }}>
-                {strictT(tr, lang, 'exec_actions')}
-              </span>
-              <CmdServerText lang={lang} tr={tr} as="span">
-                {recLine}
-              </CmdServerText>
-            </div>
-          ) : null}
           <div className="cmd-muted-foreign" style={{ marginTop: 4 }}>
             {strictT(tr, lang, 'cmd_primary_decision_open')} →
           </div>
         </div>
+        {hasQuant ? (
+          <div className="cmd-magic-impact-support">
+            <span className="cmd-magic-impact-label">{strictT(tr, lang, 'impact_expected_label')}</span>
+            <div className={`cmd-hero-number cmd-data-num cmd-magic-impact-num ${numTone}`.trim()}>
+              <HeroCfoImpactValue raw={imp.value} fmtQuantImpact={fmtQuantImpact} />
+            </div>
+          </div>
+        ) : null}
       </div>
       </button>
       {analysisLink}
@@ -464,6 +486,8 @@ function HealthScorePanel({
   actionLine,
   onDrillAnalysis,
   pairedLayout = false,
+  hideCompanyIdentity = false,
+  bandCompact = false,
 }) {
   const hc = stC[status] || T.text2
   const circ = 2 * Math.PI * 30
@@ -482,11 +506,19 @@ function HealthScorePanel({
         border: NEU_BD,
         borderRadius: 14,
         boxShadow: 'none',
-        padding: pairedLayout ? '14px 16px 14px' : '16px 18px 16px',
+        padding: bandCompact ? '10px 12px 12px' : pairedLayout ? '14px 16px 14px' : '16px 18px 16px',
         minHeight: 0,
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, marginBottom: 16 }}>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'flex-start',
+          justifyContent: 'space-between',
+          gap: bandCompact ? 10 : 16,
+          marginBottom: bandCompact ? 10 : 16,
+        }}
+      >
         <div>
           <div className="cmd-card-title">{healthLabel}</div>
           <div className="cmd-muted-foreign" style={{ marginTop: 4 }}>
@@ -546,7 +578,7 @@ function HealthScorePanel({
         style={{
           display: 'flex',
           alignItems: 'center',
-          gap: 16,
+          gap: bandCompact ? 12 : 16,
           cursor: onDrillAnalysis ? 'pointer' : undefined,
           borderRadius: onDrillAnalysis ? 12 : undefined,
           padding: onDrillAnalysis ? 4 : undefined,
@@ -555,7 +587,12 @@ function HealthScorePanel({
         }}
         title={onDrillAnalysis ? strictT(tr, lang, 'cmd_drill_health_hint') : undefined}
       >
-        <svg width={76} height={76} viewBox="0 0 88 88" style={{ flexShrink: 0 }}>
+        <svg
+          width={bandCompact ? 68 : 76}
+          height={bandCompact ? 68 : 76}
+          viewBox="0 0 88 88"
+          style={{ flexShrink: 0 }}
+        >
           <circle cx={44} cy={44} r={34} fill="none" stroke={T.border} strokeWidth={5} />
           <circle
             cx={44}
@@ -576,25 +613,28 @@ function HealthScorePanel({
           </text>
         </svg>
         <div style={{ minWidth: 0, flex: 1 }}>
-          <div
-            className={`cmd-display-headline${pairedLayout ? ' cmd-muted-foreign' : ''}`.trim()}
-            style={{ marginBottom: 8, fontWeight: pairedLayout ? 650 : undefined }}
-          >
-            <CmdServerText lang={lang} tr={tr} as="span">
-              {companyName || ''}
-            </CmdServerText>
-          </div>
+          {!hideCompanyIdentity ? (
+            <div
+              className={`cmd-display-headline${pairedLayout ? ' cmd-muted-foreign' : ''}`.trim()}
+              style={{ marginBottom: 8, fontWeight: pairedLayout ? 650 : undefined }}
+            >
+              <CmdServerText lang={lang} tr={tr} as="span">
+                {companyName || ''}
+              </CmdServerText>
+            </div>
+          ) : null}
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             <span
+              className={hideCompanyIdentity ? 'cmd-magic-health-tier' : undefined}
               style={{
-                fontSize: 10,
+                fontSize: hideCompanyIdentity ? 13 : 10,
                 fontWeight: 800,
-                padding: '4px 10px',
+                padding: hideCompanyIdentity ? '6px 12px' : '4px 10px',
                 borderRadius: 999,
                 background: 'rgba(255,255,255,0.06)',
                 color: status === 'risk' ? T.red : T.text1,
                 border: NEU_BD,
-                letterSpacing: '.04em',
+                letterSpacing: hideCompanyIdentity ? '.02em' : '.04em',
               }}
             >
               {statusUi}
@@ -2023,6 +2063,7 @@ export default function CommandCenter() {
   const [pType, setPType] = useState(null)
   const [pLoad, setPLoad] = useState(null)
   const [pXtra, setPXtra] = useState(null)
+  const [detailTile, setDetailTile] = useState(null)
 
   const drillAnalysis = useCallback(
     (tab) => {
@@ -2177,6 +2218,8 @@ export default function CommandCenter() {
     actionPrefix: null,
     actionLine: null,
     onDrillAnalysis: () => drillAnalysis('overview'),
+    hideCompanyIdentity: true,
+    bandCompact: true,
   }
 
   const open = useCallback(
@@ -2298,99 +2341,118 @@ export default function CommandCenter() {
                   validation={main?.pipeline_validation}
                 />
               }
-              heroLeft={
-                main ? (
-                  main.structured_profit_story?.what_changed_key ? (
-                    <StructuredFinancialLayers data={main} tr={tr} lang={lang} variant="command" />
-                  ) : (
-                    <div
-                      style={{
-                        background: 'var(--bg-panel)',
-                        borderRadius: 13,
-                        padding: '18px 18px',
-                        borderTop: '2px solid rgba(0,212,170,0.35)',
-                        border: '1px solid var(--border)',
-                      }}
-                    >
-                      <div
-                        style={{
-                          fontSize: 11,
-                          fontWeight: 800,
-                          letterSpacing: '.08em',
-                          textTransform: 'uppercase',
-                          color: 'var(--accent)',
-                          marginBottom: 10,
-                        }}
-                      >
-                        {strictT(tr, lang, 'sfl_title_story')}
-                      </div>
-                      <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.5, margin: 0 }}>
-                        {strictT(tr, lang, 'cmd_cc_story_empty')}
-                      </p>
-                    </div>
-                  )
-                ) : null
-              }
-              heroRight={
-                main && primaryResolution ? (
-                  <PrimaryDecisionHero
-                    resolution={primaryResolution}
-                    impacts={impacts}
-                    tr={tr}
-                    lang={lang}
-                    causes={causes}
-                    allDecisions={decs}
-                    onOpen={open}
-                    realizedCausalItems={main?.realized_causal_items}
-                    onOpenFullAnalysis={() => drillAnalysis('overview')}
-                  />
-                ) : null
-              }
-              secondaryHealth={
-                main ? (
-                  <CommandCenterHealthComposite
-                    healthPanel={<HealthScorePanel {...healthPanelProps} pairedLayout={false} />}
-                    intelligence={intel}
-                    tr={tr}
-                    lang={lang}
-                    onSelectDomain={(panelType, payload) => open(panelType, payload, { causes, decisions: decs })}
-                  />
-                ) : null
-              }
-              secondaryFlow={main ? <CommandCenterMiniPnlFlow data={main} tr={tr} lang={lang} /> : null}
-              secondaryBranch={
-                <CommandCenterBranchStrip
-                  comparativeIntel={main?.comparative_intelligence}
-                  tr={tr}
-                  lang={lang}
-                  onOpenBranches={() => navigate('/branches')}
-                />
-              }
-              collapsed={
+              executiveBand={
                 <>
-                  <details className="cmd-phase1-details">
-                    <summary>{strictT(tr, lang, 'cmd_cc_collapsed_snapshot')}</summary>
-                    <div className="cmd-phase1-details-body">
-                      {main ? (
-                        <ExecutiveKpiRow
-                          kpis={kpis}
-                          cashflow={main?.cashflow || {}}
-                          main={main}
-                          tr={tr}
-                          lang={lang}
-                          alerts={alerts}
-                          onSelect={open}
-                          ctxLabel={ctxLabel}
-                          hideTitle={false}
-                          layout="command"
-                          supportingOnly={false}
-                        />
-                      ) : null}
+                  <div style={{ minWidth: 0 }}>
+                    {main ? (
+                      main.structured_profit_story?.what_changed_key ? (
+                        <StructuredFinancialLayers data={main} tr={tr} lang={lang} variant="command" />
+                      ) : (
+                        <div
+                          className="cmd-magic-story-empty"
+                          style={{
+                            background: 'var(--bg-panel)',
+                            borderRadius: 13,
+                            padding: '18px 18px',
+                            borderTop: '2px solid rgba(0,212,170,0.35)',
+                            border: '1px solid var(--border)',
+                          }}
+                        >
+                          <div
+                            style={{
+                              fontSize: 11,
+                              fontWeight: 800,
+                              letterSpacing: '.08em',
+                              textTransform: 'uppercase',
+                              color: 'var(--accent)',
+                              marginBottom: 10,
+                            }}
+                          >
+                            {strictT(tr, lang, 'sfl_title_story')}
+                          </div>
+                          <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.5, margin: 0 }}>
+                            {strictT(tr, lang, 'cmd_cc_story_empty')}
+                          </p>
+                        </div>
+                      )
+                    ) : null}
+                  </div>
+                  <div style={{ minWidth: 0 }}>
+                    {main && primaryResolution ? (
+                      <PrimaryDecisionHero
+                        resolution={primaryResolution}
+                        impacts={impacts}
+                        tr={tr}
+                        lang={lang}
+                        causes={causes}
+                        allDecisions={decs}
+                        onOpen={open}
+                        realizedCausalItems={main?.realized_causal_items}
+                        onOpenFullAnalysis={() => drillAnalysis('overview')}
+                      />
+                    ) : null}
+                  </div>
+                  <div style={{ minWidth: 0 }}>
+                    {main ? (
+                      <CommandCenterHealthComposite
+                        executiveBand
+                        healthPanel={<HealthScorePanel {...healthPanelProps} pairedLayout={false} />}
+                        intelligence={intel}
+                        tr={tr}
+                        lang={lang}
+                        onSelectDomain={(panelType, payload) => open(panelType, payload, { causes, decisions: decs })}
+                      />
+                    ) : null}
+                  </div>
+                </>
+              }
+              intelligenceDeck={
+                main ? (
+                  <div className="cmd-p3-intelligence">
+                    <div className="cmd-p3-intelligence__charts">
+                      <CommandCenterTripleTrendChart kpiBlock={main.kpi_block} tr={tr} lang={lang} />
+                      <CommandCenterBranchGroupedChart
+                        comparativeIntelligence={main.comparative_intelligence}
+                        tr={tr}
+                        lang={lang}
+                        onOpenBranches={() => navigate('/branches')}
+                      />
                     </div>
-                  </details>
-                  <details className="cmd-phase1-details">
-                    <summary>{strictT(tr, lang, 'cmd_cc_collapsed_signals')}</summary>
-                    <div className="cmd-phase1-details-body">
+                    {main.structured_profit_bridge ? (
+                      <CommandCenterProfitPathBridge bridge={main.structured_profit_bridge} tr={tr} lang={lang} />
+                    ) : (
+                      <div className="cmd-p3-bridge-fallback">
+                        <ExecutiveProfitBridgeChart kpiBlock={main.kpi_block} tr={tr} lang={lang} />
+                      </div>
+                    )}
+                  </div>
+                ) : null
+              }
+              tileStrip={
+                main ? (
+                  <CommandCenterSecondaryTiles
+                    tr={tr}
+                    lang={lang}
+                    activeId={detailTile}
+                    onSelect={setDetailTile}
+                    onClose={() => setDetailTile(null)}
+                  >
+                    {detailTile === 'snapshot' ? (
+                      <ExecutiveKpiRow
+                        kpis={kpis}
+                        cashflow={main?.cashflow || {}}
+                        main={main}
+                        tr={tr}
+                        lang={lang}
+                        alerts={alerts}
+                        onSelect={open}
+                        ctxLabel={ctxLabel}
+                        hideTitle={false}
+                        layout="command"
+                        supportingOnly={false}
+                      />
+                    ) : null}
+                    {detailTile === 'signals' ? (
                       <div
                         style={{
                           display: 'grid',
@@ -2421,12 +2483,9 @@ export default function CommandCenter() {
                           visualTier={2}
                         />
                       </div>
-                    </div>
-                  </details>
-                  <details className="cmd-phase1-details">
-                    <summary>{strictT(tr, lang, 'cmd_cc_collapsed_domains')}</summary>
-                    <div className="cmd-phase1-details-body">
-                      {main && intel ? (
+                    ) : null}
+                    {detailTile === 'domains' ? (
+                      main && intel ? (
                         <DomainGrid
                           intelligence={intel}
                           tr={tr}
@@ -2437,41 +2496,41 @@ export default function CommandCenter() {
                           alerts={alerts}
                           secondary={false}
                         />
-                      ) : null}
-                    </div>
-                  </details>
-                  <details className="cmd-phase1-details">
-                    <summary>{strictT(tr, lang, 'cmd_cc_collapsed_more')}</summary>
-                    <div className="cmd-phase1-details-body">
-                      <DecisionsSection
-                        key={
-                          primaryResolution
-                            ? primaryResolution.kind === 'expense'
-                              ? `pd-${primaryResolution.expense?.decision_id || 'x'}`
-                              : `pd-${primaryResolution.decision?.key || primaryResolution.decision?.domain || 'cfo'}`
-                            : 'dec-section'
-                        }
-                        expenseDecisionsV2={main?.expense_decisions_v2}
-                        expenseIntel={expenseIntel}
-                        realizedCausalItems={main?.realized_causal_items}
-                        tr={tr}
-                        lang={lang}
-                        onOpenDecision={(d) => open('causal_item', d, {})}
-                        visualTier={2}
-                        defaultCollapsed={false}
-                        omitDecisionIds={omitPrimaryExpenseId}
-                        omitCausalIds={omitCausalIds}
-                      />
-                      {Array.isArray(alerts) && alerts.length > 0 ? (
-                        <div style={{ marginTop: 14 }}>
-                          <AlertsBar alerts={alerts} tr={tr} lang={lang} onSelect={open} secondary />
-                        </div>
-                      ) : null}
-                    </div>
-                  </details>
-                  <details className="cmd-phase1-details">
-                    <summary>{strictT(tr, lang, 'cmd_cc_collapsed_narrative')}</summary>
-                    <div className="cmd-phase1-details-body">
+                      ) : (
+                        <p style={{ margin: 0, fontSize: 13, color: 'var(--text-secondary)' }}>
+                          {strictT(tr, lang, 'cmd_na_short')}
+                        </p>
+                      )
+                    ) : null}
+                    {detailTile === 'more' ? (
+                      <>
+                        <DecisionsSection
+                          key={
+                            primaryResolution
+                              ? primaryResolution.kind === 'expense'
+                                ? `pd-${primaryResolution.expense?.decision_id || 'x'}`
+                                : `pd-${primaryResolution.decision?.key || primaryResolution.decision?.domain || 'cfo'}`
+                              : 'dec-section'
+                          }
+                          expenseDecisionsV2={main?.expense_decisions_v2}
+                          expenseIntel={expenseIntel}
+                          realizedCausalItems={main?.realized_causal_items}
+                          tr={tr}
+                          lang={lang}
+                          onOpenDecision={(d) => open('causal_item', d, {})}
+                          visualTier={2}
+                          defaultCollapsed={false}
+                          omitDecisionIds={omitPrimaryExpenseId}
+                          omitCausalIds={omitCausalIds}
+                        />
+                        {Array.isArray(alerts) && alerts.length > 0 ? (
+                          <div style={{ marginTop: 14 }}>
+                            <AlertsBar alerts={alerts} tr={tr} lang={lang} onSelect={open} secondary />
+                          </div>
+                        ) : null}
+                      </>
+                    ) : null}
+                    {detailTile === 'narrative' ? (
                       <ExecutiveNarrativeStrip
                         narrative={narrative}
                         tr={tr}
@@ -2479,10 +2538,11 @@ export default function CommandCenter() {
                         compact={false}
                         onOpenFullAnalysis={() => drillAnalysis('overview')}
                       />
-                    </div>
-                  </details>
-                </>
+                    ) : null}
+                  </CommandCenterSecondaryTiles>
+                ) : null
               }
+              collapsed={null}
               footerSecondary={
                 <>
                   <div className="cmd-section-label" style={{ color: T.text3, letterSpacing: '.1em' }}>

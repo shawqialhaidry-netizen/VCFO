@@ -318,7 +318,7 @@ function BridgeBlock({ bridge, tr, lang }) {
   )
 }
 
-function ProfitStoryBlock({ story, tr, lang, compact }) {
+function ProfitStoryBlock({ story, tr, lang, compact, visualBlocks }) {
   if (!story || !story.what_changed_key) return null
   const st = story.summary_type
   const what = storyLine(tr, story.what_changed_key, story.what_changed_params)
@@ -338,6 +338,25 @@ function ProfitStoryBlock({ story, tr, lang, compact }) {
     color: 'var(--text-secondary)',
     lineHeight: 1.55,
     margin: 0,
+  }
+  if (visualBlocks) {
+    return (
+      <div className="cmd-magic-story-body">
+        {st ? <div className="cmd-magic-summary-badge">{tr(`sfl_summary_${st}`)}</div> : null}
+        <div className="cmd-magic-story-block">
+          <div className="cmd-magic-story-block__k">{tr('sfl_story_what')}</div>
+          <p className="cmd-magic-story-block__t">{what}</p>
+        </div>
+        <div className="cmd-magic-story-block">
+          <div className="cmd-magic-story-block__k">{tr('sfl_story_why')}</div>
+          <p className="cmd-magic-story-block__t">{why}</p>
+        </div>
+        <div className="cmd-magic-story-block">
+          <div className="cmd-magic-story-block__k">{tr('sfl_story_action')}</div>
+          <p className="cmd-magic-story-block__t">{act}</p>
+        </div>
+      </div>
+    )
   }
   return (
     <div>
@@ -552,9 +571,9 @@ export default function StructuredFinancialLayers({ data, tr, lang, variant = 'f
   if (variant === 'command') {
     if (!story?.what_changed_key) return null
     return (
-      <div className="cmd-financial-story-lead" style={{ ...CARD_STYLE, borderTop: '2px solid rgba(0,212,170,0.35)' }}>
-        <div style={{ ...H2, color: 'var(--accent)' }}>{tr('sfl_title_story')}</div>
-        <ProfitStoryBlock story={story} tr={tr} lang={lang} compact />
+      <div className="cmd-financial-story-lead cmd-magic-story-shell" style={{ ...CARD_STYLE, borderTop: '2px solid rgba(0,212,170,0.35)' }}>
+        <div className="cmd-magic-story-h2">{tr('sfl_title_story')}</div>
+        <ProfitStoryBlock story={story} tr={tr} lang={lang} compact visualBlocks />
       </div>
     )
   }

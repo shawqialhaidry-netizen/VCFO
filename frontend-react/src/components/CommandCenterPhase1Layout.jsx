@@ -1,51 +1,32 @@
 /**
- * Command Center Phase 1 — single reading path layout (no business logic).
+ * Command Center layout — Phase 3 executive band + intelligence deck + tile strip.
  */
 export default function CommandCenterPhase1Layout({
   contextRail,
-  heroLeft,
-  heroRight,
-  secondaryHealth,
-  secondaryFlow,
-  secondaryBranch,
+  executiveBand,
+  intelligenceDeck,
+  tileStrip,
   collapsed,
   footerSecondary,
 }) {
   return (
-    <div className="cmd-phase1-layout" style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0 }}>
+    <div
+      className="cmd-magic-root cmd-phase1-layout cmd-p3-root"
+      style={{ display: 'flex', flexDirection: 'column', gap: 20, minWidth: 0 }}
+    >
       {contextRail}
 
-      {/* B) Hero — story | primary decision */}
-      <div
-        className="cmd-phase1-hero"
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)',
-          gap: 16,
-          alignItems: 'stretch',
-        }}
-      >
-        <div style={{ minWidth: 0 }}>{heroLeft}</div>
-        <div style={{ minWidth: 0 }}>{heroRight}</div>
-      </div>
+      {/* A) Executive band — story | primary decision | financial health */}
+      <div className="cmd-p3-executive-band">{executiveBand}</div>
 
-      {/* C) Secondary — health | flow | branch */}
-      <div
-        className="cmd-phase1-secondary"
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'minmax(220px, 1.1fr) minmax(200px, 1fr) minmax(200px, 0.9fr)',
-          gap: 14,
-          alignItems: 'stretch',
-        }}
-      >
-        <div style={{ minWidth: 0 }}>{secondaryHealth}</div>
-        <div style={{ minWidth: 0 }}>{secondaryFlow}</div>
-        <div style={{ minWidth: 0 }}>{secondaryBranch}</div>
-      </div>
+      {/* Charts + profit path bridge */}
+      {intelligenceDeck}
 
-      {/* D) Collapsed detail */}
-      <div className="cmd-phase1-collapsed" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {/* Icon tiles → expand detail */}
+      {tileStrip}
+
+      {/* Lower collapsed (lighter) */}
+      <div className="cmd-phase1-collapsed" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         {collapsed}
       </div>
 
@@ -58,7 +39,7 @@ export default function CommandCenterPhase1Layout({
             display: 'flex',
             flexDirection: 'column',
             gap: 14,
-            opacity: 0.94,
+            opacity: 0.88,
           }}
         >
           {footerSecondary}
@@ -67,12 +48,7 @@ export default function CommandCenterPhase1Layout({
 
       <style>{`
         @media (max-width: 1100px) {
-          .cmd-phase1-hero { grid-template-columns: 1fr !important; }
-          .cmd-phase1-secondary { grid-template-columns: 1fr !important; }
-        }
-        @media (min-width: 1101px) and (max-width: 1320px) {
-          .cmd-phase1-secondary { grid-template-columns: 1fr 1fr !important; }
-          .cmd-phase1-secondary > div:last-child { grid-column: 1 / -1; }
+          .cmd-p3-executive-band { grid-template-columns: 1fr !important; }
         }
         .cmd-phase1-details { border-radius: 12px; border: 1px solid var(--border); background: rgba(255,255,255,0.02); }
         .cmd-phase1-details > summary {

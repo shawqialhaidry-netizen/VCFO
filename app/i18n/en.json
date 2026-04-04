@@ -2253,5 +2253,13 @@
   "cmd_cc_collapsed_signals": "Signals & expense context",
   "cmd_cc_collapsed_domains": "Domain scores (full)",
   "cmd_cc_collapsed_more": "More decisions & alerts",
-  "cmd_cc_collapsed_narrative": "Legacy executive narrative (reference)"
+  "cmd_cc_collapsed_narrative": "Legacy executive narrative (reference)",
+  "cmd_p3_trend_title": "Revenue, expenses & net profit",
+  "cmd_p3_branch_chart_title": "Branches — revenue, expense & implied profit",
+  "cmd_p3_branch_bar_expense": "Total expense",
+  "cmd_p3_branch_bar_profit": "Implied profit",
+  "cmd_p3_profit_path_title": "Period profit path",
+  "cmd_p3_tiles_aria": "Secondary detail sections",
+  "cmd_p3_tile_close": "Close",
+  "cmd_p3_anomaly_head": "Signal watch"
 }

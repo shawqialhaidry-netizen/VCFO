@@ -2253,5 +2253,13 @@
   "cmd_cc_collapsed_signals": "Sinyaller ve gider bağlamı",
   "cmd_cc_collapsed_domains": "Alan skorları (tam)",
   "cmd_cc_collapsed_more": "Diğer kararlar ve uyarılar",
-  "cmd_cc_collapsed_narrative": "Eski yönetici özeti (referans)"
+  "cmd_cc_collapsed_narrative": "Eski yönetici özeti (referans)",
+  "cmd_p3_trend_title": "Gelir, giderler ve net kâr",
+  "cmd_p3_branch_chart_title": "Şubeler — gelir, gider ve örtük kâr",
+  "cmd_p3_branch_bar_expense": "Toplam gider",
+  "cmd_p3_branch_bar_profit": "Örtük kâr",
+  "cmd_p3_profit_path_title": "Dönem kâr yolu",
+  "cmd_p3_tiles_aria": "İkincil detay bölümleri",
+  "cmd_p3_tile_close": "Kapat",
+  "cmd_p3_anomaly_head": "Sinyal takibi"
 }

@@ -2253,5 +2253,13 @@
   "cmd_cc_collapsed_signals": "إشارات وسياق المصاريف",
   "cmd_cc_collapsed_domains": "درجات المجالات (كامل)",
   "cmd_cc_collapsed_more": "مزيد من القرارات والتنبيهات",
-  "cmd_cc_collapsed_narrative": "سرد تنفيذي قديم (مرجع)"
+  "cmd_cc_collapsed_narrative": "سرد تنفيذي قديم (مرجع)",
+  "cmd_p3_trend_title": "الإيراد والمصروفات وصافي الربح",
+  "cmd_p3_branch_chart_title": "الفروع — إيراد ومصروف وربح ضمني",
+  "cmd_p3_branch_bar_expense": "إجمالي المصروف",
+  "cmd_p3_branch_bar_profit": "ربح ضمني",
+  "cmd_p3_profit_path_title": "مسار ربح الفترة",
+  "cmd_p3_tiles_aria": "أقسام تفصيلية ثانوية",
+  "cmd_p3_tile_close": "إغلاق",
+  "cmd_p3_anomaly_head": "مراقبة الإشارات"
 }

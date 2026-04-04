@@ -80,6 +80,60 @@ export function extractProfitBridge(kpiBlock) {
   }
 }
 
+/**
+ * Align revenue, expenses (COGS+OpEx), net_profit per period for multi-line chart.
+ */
+export function extractTripleTrendRows(kpiBlock) {
+  const kb = kpiBlock || {}
+  const periods = kb.periods || []
+  const rev = kb.series?.revenue || []
+  const exp = kb.series?.expenses || []
+  const np = kb.series?.net_profit || []
+  const n = Math.min(periods.length, rev.length, exp.length, np.length)
+  if (n < 2) return null
+  const out = []
+  for (let i = 0; i < n; i++) {
+    const r = rev[i]
+    const e = exp[i]
+    const p = np[i]
+    const ok =
+      (r == null || Number.isFinite(Number(r))) &&
+      (e == null || Number.isFinite(Number(e))) &&
+      (p == null || Number.isFinite(Number(p)))
+    if (!ok) continue
+    if (r == null && e == null && p == null) continue
+    out.push({
+      period: String(periods[i] || '').slice(0, 7),
+      revenue: r != null ? Number(r) : null,
+      expenses: e != null ? Number(e) : null,
+      net_profit: p != null ? Number(p) : null,
+    })
+  }
+  return out.length >= 2 ? out : null
+}
+
+/**
+ * Grouped compare: revenue, total_expense, implied profit (rev − expense) per branch.
+ */
+export function extractBranchGroupedCompareRows(comparativeIntelligence, maxBranches = 8) {
+  const eff = comparativeIntelligence?.efficiency_ranking?.by_expense_pct_of_revenue_desc || []
+  if (!Array.isArray(eff) || eff.length === 0) return null
+  const rows = []
+  for (const b of eff.slice(0, maxBranches)) {
+    const rev = b.revenue != null && Number.isFinite(Number(b.revenue)) ? Number(b.revenue) : null
+    const exp = b.total_expense != null && Number.isFinite(Number(b.total_expense)) ? Number(b.total_expense) : null
+    if (rev == null && exp == null) continue
+    const profit = rev != null && exp != null ? rev - exp : null
+    rows.push({
+      name: String(b.branch_name || '—').slice(0, 22),
+      revenue: rev,
+      expenses: exp,
+      profit,
+    })
+  }
+  return rows.length ? rows : null
+}
+
 export function extractBranchCompareRows(comparativeIntelligence, metric) {
   const ci = comparativeIntelligence || {}
   const eff = ci.efficiency_ranking?.by_expense_pct_of_revenue_desc || []
