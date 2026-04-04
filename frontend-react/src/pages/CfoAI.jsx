@@ -89,8 +89,8 @@ function extractBranch(text, branches=[]) {
 }
 
 // ── System prompt (dense + data-grounded) ────────────────────────────────────
-function buildPrompt(c, lg, memory={}, tone='auto') {
-  if (!c) return lg==='ar'?'أنت مساعد مالي. لا توجد بيانات.':'You are a CFO assistant. No data loaded.'
+function buildPrompt(c, lg, memory={}, tone='auto', tr) {
+  if (!c) return tr('cfo_ai_prompt_no_data')
   const co=c.company||{}, d=c.dashboard||{}, s=c.statements||{}, an=c.analysis||{}
   const cf=c.cashflow||{}, br=c.branches||{}, val=c.validation||{}, decs=c.decisions||{}
   const liq=an.liquidity||{}, eff=an.efficiency||{}
@@ -101,7 +101,9 @@ function buildPrompt(c, lg, memory={}, tone='auto') {
   if (val.approximation_detected) valBlock+=' | ⚠ نسبة التداول تقريبية'
   if (val.blocking) valBlock+=' | 🚫 مشكلة حرجة'
   const memStr=[memory.lastIntent&&`موضوع: ${memory.lastIntent}`,memory.lastBranch&&`فرع: ${memory.lastBranch}`].filter(Boolean).join(' · ')
-  const decLines=(decs.decisions||[]).slice(0,3).map((dd,i)=>`${i+1}. ${dd.action_type} (${dd.priority}): ${dd.rationale}`).join('\n')||'—'
+  const rcList = c.realized_causal_items || []
+  const decLines =
+    rcList.slice(0, 3).map((it, i) => `${i + 1}. ${String(it.change_text || it.action_text || '').trim()}`).join('\n') || '—'
 
   const toneRule = {
     quick:    'أجب بإيجاز شديد — 3-4 أسطر فقط. الأرقام أولاً.',
@@ -415,10 +417,29 @@ export default function CfoAI() {
       const dec=(j.decisions?.decisions||[])[0], hasLoss=(j.branches?.branches||[]).some(b=>b.is_loss)
       const wk=j.branches?.weakest
       const marginStr = nm != null && Number.isFinite(Number(nm)) ? formatPctForLang(Number(nm), 1, lang) : '?'
+      const rc0 = (j.realized_causal_items || [])[0]
+      const causalWelcome = rc0
+        ? String(rc0.action_text || rc0.change_text || '').trim()
+        : ''
 
-      const welcome = lang==='ar'
-        ? `مرحباً 👋 أنا مستشارك المالي لـ **${co}**.\n\nالفترة **${j.period||'—'}** · النافذة ${window_} · هامش صافي **${marginStr}** · خطر **${rp}**\n\n${vs!=='PASS'?`⚠ سلامة البيانات: **${vs}**\n\n`:''}${dec?`أولى التوصيات: **${dec.action_type}** — ${dec.rationale}\n\n`:''}${hasLoss?`⚠ فرع خاسر: **${wk}**\n\n`:''}اسألني عن أي شيء مالي.`
-        : `Hello 👋 I'm your AI CFO Advisor for **${co}**.\n\nPeriod **${j.period||'—'}** · Window ${window_} · Net Margin **${marginStr}** · Risk **${rp}**\n\n${vs!=='PASS'?`⚠ Data validation: **${vs}**\n\n`:''}${dec?`Top recommendation: **${dec.action_type}** — ${dec.rationale}\n\n`:''}Ask me anything about the financials.`
+      const validationBlock = vs !== 'PASS' ? tr('cfo_ai_welcome_val', { status: vs }) : ''
+      const decBlock =
+        causalWelcome && dec
+          ? tr('cfo_ai_welcome_dec', { action: dec.action_type || 'CFO', rationale: causalWelcome })
+          : causalWelcome
+            ? tr('cfo_ai_welcome_dec', { action: 'CFO', rationale: causalWelcome })
+            : ''
+      const lossBlock = hasLoss ? tr('cfo_ai_welcome_loss', { branch: wk }) : ''
+      const welcome = tr('cfo_ai_welcome_main', {
+        company: co,
+        period: j.period || '—',
+        window: window_,
+        margin: marginStr,
+        risk: rp,
+        validation_block: validationBlock,
+        dec_block: decBlock,
+        loss_block: lossBlock,
+      })
 
       setMessages([{ role:'assistant', content:welcome, suggestions:getSuggestions('executive_summary', tr) }])
     } catch(e) { console.error('CfoAI ctx:', e) }
@@ -428,14 +449,13 @@ export default function CfoAI() {
   useEffect(() => { loadCtx() }, [loadCtx])
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior:'smooth' }) }, [messages])
 
-  // ── Error messages — Arabic / English ────────────────────────────────────────
+  // ── Error messages (en / ar / tr via i18n) ───────────────────────────────────
   function errMsg(code) {
-    const ar = lang === 'ar'
-    if (code === 401) return ar ? 'انتهت الجلسة، سجّل الدخول مرة أخرى.' : 'Session expired. Please log in again.'
-    if (code === 403) return ar ? 'ليست لديك صلاحية للوصول إلى هذه الشركة.' : 'Access denied for this company.'
-    if (code === 503) return ar ? 'خدمة الذكاء غير مهيأة حالياً.' : 'AI service not configured.'
-    if (code === 504) return ar ? 'انتهت مهلة الاستجابة، حاول مرة أخرى.' : 'AI service timed out. Please retry.'
-    return ar ? 'حدث خطأ في الاتصال بالمستشار المالي.' : 'Connection error. Please try again.'
+    if (code === 401) return tr('cfo_ai_err_401')
+    if (code === 403) return tr('cfo_ai_err_403')
+    if (code === 503) return tr('cfo_ai_err_503')
+    if (code === 504) return tr('cfo_ai_err_504')
+    return tr('cfo_ai_err_network')
   }
 
   // ── Send message (routes through VCFO backend — never direct to Anthropic) ───

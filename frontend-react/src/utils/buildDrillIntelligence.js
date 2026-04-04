@@ -73,21 +73,36 @@ function firstKpiSnapshotLine(kpis, t, lang) {
   return null
 }
 
+function pickExpenseCausalLine(items) {
+  if (!Array.isArray(items)) return ''
+  const hit = items.find((it) => String(it.id || '').toLowerCase().includes('expense'))
+  const row = hit || items[0]
+  if (!row) return ''
+  return String(row.action_text || row.change_text || '').trim()
+}
+
 /**
  * @param {object | null | undefined} primaryResolution
  * @param {(k: string, p?: Record<string, unknown>) => string} t
+ * @param {object[] | undefined} realizedCausalItems — executive `realized_causal_items`
  */
-export function primaryDecisionTieLine(primaryResolution, t) {
+export function primaryDecisionTieLine(primaryResolution, t, realizedCausalItems) {
   if (!primaryResolution) return null
   if (primaryResolution.kind === 'expense') {
     const ex = primaryResolution.expense
-    if (!ex?.title) return null
     if (ex.decision_id === '_cmd_baseline') return null
-    return t('drill_intel_follow_primary', { title: sliceTitle(ex.title, 100) })
+    const line =
+      String(ex?.causal_realized?.action_text || ex?.causal_realized?.change_text || '').trim() ||
+      pickExpenseCausalLine(realizedCausalItems)
+    if (!line) return null
+    return t('drill_intel_follow_primary', { title: sliceTitle(line, 100) })
   }
   const d = primaryResolution.decision
-  if (!d?.title) return null
-  return t('drill_intel_follow_primary', { title: sliceTitle(d.title, 100) })
+  const line =
+    String(d?.causal_realized?.action_text || d?.causal_realized?.change_text || '').trim() ||
+    pickExpenseCausalLine(realizedCausalItems)
+  if (!line) return null
+  return t('drill_intel_follow_primary', { title: sliceTitle(line, 100) })
 }
 
 function resolveKpis(bundle, extra) {
@@ -210,16 +225,36 @@ function pushRiskRatiosFromObject(obj, t, arr, max = 2) {
 
 function primaryTitleSnippet(primaryResolution) {
   if (!primaryResolution) return ''
-  if (primaryResolution.kind === 'expense') return sliceTitle(primaryResolution.expense?.title, 24).toLowerCase()
-  return sliceTitle(primaryResolution.decision?.title, 24).toLowerCase()
+  if (primaryResolution.kind === 'expense') {
+    const ex = primaryResolution.expense
+    const ax = ex?.causal_realized?.action_text || ex?.causal_realized?.change_text
+    if (ax) return sliceTitle(ax, 24).toLowerCase()
+    return sliceTitle(ex?.title, 24).toLowerCase()
+  }
+  const d = primaryResolution.decision
+  const ax = d?.causal_realized?.action_text || d?.causal_realized?.change_text
+  if (ax) return sliceTitle(ax, 24).toLowerCase()
+  return sliceTitle(d?.title, 24).toLowerCase()
 }
 
-function pushDecisionDo(primaryResolution, decisions, t, doRaw) {
-  const pd = primaryDecisionTieLine(primaryResolution, t)
+function pushDecisionDo(primaryResolution, decisions, t, doRaw, realizedCausalItems) {
+  const pd = primaryDecisionTieLine(primaryResolution, t, realizedCausalItems)
   if (pd) doRaw.push({ text: pd })
 
-  if (!Array.isArray(decisions) || !decisions[0]?.title) return
-  const title = sliceTitle(decisions[0].title, 90)
+  if (!Array.isArray(decisions) || !decisions[0]) return
+  const d0 = decisions[0]
+  const causalLine = String(d0.causal_realized?.action_text || d0.causal_realized?.change_text || '').trim()
+  if (causalLine) {
+    const title = sliceTitle(causalLine, 90)
+    const snippet = primaryTitleSnippet(primaryResolution)
+    const head = title.toLowerCase().slice(0, 22)
+    if (snippet && head && snippet.includes(head)) return
+    if (pd && normLine(pd).includes(normLine(title).slice(0, 18))) return
+    doRaw.push({ text: t('drill_intel_ranked_decision', { title }) })
+    return
+  }
+  if (!d0.title) return
+  const title = sliceTitle(d0.title, 90)
   const snippet = primaryTitleSnippet(primaryResolution)
   const head = title.toLowerCase().slice(0, 22)
   if (snippet && head && snippet.includes(head)) return
@@ -238,6 +273,18 @@ function pushDecisionDo(primaryResolution, decisions, t, doRaw) {
  * @returns {{ what: Array<{ text: string }>, why: Array<{ text: string }>, do: Array<{ text: string }> }}
  */
 export function buildDrillIntelligence({ panelType, payload = {}, extra = {}, t, lang = 'en' }) {
+  if (panelType === 'causal_item') {
+    const c = payload || {}
+    const w = []
+    const y = []
+    const d0 = []
+    if (c.change_text) w.push({ text: String(c.change_text) })
+    if (c.cause_text) y.push({ text: String(c.cause_text) })
+    if (c.action_text) d0.push({ text: String(c.action_text) })
+    const merged = dedupeAcrossSections(dedupeCap(w, MAX), dedupeCap(y, MAX), dedupeCap(d0, MAX), MAX)
+    return { what: merged.what, why: merged.why, do: merged.do }
+  }
+
   const bundle = extra?.drillIntelBundle || {}
   const kpis = resolveKpis(bundle, extra)
   const primaryResolution = bundle.primaryResolution
@@ -408,7 +455,7 @@ export function buildDrillIntelligence({ panelType, payload = {}, extra = {}, t,
     }
   }
 
-  pushDecisionDo(primaryResolution, decisions, t, doRaw)
+  pushDecisionDo(primaryResolution, decisions, t, doRaw, bundle.realizedCausalItems)
 
   let what = dedupeCap(whatRaw, MAX)
   let why = dedupeCap(whyRaw, MAX)

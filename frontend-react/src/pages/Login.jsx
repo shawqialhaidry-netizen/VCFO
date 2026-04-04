@@ -1,10 +1,12 @@
 import { useState } from 'react'
 import { useAuth } from '../context/AuthContext.jsx'
 import { useCompany } from '../context/CompanyContext.jsx'
+import { useLang } from '../context/LangContext.jsx'
 
 const API = '/api/v1'
 
 export default function Login() {
+  const { tr }               = useLang()
   const { setAuth }          = useAuth()
   const { reloadCompanies }  = useCompany()
   const [mode, setMode]      = useState('login')
@@ -24,7 +26,7 @@ export default function Login() {
           body: JSON.stringify({ email, password, full_name: name }),
         })
         const dReg = await rReg.json()
-        if (!rReg.ok) { setError(dReg.detail || 'Registration failed'); setLoading(false); return }
+        if (!rReg.ok) { setError(dReg.detail || tr('login_err_register_failed')); setLoading(false); return }
       }
 
       const rLogin = await fetch(`${API}/auth/login`, {
@@ -32,13 +34,13 @@ export default function Login() {
         body: JSON.stringify({ email, password }),
       })
       const dLogin = await rLogin.json()
-      if (!rLogin.ok) { setError(dLogin.detail || 'Invalid email or password'); setLoading(false); return }
+      if (!rLogin.ok) { setError(dLogin.detail || tr('login_err_invalid_credentials')); setLoading(false); return }
 
       // Store auth first, then reload companies with the new token
       setAuth({ token: dLogin.access_token, user: dLogin.user })
       reloadCompanies()
     } catch {
-      setError('Connection error — is the server running?')
+      setError(tr('login_err_connection'))
     }
     setLoading(false)
   }

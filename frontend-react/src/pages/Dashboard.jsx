@@ -613,14 +613,18 @@ function Legend({color,label}) {
 }
 
 // ── Phase 6.2: KPI cause derivation ─────────────────────────────────────────
-// Reads ONLY: d.decisions[].reason, d.cashflow.flags, d.root_causes[]
+// Reads: d.decisions[].causal_realized, d.cashflow.flags, d.root_causes[]
 function kpiCause(type, data, tr, lang) {
   const d = data?.data || {}
   const decs   = d.decisions   || []
   const causes = d.root_causes || []
   const cf     = d.cashflow    || {}
   const ratios = d.intelligence?.ratios || {}
-  const decReason = domain => { const x=decs.find(v=>v.domain===domain); return x?.reason?(x.reason.split('. ')[0]||x.reason):null }
+  const decReason = (domain) => {
+    const x = decs.find((v) => v.domain === domain)
+    const t = String(x?.causal_realized?.change_text || x?.causal_realized?.cause_text || '').trim()
+    return t ? t.split('. ')[0] || t : null
+  }
   const rcTitle   = domain => { const c=causes.find(x=>x.domain===domain||x.domain==='cross_domain'); return c?.title||null }
   const clip = s => (s && s.length > 60 ? s.slice(0, 57) : s)
   switch(type) {
@@ -723,9 +727,9 @@ function HealthBlock({ score, data, tr, lang }) {
 
   const headline = tr(`dash_health_narrative_${status}`)
 
-  // Supporting detail — first sentence of top decision reason
   const topDec = (d.decisions || [])[0]
-  const summary = topDec?.reason ? topDec.reason.split('. ')[0] : null
+  const cr0 = topDec?.causal_realized || {}
+  const summary = String(cr0.change_text || cr0.cause_text || '').trim().split('\n')[0] || null
 
   // Ring geometry
   const R=52, cx=62, cy=62, pct=Math.max(0,Math.min(100,score))/100
@@ -793,19 +797,16 @@ function AIInsightBlock({ data, lang, tr }) {  const d  = data?.data || {}
   const topIns  = stmtIns[0]
   const topDec  = (d.decisions || [])[0]
 
+  const cr = topDec?.causal_realized || {}
   const insightText = topIns?.message
-  ? trDynamic(tr, topIns.message)
-  : topDec?.reason
-    ? trDynamic(tr, topDec.reason.split('. ')[0])
-    : null
+    ? trDynamic(tr, topIns.message)
+    : topDec
+      ? trDynamic(tr, String(cr.change_text || cr.cause_text || '').trim().split('. ')[0])
+      : null
 
-const actionText = topDec?.action
-  ? trDynamic(
-      tr,
-      topDec.action.replace(/^1[.)]\.?\s*/,'').split('\n')[0].split(';')[0].trim(),
-      80
-    )
-  : null
+  const actionText = topDec
+    ? trDynamic(tr, String(cr.action_text || '').trim().split('\n')[0].split(';')[0].trim(), 80)
+    : null
 
   if (!insightText && !actionText) return null
 
@@ -3036,10 +3037,10 @@ function DecisionsPanelV2({tr, selectedId, lang}) {
             <span style={{marginLeft:'auto'}}><Badge label={tr(`urgency_${dec.urgency}`)||dec.urgency} color={uc}/></span>
           </div>
           <div style={{fontSize:13,fontWeight:700,color:C.text1,lineHeight:1.4,marginBottom:8}}>
-            {dec.title}
+            {String(dec.causal_realized?.change_text || dec.causal_realized?.action_text || '').trim() || '—'}
           </div>
           <div style={{fontSize:11,color:C.text2,lineHeight:1.5,marginBottom:10}}>
-            {dec.reason}
+            {String(dec.causal_realized?.cause_text || '').trim() || '—'}
           </div>
         </div>
         <div style={{background:`${dc}08`,borderTop:`1px solid ${dc}20`,
@@ -3047,7 +3048,9 @@ function DecisionsPanelV2({tr, selectedId, lang}) {
           <div>
             <div style={{fontSize:9,fontWeight:800,color:dc,textTransform:'uppercase',
               letterSpacing:'.06em',marginBottom:3}}>{tr('dec_v2_action')}</div>
-            <div style={{fontSize:11,color:C.text2,lineHeight:1.5}}>{dec.action}</div>
+            <div style={{fontSize:11,color:C.text2,lineHeight:1.5}}>
+              {String(dec.causal_realized?.action_text || '').trim() || '—'}
+            </div>
           </div>
           <div style={{display:'flex',gap:8,flexWrap:'wrap',marginTop:2}}>
             <span style={{fontSize:10,color:C.text2,background:BG.panel,

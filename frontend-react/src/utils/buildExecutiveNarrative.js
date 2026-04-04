@@ -446,52 +446,44 @@ export function buildExecutiveNarrative(payload = {}, options = {}) {
       whatChanged: { lines: [L.stableWhat], period: '' },
       why: { lines: [L.whyNoNumber], sources: ['fallback'] },
       whatToDo: { lines: [L.doDefault], sources: ['fallback'] },
-      hasContent: true,
+      hasContent: false,
       healthHeadline: '',
       actionPrefix: L.actionPrefix,
       actionLine: null,
     }
   }
 
-  const wc = payload.financial_brain?.what_changed
-  let whatLines = buildWhatLines(payload, L, lang, mw).slice(0, 2)
+  const items = Array.isArray(payload.realized_causal_items) ? payload.realized_causal_items : []
+
+  /** @param {'change_text'|'cause_text'|'action_text'} field */
+  const takeField = (field, max) => {
+    const lines = []
+    for (const it of items) {
+      const t = String(it[field] || '').trim()
+      if (!t) continue
+      if (!lines.includes(t)) lines.push(t)
+      if (lines.length >= max) break
+    }
+    return lines
+  }
+
+  let whatLines = takeField('change_text', MAX_COL)
   if (!whatLines.length) whatLines = [L.stableWhat]
 
-  const rawWhyLines = buildWhyLines(payload, L, lang, translate)
-  const metricWhy = pickWhyNumberLine(payload, L, lang)
-  let whyLines = rawWhyLines.slice()
-  if (!whyLines.length) {
-    whyLines = metricWhy ? [metricWhy] : [L.whyNoNumber]
-  } else {
-    if (!whyLines.some(lineHasDigit) && metricWhy) _dedupePush(whyLines, metricWhy)
-    whyLines = whyLines.slice(0, MAX_COL)
-  }
+  let whyLines = takeField('cause_text', MAX_COL)
+  if (!whyLines.length) whyLines = [L.whyNoNumber]
 
-  const rawDoLines = buildDoLines(payload, L, lang)
-  let doLines = rawDoLines.length ? rawDoLines.slice(0, MAX_COL) : [L.doDefault]
-  const healthHeadline = buildHealthHeadline(payload, L, lang)
-  const actionLine = rawDoLines.length ? rawDoLines[0] : null
+  let doLines = takeField('action_text', MAX_COL)
+  if (!doLines.length) doLines = [L.doDefault]
 
-  const whatChanged = {
-    lines: whatLines,
-    period: wc?.period ? String(wc.period) : '',
-  }
-
-  let whySources = ['structured']
-  if (!rawWhyLines.length) {
-    whySources = metricWhy ? ['metric_context'] : ['fallback']
-  } else if (metricWhy && !rawWhyLines.some(lineHasDigit) && whyLines.includes(metricWhy)) {
-    whySources = ['structured', 'metric_context']
-  }
-
-  let doSources = ['expense_decisions_v2']
-  if (!rawDoLines.length) doSources = ['fallback']
+  const healthHeadline = whatLines[0] || ''
+  const actionLine = doLines[0] || null
 
   return {
-    whatChanged,
-    why: { lines: whyLines, sources: whySources },
-    whatToDo: { lines: doLines, sources: doSources },
-    hasContent: true,
+    whatChanged: { lines: whatLines, period: '' },
+    why: { lines: whyLines, sources: items.length ? ['causal'] : ['fallback'] },
+    whatToDo: { lines: doLines, sources: items.length ? ['causal'] : ['fallback'] },
+    hasContent: items.length > 0,
     healthHeadline,
     actionPrefix: L.actionPrefix,
     actionLine,

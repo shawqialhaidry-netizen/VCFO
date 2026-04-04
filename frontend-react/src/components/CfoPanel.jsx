@@ -92,6 +92,18 @@ function buildResponse(question, domain, d, fcData, lang, tr) {
     const match = s.match(/^1\)?\s*(.+?)(?:\n|$)/m) || s.match(/^(.+?)(?:\n|$)/)
     return match ? match[1].trim().slice(0, 90) : s.slice(0, 90)
   }
+  const crHead = (dec) => {
+    const t = String(dec?.causal_realized?.change_text || dec?.causal_realized?.action_text || '').trim()
+    return t ? first(t) : null
+  }
+  const crCause = (dec) => {
+    const t = String(dec?.causal_realized?.cause_text || '').trim()
+    return t ? first(t) : null
+  }
+  const crAction = (dec) => {
+    const t = String(dec?.causal_realized?.action_text || '').trim()
+    return t ? first(t) : null
+  }
 
   // Build sections
   const sections = []
@@ -113,9 +125,9 @@ function buildResponse(question, domain, d, fcData, lang, tr) {
         label: tr('cfo_panel_action_priorities'),
         items: topDecs.map((dec, i) => ({
           num: i + 1,
-          title: dec.title,
+          title: crHead(dec) || '—',
           urgency: dec.urgency,
-          step: firstStep(dec.action)
+          step: crAction(dec) || crCause(dec)
         }))
       })
     }
@@ -131,9 +143,10 @@ function buildResponse(question, domain, d, fcData, lang, tr) {
         ? `${tr('net_margin')} ${formatPctForLang(nm.value, 1, lang)} — ${tr(`kpi_margin_status_${nm.status}`)}`
         : tr('margin_data_unavailable')
     })
-    if (dec?.reason) sections.push({ icon: '🔍', label: tr('cause'), text: first(dec.reason) })
-    if (dec?.action) sections.push({ icon: '⚡', label: tr('action'), text: firstStep(dec.action) })
-    if (dec?.expected_effect) sections.push({ icon: '✨', label: tr('expected_impact'), text: first(dec.expected_effect) })
+    const cC = crCause(dec)
+    const cA = crAction(dec)
+    if (cC) sections.push({ icon: '🔍', label: tr('cause'), text: cC })
+    if (cA) sections.push({ icon: '⚡', label: tr('action'), text: cA })
 
   } else if (domain === 'cashflow' || domain === 'liquidity') {
     const decLiq  = getDec('liquidity')
@@ -148,9 +161,12 @@ function buildResponse(question, domain, d, fcData, lang, tr) {
         ? `${tr('current_ratio')} ${formatMultipleForLang(cr.value, 2, lang)} — ${tr(`ratio_status_${cr.status}`)}`
         : (cfIns ? first(cfIns.message) : tr('liquidity_data_unavailable'))
     })
-    if (decLiq?.reason) sections.push({ icon: '🔍', label: tr('cause'), text: first(decLiq.reason) })
-    if (decEff?.reason && domain === 'cashflow') sections.push({ icon: '📋', label: tr('cashflow_operating'), text: first(decEff.reason) })
-    if (decLiq?.action) sections.push({ icon: '⚡', label: tr('action'), text: firstStep(decLiq.action) })
+    const liqC = crCause(decLiq)
+    const liqA = crAction(decLiq)
+    const effC = crCause(decEff)
+    if (liqC) sections.push({ icon: '🔍', label: tr('cause'), text: liqC })
+    if (effC && domain === 'cashflow') sections.push({ icon: '📋', label: tr('cashflow_operating'), text: effC })
+    if (liqA) sections.push({ icon: '⚡', label: tr('action'), text: liqA })
 
   } else if (domain === 'efficiency') {
     const dec = getDec('efficiency')
@@ -163,9 +179,10 @@ function buildResponse(question, domain, d, fcData, lang, tr) {
         ? tr('dso_days_line', { days: formatDays(dsoV.value) })
         : tr('efficiency_data_unavailable')
     })
-    if (dec?.reason) sections.push({ icon: '🔍', label: tr('cause'), text: first(dec.reason) })
-    if (dec?.action) sections.push({ icon: '⚡', label: tr('action'), text: firstStep(dec.action) })
-    if (dec?.expected_effect) sections.push({ icon: '✨', label: tr('effect'), text: first(dec.expected_effect) })
+    const eC = crCause(dec)
+    const eA = crAction(dec)
+    if (eC) sections.push({ icon: '🔍', label: tr('cause'), text: eC })
+    if (eA) sections.push({ icon: '⚡', label: tr('action'), text: eA })
 
   } else if (domain === 'leverage') {
     const dr    = ratios?.leverage?.debt_ratio_pct
@@ -179,7 +196,8 @@ function buildResponse(question, domain, d, fcData, lang, tr) {
     })
     if (topAl) sections.push({ icon: '🚨', label: tr('alert'), text: topAl.message || topAl.title })
     const dec = getDec('leverage') || getDec('liquidity')
-    if (dec?.action) sections.push({ icon: '⚡', label: tr('action'), text: firstStep(dec.action) })
+    const lvA = crAction(dec)
+    if (lvA) sections.push({ icon: '⚡', label: tr('action'), text: lvA })
 
   } else if (domain === 'growth') {
     const dec   = getDec('growth')
@@ -191,8 +209,10 @@ function buildResponse(question, domain, d, fcData, lang, tr) {
         ? `${tr('revenue_trend')}: ${revT==='up'?tr('trend_up'):revT==='down'?tr('trend_down'):tr('trend_stable')}`
         : tr('revenue_trend_unavailable')
     })
-    if (dec?.reason) sections.push({ icon: '🔍', label: tr('cause'), text: first(dec.reason) })
-    if (dec?.action) sections.push({ icon: '⚡', label: tr('action'), text: firstStep(dec.action) })
+    const gC = crCause(dec)
+    const gA = crAction(dec)
+    if (gC) sections.push({ icon: '🔍', label: tr('cause'), text: gC })
+    if (gA) sections.push({ icon: '⚡', label: tr('action'), text: gA })
   }
 
   // Forecast section — always appended if available

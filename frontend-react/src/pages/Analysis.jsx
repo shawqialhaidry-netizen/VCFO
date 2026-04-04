@@ -239,7 +239,16 @@ function IssueCard({issue,tr,lang,onOpen}) {
         {issue.decision&&<span style={{fontSize:9,color:'var(--accent)',opacity:.8}}>→ {tr('exec_actions')}</span>}
       </div>
       <p style={{fontSize:11,color:'var(--text-secondary)',margin:0,lineHeight:1.6}}>
-        <CmdServerText lang={lang} tr={tr}>{issue.reason}</CmdServerText>
+        <CmdServerText lang={lang} tr={tr}>
+          {issue.decision?.causal_realized
+            ? String(
+                issue.decision.causal_realized.cause_text ||
+                  issue.decision.causal_realized.action_text ||
+                  issue.decision.causal_realized.change_text ||
+                  '',
+              ).trim() || issue.reason
+            : issue.reason}
+        </CmdServerText>
       </p>
     </div>
   )
@@ -247,6 +256,15 @@ function IssueCard({issue,tr,lang,onOpen}) {
 
 function OpportunityCard({opp,tr,lang,onOpen}) {
   const dc = domC[opp.domain]||'var(--accent)'
+  const reasonShow =
+    opp.decision?.causal_realized
+      ? String(
+          opp.decision.causal_realized.cause_text ||
+            opp.decision.causal_realized.action_text ||
+            opp.decision.causal_realized.change_text ||
+            '',
+        ).trim() || opp.reason
+      : opp.reason
   return (
     <div onClick={()=>opp.decision&&onOpen(opp.decision)}
       style={{background:'var(--bg-elevated)',border:'1px solid rgba(52,211,153,.18)',
@@ -261,7 +279,7 @@ function OpportunityCard({opp,tr,lang,onOpen}) {
         </span>
       </div>
       <p style={{fontSize:11,color:'var(--text-secondary)',margin:0,lineHeight:1.6}}>
-        <CmdServerText lang={lang} tr={tr}>{opp.reason}</CmdServerText>
+        <CmdServerText lang={lang} tr={tr}>{reasonShow}</CmdServerText>
       </p>
       {opp.impact_value&&(
         <div style={{marginTop:6,fontSize:11,fontWeight:800,color:'var(--green)',fontFamily:'var(--font-mono)'}}>{opp.impact_value} {tr('impact_expected')}</div>
@@ -292,11 +310,15 @@ function DecCard({dec,tr,lang,impacts,onOpen}) {
         </span>
       </div>
       <div style={{fontSize:13,fontWeight:700,color:'#ffffff',marginBottom:4}}>
-        <CmdServerText lang={lang} tr={tr}>{dec.title}</CmdServerText>
+        <CmdServerText lang={lang} tr={tr}>
+          {String(dec.causal_realized?.change_text || dec.causal_realized?.action_text || '').trim() || '—'}
+        </CmdServerText>
       </div>
       <div style={{fontSize:11,color:'var(--text-secondary)',lineHeight:1.5,marginBottom:imp?.value?6:0,
         display:'-webkit-box',WebkitLineClamp:2,WebkitBoxOrient:'vertical',overflow:'hidden'}}>
-        <CmdServerText lang={lang} tr={tr}>{dec.reason}</CmdServerText>
+        <CmdServerText lang={lang} tr={tr}>
+          {String(dec.causal_realized?.cause_text || dec.causal_realized?.action_text || '').trim() || '—'}
+        </CmdServerText>
       </div>
       {imp?.value&&(
         <div style={{display:'inline-flex',alignItems:'center',gap:4,
@@ -358,7 +380,6 @@ function DecisionPanel({dec,impacts,tr,lang,onClose}) {
   const uc = urgC[dec.urgency]||'var(--text-secondary)'
   const impKey = dec.key||dec.domain
   const imp = impacts[impKey]?.impact || impacts[dec.domain]?.impact
-  const steps = (dec.action||'').split(/[0-9]+[).]\s*/).filter(s=>s.trim().length>5)
   const Sec = ({label,color='var(--text-secondary)',children}) => (
     <div style={{marginBottom:20}}>
       <div style={{display:'flex',alignItems:'center',gap:7,marginBottom:10}}>
@@ -385,7 +406,9 @@ function DecisionPanel({dec,impacts,tr,lang,onClose}) {
         </div>
         <div style={{flex:1,overflowY:'auto',padding:'20px'}}>
           <div style={{fontSize:17,fontWeight:800,color:'#ffffff',lineHeight:1.3,marginBottom:8}}>
-            <CmdServerText lang={lang} tr={tr}>{dec.title}</CmdServerText>
+            <CmdServerText lang={lang} tr={tr}>
+              {String(dec.causal_realized?.change_text || dec.causal_realized?.action_text || '').trim() || '—'}
+            </CmdServerText>
           </div>
           <div style={{display:'flex',gap:6,flexWrap:'wrap',marginBottom:20}}>
             <Badge label={tr(`urgency_${dec.urgency}`)} color={uc}/>
@@ -396,22 +419,17 @@ function DecisionPanel({dec,impacts,tr,lang,onClose}) {
           </div>
           <Sec label={tr('exec_why')} color='var(--red)'>
             <p style={{fontSize:12,color:'var(--text-secondary)',lineHeight:1.75,margin:0}}>
-              <CmdServerText lang={lang} tr={tr}>{dec.reason}</CmdServerText>
+              <CmdServerText lang={lang} tr={tr}>
+                {String(dec.causal_realized?.cause_text || '').trim() || '—'}
+              </CmdServerText>
             </p>
           </Sec>
           <Sec label={tr('exec_actions')} color={dc}>
-            <div style={{display:'flex',flexDirection:'column',gap:7}}>
-              {steps.length>1?steps.map((s,i)=>(
-                <div key={i} style={{display:'flex',gap:8,background:`${dc}08`,borderRadius:8,padding:'9px 12px',border:`1px solid ${dc}15`}}>
-                  <div style={{width:20,height:20,borderRadius:'50%',background:`${dc}22`,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,fontSize:11,fontWeight:800,color:dc}}>{i+1}</div>
-                  <span style={{fontSize:11,color:'var(--text-secondary)',lineHeight:1.6}}>
-                    <CmdServerText lang={lang} tr={tr}>{s.trim()}</CmdServerText>
-                  </span>
-                </div>
-              )):<p style={{fontSize:12,color:'var(--text-secondary)',lineHeight:1.75,margin:0}}>
-                <CmdServerText lang={lang} tr={tr}>{dec.action}</CmdServerText>
-              </p>}
-            </div>
+            <p style={{fontSize:12,color:'var(--text-secondary)',lineHeight:1.75,margin:0}}>
+              <CmdServerText lang={lang} tr={tr}>
+                {String(dec.causal_realized?.action_text || '').trim() || '—'}
+              </CmdServerText>
+            </p>
           </Sec>
           {imp?.value&&(
             <Sec label={tr('impact_expected_label')} color='var(--green)'>
@@ -422,9 +440,6 @@ function DecisionPanel({dec,impacts,tr,lang,onClose}) {
                 {imp.range?.low!=null&&imp.range?.high!=null&&<div style={{fontSize:10,color:'var(--text-secondary)',marginBottom:6,fontFamily:'var(--font-mono)'}}>
                   {formatCompactForLang(imp.range.low, lang)} – {formatCompactForLang(imp.range.high, lang)} {tr('impact_range_label')}
                 </div>}
-                <p style={{fontSize:11,color:'var(--text-secondary)',lineHeight:1.65,margin:'0 0 8px'}}>
-                  <CmdServerText lang={lang} tr={tr}>{imp.description}</CmdServerText>
-                </p>
                 <Badge label={imp.confidence != null && Number.isFinite(Number(imp.confidence))
                   ? `${tr('fc_confidence')}: ${formatPctForLang(Number(imp.confidence), 0, lang)}`
                   : `${tr('fc_confidence')}: —`} color='var(--green)'/>
@@ -483,11 +498,14 @@ function deriveOpportunities(decs, causes, impacts, trends, ratios, tr, lang) {
   const revDir = trends?.revenue?.direction
   if (revDir==='up'||ytdRev>5) {
     const gDec = decs.find(d=>d.domain==='growth')
+    const gc = gDec?.causal_realized || {}
+    const gtxt = String(gc.change_text || gc.cause_text || gc.action_text || '').trim()
     opps.push({ domain:'growth',
       title: tr('opp_revenue_momentum'),
-      reason: ytdRev>0
-        ? tr('opp_revenue_momentum_reason_yoy', { pct: formatPctForLang(ytdRev, 1, lang) })
-        : tr('opp_revenue_momentum_reason_trend'),
+      reason: gtxt
+        || (ytdRev>0
+          ? tr('opp_revenue_momentum_reason_yoy', { pct: formatPctForLang(ytdRev, 1, lang) })
+          : tr('opp_revenue_momentum_reason_trend')),
       impact_value: null, decision: gDec||null })
   }
   const sorted = Object.values(impacts||{}).filter(x=>x?.impact?.value>0)
@@ -497,9 +515,11 @@ function deriveOpportunities(decs, causes, impacts, trends, ratios, tr, lang) {
     const dec = decs.find(d=>d.key===item.decision_key||d.domain===item.domain)
     if (!dec) return
     const v = item.impact.value
+    const cr = dec.causal_realized || {}
+    const reasonTxt = String(cr.cause_text || cr.action_text || cr.change_text || '').trim()
     opps.push({ domain:item.domain||dec.domain,
       title: tr(`dec_short_${dec.domain}`),
-      reason: item.impact.description,
+      reason: reasonTxt || '—',
       impact_value: `+${formatCompactForLang(v, lang)}`, decision: dec })
   })
   if (opps.length<3) {
@@ -695,6 +715,7 @@ export default function Analysis({ routeDefaultTab = null } = {}) {
         health: drillBundle.health,
         cashflow: drillBundle.cashflow,
         comparative_intelligence: drillBundle.comparative_intelligence,
+        realizedCausalItems: d.realized_causal_items ?? [],
       },
       execChartBundle: {
         kpi_block: drillBundle.kpi_block,
@@ -876,7 +897,11 @@ export default function Analysis({ routeDefaultTab = null } = {}) {
                 : dir === 'stable' ? tr('trend_stable')
                 : null
             })()}
-            cause={(()=>{const dec=(d?.decisions||[]).find(x=>x.domain==='growth');return dec?.reason?dec.reason.split('. ')[0].slice(0,60):null})()}
+            cause={(() => {
+              const dec = (d?.decisions || []).find((x) => x.domain === 'growth')
+              const t = String(dec?.causal_realized?.change_text || dec?.causal_realized?.cause_text || '').trim()
+              return t ? t.slice(0, 60) : null
+            })()}
             forecast={kpiForecast('revenue', fcData, tr, (v) => formatCompactForLang(v, lang), lang)}/>
           <MetricCard label={kpiLabel(tr('fc_net_profit'), ctxLabel(), tr)} value={formatCompactForLang(kpis.net_profit?.value, lang)} fullValue={formatFullForLang(kpis.net_profit?.value, lang)}
             lang={lang} tr={tr} momWord={tr('mom_label')}
@@ -894,7 +919,11 @@ export default function Analysis({ routeDefaultTab = null } = {}) {
             lang={lang} tr={tr} momWord={tr('mom_label')}
             mom={kpis.net_margin?.mom_pct} color='var(--violet)' explain={kpiExplain.margin}
             insight={(()=>{const ins=(d?.statements?.insights||[]).find(i=>i.key==='strong_gross_margin');return ins?ins.message.split('. ')[0]:null})()}
-            cause={(()=>{const dec=(d?.decisions||[]).find(x=>x.domain==='profitability');return dec?.reason?dec.reason.split('. ')[0].slice(0,60):null})()}/>
+            cause={(() => {
+              const dec = (d?.decisions || []).find((x) => x.domain === 'profitability')
+              const t = String(dec?.causal_realized?.change_text || dec?.causal_realized?.cause_text || '').trim()
+              return t ? t.slice(0, 60) : null
+            })()}/>
         </div>
 
         {drillExtra ? (

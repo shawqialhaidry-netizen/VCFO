@@ -141,6 +141,45 @@ router = APIRouter(
 VALID_WINDOWS = {"3M", "6M", "12M", "YTD", "ALL"}
 
 
+def _dedupe_causal_items_by_id(items: list | None) -> list[dict]:
+    seen: set[str] = set()
+    out: list[dict] = []
+    for it in items or []:
+        if not isinstance(it, dict):
+            continue
+        uid = str(it.get("id") or "").strip() or f"_idx:{len(out)}"
+        if uid in seen:
+            continue
+        seen.add(uid)
+        out.append(it)
+    return out
+
+
+def _merge_causal_sources_for_realize(
+    dec_pack: dict | None,
+    deep_intel: dict | None,
+    profit_intel: dict | None,
+) -> list[dict]:
+    """Merge CFO + expense-pressure + profitability causal rows; dedupe by id."""
+    flat: list[dict] = []
+    if dec_pack:
+        flat.extend(dec_pack.get("causal_items") or [])
+    di = deep_intel or {}
+    ei = di.get("expense_intelligence") or {}
+    pa = ei.get("pressure_assessment") or {}
+    flat.extend(pa.get("causal_items") or [])
+    pi = profit_intel or {}
+    interp = pi.get("interpretation") or {}
+    ci_pi = interp.get("causal_items") or []
+    if ci_pi:
+        flat.extend(ci_pi)
+    else:
+        dpi = di.get("profitability_intelligence") or {}
+        interp2 = dpi.get("interpretation") or {}
+        flat.extend(interp2.get("causal_items") or [])
+    return _dedupe_causal_items_by_id(flat)
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _load_df(record: TrialBalanceUpload):
@@ -2867,6 +2906,7 @@ def get_board_report(
         except Exception as _di_exc:
             logger.warning("board-report deep_intelligence failed: %s", _di_exc)
 
+        _dec_pack_board: dict = {}
         _dec_board: list = []
         try:
             _ann_b = build_annual_layer(windowed_stmts)
@@ -2875,17 +2915,21 @@ def get_board_report(
             )
             _al_b = build_alerts(_intel_b, lang=safe_lang).get("alerts", [])
             _bc_board = None if branch_id else _branch_context_for_cfo_decisions(db, company_id)
-            _dec_board = build_cfo_decisions(
+            _dec_pack_board = build_cfo_decisions(
                 _intel_b,
                 _al_b,
                 lang=safe_lang,
                 n_periods=len(windowed_stmts),
                 analysis=_analysis,
                 branch_context=_bc_board,
-            ).get("decisions", [])
+            )
+            _dec_board = _dec_pack_board.get("decisions", [])
         except Exception as _de_exc:
             logger.warning("board-report CFO decisions assembly failed: %s", _de_exc)
 
+        _board_merged_causal = _merge_causal_sources_for_realize(
+            _dec_pack_board or None, _di_board or None, None
+        )
         report = build_board_report(
             analysis_dict,
             executive_dict,
@@ -2893,6 +2937,7 @@ def get_board_report(
             deep_intelligence=_di_board or None,
             phase43_root_causes=_rc2,
             cfo_decisions=_dec_board,
+            causal_items=_board_merged_causal,
         )
         report["prev_comparison"] = prev_comparison
         report["branch_id"]       = branch_id or None
@@ -4468,6 +4513,28 @@ def get_executive(
     except Exception as _fb_exc:
         logger.warning("financial_brain build failed: %s", _fb_exc)
 
+    # ── Realized causal (single UI-facing financial wording source) ───────────
+    from app.services.causal_realize import realize_causal_items
+
+    _merged_causal_exec = _merge_causal_sources_for_realize(
+        dec_result, deep_intelligence, profitability_intelligence
+    )
+    realized_causal_items = realize_causal_items(_merged_causal_exec, safe_lang)
+    _raw_cfo_causal = dec_result.get("causal_items") or []
+    _realized_cfo_only = realize_causal_items(_raw_cfo_causal, safe_lang)
+    decisions_for_api: list[dict] = []
+    for i, dec in enumerate(dec_result.get("decisions", [])):
+        row = dict(dec)
+        if i < len(_realized_cfo_only):
+            r = _realized_cfo_only[i]
+            row["causal_realized"] = {
+                "id": r.get("id"),
+                "change_text": r.get("change_text") or "",
+                "cause_text": r.get("cause_text") or "",
+                "action_text": r.get("action_text") or "",
+            }
+        decisions_for_api.append(row)
+
     # ── Canonical response — single source of truth ──────────────────────────
     _all_periods = sorted(s.get("period", "") for s in all_stmts if s.get("period"))
     return {
@@ -4493,7 +4560,8 @@ def get_executive(
             "cashflow":          cashflow_raw,
 
             # ── Decisions ─────────────────────────────────────────────────────
-            "decisions":         dec_result.get("decisions", []),
+            "decisions":         decisions_for_api,
+            "realized_causal_items": realized_causal_items,
             "decisions_summary": dec_result.get("summary", {}),
             "recommendations":   dec_result.get("recommendations", []),
 

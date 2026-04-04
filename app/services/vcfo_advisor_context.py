@@ -248,6 +248,10 @@ def build_advisor_context(
     causal_items_merged.extend(cfo_decisions_ctx.get("causal_items") or [])
     causal_items_final = _merge_advisor_causal_items(causal_items_merged)
 
+    from app.services.causal_realize import realize_causal_items
+
+    realized_causal_advisor = realize_causal_items(causal_items_final, _lang_cfo)
+
     # ── Branch context ────────────────────────────────────────────────────────
     branch_ctx: dict = {}
     try:
@@ -362,6 +366,7 @@ def build_advisor_context(
         "validation": validation_ctx,
         "decisions":  cfo_decisions_ctx,
         "causal_items": causal_items_final,
+        "realized_causal_items": realized_causal_advisor,
 
         # ── Spec-mandated key aliases ─────────────────────────────────────────
         # "executive" = decisions + analysis (same data, different label)

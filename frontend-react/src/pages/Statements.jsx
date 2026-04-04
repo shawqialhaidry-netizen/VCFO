@@ -106,7 +106,11 @@ function stmtCause(key, d, tr, lang) {
   const causes  = d?.root_causes || []
   const cf      = d?.cashflow    || {}
   const ratios  = d?.intelligence?.ratios || {}
-  const decR    = domain => { const x=decs.find(v=>v.domain===domain); return x?.reason?(x.reason.split('. ')[0]||x.reason):null }
+  const decR = (domain) => {
+    const x = decs.find((v) => v.domain === domain)
+    const t = String(x?.causal_realized?.change_text || x?.causal_realized?.cause_text || '').trim()
+    return t ? t.split('. ')[0] || t : null
+  }
   const rcT     = domain => { const c=causes.find(v=>v.domain===domain||v.domain==='cross_domain'); return c?.title||null }
   const clip    = s => (s && s.length > 60 ? s.slice(0, 57) : s)
   switch(key) {

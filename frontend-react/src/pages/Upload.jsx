@@ -72,9 +72,8 @@ function ModeSelector({ uploadMode, setUploadMode, tr }) {
 }
 
 // ── Replace confirmation modal ─────────────────────────────────────────────────
-function ReplaceModal({ info, onConfirm, onCancel, lang }) {
+function ReplaceModal({ info, onConfirm, onCancel, tr }) {
   if (!info) return null
-  const l = lang || 'en'
   return (
     <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.75)', zIndex:1000,
       display:'flex', alignItems:'center', justifyContent:'center', padding:'20px' }}>
@@ -87,12 +86,10 @@ function ReplaceModal({ info, onConfirm, onCancel, lang }) {
           <span style={{ fontSize:22 }}>🔄</span>
           <div>
             <div style={{ fontSize:16, fontWeight:800, color:'var(--amber)' }}>
-              {l === 'ar' ? 'فترة موجودة مسبقاً' : 'Period Already Exists'}
+              {tr('upload_modal_replace_title')}
             </div>
             <div style={{ fontSize:11, color:'var(--text-secondary)', marginTop:2 }}>
-              {l === 'ar'
-                ? 'يمكنك استبدال البيانات الحالية بالرفع الجديد'
-                : 'You can replace the current data with the new upload'}
+              {tr('upload_modal_replace_subtitle')}
             </div>
           </div>
         </div>
@@ -101,9 +98,9 @@ function ReplaceModal({ info, onConfirm, onCancel, lang }) {
           marginBottom:16, fontSize:12, lineHeight:2.2,
           border:'1px solid rgba(251,191,36,.25)' }}>
           {[
-            [l === 'ar' ? 'الفترة'       : 'Period',       info.period      || '—'],
-            [l === 'ar' ? 'الملف الحالي' : 'Existing file', info.filename    || '—'],
-            [l === 'ar' ? 'ستُستبدل بـ'  : 'Replace with',  info.newFilename || (l === 'ar' ? 'الملف الجديد' : 'new file')],
+            [tr('upload_modal_replace_period'),       info.period      || '—'],
+            [tr('upload_modal_replace_existing_file'), info.filename    || '—'],
+            [tr('upload_modal_replace_with'),  info.newFilename || tr('upload_modal_replace_new_file')],
           ].map(([label, value]) => (
             <div key={label} style={{ display:'flex', justifyContent:'space-between', gap:12 }}>
               <span style={{ color:'var(--text-secondary)', flexShrink:0 }}>{label}:</span>
@@ -118,22 +115,20 @@ function ReplaceModal({ info, onConfirm, onCancel, lang }) {
         <div style={{ padding:'9px 12px', background:'rgba(251,191,36,0.07)',
           border:'1px solid rgba(251,191,36,0.25)', borderRadius:8,
           fontSize:11, color:'var(--amber)', marginBottom:18, lineHeight:1.5 }}>
-          ⚠ {l === 'ar'
-            ? 'سيتم حذف البيانات الحالية لهذه الفترة واستبدالها نهائياً'
-            : 'Current data for this period will be permanently replaced. This cannot be undone.'}
+          ⚠ {tr('upload_modal_replace_warning')}
         </div>
 
         <div style={{ display:'flex', gap:10 }}>
           <button onClick={onConfirm}
             style={{ flex:1, background:'var(--amber)', color:'#000', border:'none',
               borderRadius:8, padding:'10px 0', fontSize:13, fontWeight:700, cursor:'pointer' }}>
-            {l === 'ar' ? 'استبدال' : 'Replace'}
+            {tr('upload_modal_replace_btn')}
           </button>
           <button onClick={onCancel}
             style={{ flex:1, background:'var(--bg-elevated)', color:'var(--text-secondary)',
               border:'1px solid var(--border)', borderRadius:8, padding:'10px 0',
               fontSize:13, cursor:'pointer' }}>
-            {l === 'ar' ? 'إلغاء' : 'Cancel'}
+            {tr('upload_modal_cancel_btn')}
           </button>
         </div>
       </div>
@@ -142,7 +137,7 @@ function ReplaceModal({ info, onConfirm, onCancel, lang }) {
 }
 
 // ── Delete confirmation modal ──────────────────────────────────────────────────
-function DeleteModal({ info, onConfirm, onCancel, lang }) {
+function DeleteModal({ info, onConfirm, onCancel, tr }) {
   // deleteScope is separate from any outer state — no name collision
   const [deleteScope, setDeleteScope] = useState('single')
 
@@ -150,11 +145,10 @@ function DeleteModal({ info, onConfirm, onCancel, lang }) {
   useEffect(() => { if (info) setDeleteScope('single') }, [info])
 
   if (!info) return null
-  const l = lang || 'en'
 
   const tbLabels = {
-    pre_closing:  l === 'ar' ? 'قبل الإقفال' : 'Pre-closing',
-    post_closing: l === 'ar' ? 'بعد الإقفال' : 'Post-closing',
+    pre_closing:  tr('upload_modal_tb_pre'),
+    post_closing: tr('upload_modal_tb_post'),
   }
 
   return (
@@ -170,10 +164,10 @@ function DeleteModal({ info, onConfirm, onCancel, lang }) {
           <span style={{ fontSize:22 }}>🗑</span>
           <div>
             <div style={{ fontSize:16, fontWeight:800, color:'var(--red)' }}>
-              {l === 'ar' ? 'تأكيد الحذف' : 'Confirm Delete'}
+              {tr('upload_modal_delete_title')}
             </div>
             <div style={{ fontSize:11, color:'var(--text-secondary)', marginTop:2 }}>
-              {l === 'ar' ? 'هذا الإجراء لا يمكن التراجع عنه' : 'This action cannot be undone'}
+              {tr('upload_modal_delete_subtitle')}
             </div>
           </div>
         </div>
@@ -182,13 +176,13 @@ function DeleteModal({ info, onConfirm, onCancel, lang }) {
         <div style={{ background:'var(--bg-elevated)', borderRadius:10, padding:'12px 14px',
           marginBottom:16, fontSize:12, lineHeight:2.2, border:'1px solid var(--border)' }}>
           {[
-            [l === 'ar' ? 'الشركة'      : 'Company',  info.company_name || '—'],
-            [l === 'ar' ? 'الفترة'      : 'Period',   info.period       || '—'],
-            [l === 'ar' ? 'الملف'       : 'File',     info.original_filename || info.filename || '—'],
-            [l === 'ar' ? 'نوع الميزان' : 'TB Type',  info.tb_type
+            [tr('upload_modal_label_company'),  info.company_name || '—'],
+            [tr('upload_modal_replace_period'),   info.period       || '—'],
+            [tr('upload_modal_label_file'),     info.original_filename || info.filename || '—'],
+            [tr('upload_modal_label_tb_type'),  info.tb_type
               ? (tbLabels[info.tb_type] || info.tb_type)
-              : (l === 'ar' ? 'غير محدد' : 'Unknown')],
-            [l === 'ar' ? 'الصفوف'      : 'Records',  info.record_count
+              : tr('upload_modal_label_unknown')],
+            [tr('records'),  info.record_count
               ? info.record_count.toLocaleString()
               : '—'],
           ].map(([label, value]) => (
@@ -207,16 +201,11 @@ function DeleteModal({ info, onConfirm, onCancel, lang }) {
         <div style={{ marginBottom:18 }}>
           <div style={{ fontSize:11, fontWeight:700, color:'var(--text-secondary)',
             textTransform:'uppercase', letterSpacing:'.06em', marginBottom:8 }}>
-            {l === 'ar' ? 'نطاق الحذف' : 'Delete scope'}
+            {tr('upload_modal_delete_scope')}
           </div>
           {[
-            ['single',
-              l === 'ar' ? 'هذا الرفع فقط'           : 'This upload only',
-              l === 'ar' ? 'يحذف السجل والملف فقط'   : 'Deletes this record + its file'],
-            ['period',
-              l === 'ar' ? 'كل بيانات هذه الفترة'    : 'All data for this period',
-              l === 'ar' ? 'يحذف جميع رفعات الفترة والبيانات المشتقة'
-                         : 'Deletes all uploads for this period + derived branch data'],
+            ['single', tr('upload_modal_scope_single_label'), tr('upload_modal_scope_single_hint')],
+            ['period', tr('upload_modal_scope_period_label'), tr('upload_modal_scope_period_hint')],
           ].map(([val, label, hint]) => (
             <label key={val} style={{ display:'flex', alignItems:'flex-start', gap:10,
               padding:'10px 12px', borderRadius:9, cursor:'pointer', marginBottom:6,
@@ -238,12 +227,8 @@ function DeleteModal({ info, onConfirm, onCancel, lang }) {
           border:'1px solid rgba(248,113,113,0.25)', borderRadius:8,
           fontSize:11, color:'var(--red)', marginBottom:18, lineHeight:1.5 }}>
           ⚠ {deleteScope === 'period'
-            ? (l === 'ar'
-                ? 'سيتم حذف جميع رفعات الفترة والبيانات المشتقة منها نهائياً'
-                : 'All uploads for this period and derived data will be permanently deleted')
-            : (l === 'ar'
-                ? 'سيتم حذف هذا الرفع والملف المرتبط به نهائياً'
-                : 'This upload record and its associated file will be permanently deleted')}
+            ? tr('upload_modal_warn_period')
+            : tr('upload_modal_warn_single')}
         </div>
 
         {/* Actions */}
@@ -251,13 +236,13 @@ function DeleteModal({ info, onConfirm, onCancel, lang }) {
           <button onClick={() => onConfirm(deleteScope)}
             style={{ flex:1, background:'var(--red)', color:'#fff', border:'none',
               borderRadius:8, padding:'10px 0', fontSize:13, fontWeight:700, cursor:'pointer' }}>
-            {l === 'ar' ? 'تأكيد الحذف' : 'Confirm Delete'}
+            {tr('upload_modal_delete_confirm_btn')}
           </button>
           <button onClick={onCancel}
             style={{ flex:1, background:'var(--bg-elevated)', color:'var(--text-secondary)',
               border:'1px solid var(--border)', borderRadius:8, padding:'10px 0',
               fontSize:13, cursor:'pointer' }}>
-            {l === 'ar' ? 'إلغاء' : 'Cancel'}
+            {tr('upload_modal_cancel_btn')}
           </button>
         </div>
       </div>
@@ -539,13 +524,13 @@ export default function Upload() {
         info={replaceInfo}
         onConfirm={onConfirmReplace}
         onCancel={onCancelReplace}
-        lang={lang}
+        tr={tr}
       />
       <DeleteModal
         info={deleteInfo}
         onConfirm={handleConfirmDelete}
         onCancel={() => setDeleteInfo(null)}
-        lang={lang}
+        tr={tr}
       />
 
       {/* Header */}
@@ -949,8 +934,8 @@ function UploadHistory({ uploads, branches = [], onDelete, tr, lang }) {
                 {u.status === 'ok' && (
                   <span
                     title={u.is_balanced === 'true'
-                      ? 'TB balanced: total debits = total credits'
-                      : 'TB unbalanced: total debits ≠ total credits'}
+                      ? tr('upload_tb_balanced_title')
+                      : tr('upload_tb_unbalanced_title')}
                     style={{ fontSize:10, fontWeight:700, padding:'2px 7px',
                       borderRadius:20, flexShrink:0,
                       background: u.is_balanced === 'true' ? 'rgba(34,197,94,.1)' : 'rgba(245,166,35,.1)',

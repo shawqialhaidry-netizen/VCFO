@@ -651,5 +651,6 @@ def build_board_report(
         "brain_pack":         brain_pack,
         "structured_root_causes": list(phase43_root_causes or []),
         "structured_decisions":   list(cfo_decisions or []),
+        "realized_causal_items":  list(realized_causal),
     }
     return out

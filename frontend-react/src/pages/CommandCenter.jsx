@@ -22,7 +22,13 @@ import { buildAnalysisQuery } from '../utils/buildAnalysisQuery.js'
 import { buildExecutiveNarrative } from '../utils/buildExecutiveNarrative.js'
 import { analysisPathFromPanelType, pathForDrillAnalysisTab } from '../utils/analysisRoutes.js'
 import { strictT, strictTParams, localizedMissingPlaceholder } from '../utils/strictI18n.js'
-import { selectPrimaryDecision, firstExpenseActionLine } from '../utils/selectPrimaryDecision.js'
+import { selectPrimaryDecision } from '../utils/selectPrimaryDecision.js'
+
+function pickExpenseCausalRow(items) {
+  if (!Array.isArray(items) || !items.length) return null
+  const hit = items.find((it) => String(it.id || '').toLowerCase().includes('expense'))
+  return hit || items[0]
+}
 import { CLAMP_FADE_MASK_SHORT } from '../utils/serverTextUi.js'
 import CmdServerText from '../components/CmdServerText.jsx'
 import PeriodSelector from '../components/PeriodSelector.jsx'
@@ -150,7 +156,7 @@ function KpiMainNumber({ raw, mode, isHero, compact, na, signedTone, lang }) {
   )
 }
 
-function PrimaryDecisionHero({ resolution, impacts, tr, lang, causes, allDecisions, onOpen }) {
+function PrimaryDecisionHero({ resolution, impacts, tr, lang, causes, allDecisions, onOpen, realizedCausalItems }) {
   if (!resolution) return null
 
   const fmtQuantImpact = (v) => {
@@ -162,21 +168,29 @@ function PrimaryDecisionHero({ resolution, impacts, tr, lang, causes, allDecisio
 
   if (resolution.kind === 'expense') {
     const ex = resolution.expense
-    if (!ex?.title) return null
+    const ec = pickExpenseCausalRow(realizedCausalItems)
+    const titleText =
+      String(ec?.change_text || ec?.action_text || '').trim() ||
+      String(ex?.title || '').trim()
+    if (!titleText) return null
     const isBaseline = ex.decision_id === '_cmd_baseline'
     const pri = String(ex.priority || 'medium').toLowerCase()
     const sav = ex.expected_financial_impact?.estimated_monthly_savings
     const hasSav = sav != null && Number.isFinite(Number(sav)) && Number(sav) > 0
-    const recLine = firstExpenseActionLine(ex)
+    const recLine = String(ec?.action_text || '').trim().split('\n')[0]?.trim() || ''
 
     const hoverLift = !isBaseline
-    const descText = ex.rationale && String(ex.rationale).trim() ? String(ex.rationale).trim() : ''
+    const descText = String(ec?.cause_text || '').trim()
     const numTone = hasSav ? 'cmd-hero-impact-pos' : pri === 'high' ? 'cmd-hero-impact-neg' : 'cmd-hero-impact-neu'
 
     return (
       <button
         type="button"
-        onClick={() => onOpen('expense_v2', ex, {})}
+        onClick={() =>
+          ec
+            ? onOpen('causal_item', ec, {})
+            : onOpen('expense_v2', ex, {})
+        }
         className={[
           'cmd-primary-hero',
           'cmd-hero',
@@ -212,7 +226,7 @@ function PrimaryDecisionHero({ resolution, impacts, tr, lang, causes, allDecisio
           </div>
           <div className="cmd-hero-title" style={CLAMP_FADE_MASK_SHORT}>
             <CmdServerText lang={lang} tr={tr} as="span">
-              {ex.title}
+              {titleText}
             </CmdServerText>
           </div>
           <div className={`cmd-hero-number cmd-data-num ${numTone}`.trim()}>
@@ -257,16 +271,13 @@ function PrimaryDecisionHero({ resolution, impacts, tr, lang, causes, allDecisio
 
   const decision = resolution.decision
   if (!decision) return null
+  const cr = decision.causal_realized || {}
   const impKey = decision.key || decision.domain
   const imp = impacts[impKey]?.impact
   const hasQuant =
     imp && imp.type !== 'qualitative' && imp.value != null && Number.isFinite(Number(imp.value))
-  const recLine = firstRecommendedLine(decision.action)
-  const descText =
-    (decision.reason && String(decision.reason).trim()) ||
-    (!hasQuant && decision.expected_effect && String(decision.expected_effect).trim()) ||
-    (hasQuant && imp?.description && String(imp.description).trim()) ||
-    ''
+  const recLine = String(cr.action_text || '').trim().split('\n')[0]?.trim() || ''
+  const descText = String(cr.cause_text || '').trim()
 
   let numTone = 'cmd-hero-impact-neu'
   if (hasQuant) {
@@ -279,7 +290,11 @@ function PrimaryDecisionHero({ resolution, impacts, tr, lang, causes, allDecisio
   return (
     <button
       type="button"
-      onClick={() => onOpen('decision', decision, { causes, decisions: allDecisions })}
+      onClick={() =>
+        cr.change_text || cr.action_text
+          ? onOpen('causal_item', cr, { causes, decisions: allDecisions })
+          : onOpen('decision', decision, { causes, decisions: allDecisions })
+      }
       className="cmd-primary-hero cmd-hero cmd-hero--accent cmd-primary-intro cmd-level-1"
       style={{
         width: '100%',
@@ -304,7 +319,7 @@ function PrimaryDecisionHero({ resolution, impacts, tr, lang, causes, allDecisio
         </div>
         <div className="cmd-hero-title" style={CLAMP_FADE_MASK_SHORT}>
           <CmdServerText lang={lang} tr={tr} as="span">
-            {decision.title}
+            {String(cr.change_text || cr.action_text || '').trim() || strictT(tr, lang, 'cmd_na_short')}
           </CmdServerText>
         </div>
         <div className={`cmd-hero-number cmd-data-num ${numTone}`.trim()}>
@@ -629,143 +644,190 @@ function ContextPanel({ type, payload, extra, tr, lang, onClose, onNavigate, imp
     )
   }
 
-  const Decision = () => (
-    <>
-      <div style={{fontSize:17,fontWeight:800,color:T.text1,lineHeight:1.3,marginBottom:8, ...CLAMP_FADE_MASK_SHORT}}>
-        <CmdServerText lang={lang} tr={tr} as="span">
-          {payload.title}
-        </CmdServerText>
-      </div>
-      <div style={{display:'flex',gap:6,flexWrap:'wrap',marginBottom:22}}>
-        <Pill label={strictT(tr, lang, `urgency_${payload.urgency}`)} critical={payload.urgency === 'high'} />
-        {payload.impact_level ? (
-          <Pill label={strictT(tr, lang, `impact_${payload.impact_level}`)} critical={payload.impact_level === 'high'} />
-        ) : null}
-        <Pill
-          label={
-            payload.confidence != null && Number.isFinite(Number(payload.confidence))
-              ? formatPctForLang(Number(payload.confidence), 0, lang)
-              : '—'
-          }
-        />
-      </div>
-
-      <DrillIntelligenceBlock
-        what={drillLines.what}
-        why={drillLines.why}
-        do={drillLines.do}
-        tr={tr}
-        lang={lang}
-        theme={drillTheme}
-      />
-
-      <Sec label={strictT(tr, lang, 'exec_why')} color={T.red}>
-        <p style={{fontSize:12,color:T.text2,lineHeight:1.75,margin:0,marginBottom:extra?.causes?.length?10:0, ...CLAMP_FADE_MASK_SHORT}}>
+  const Decision = () => {
+    const cr = payload.causal_realized || {}
+    const headline =
+      String(cr.change_text || cr.action_text || '').trim() || strictT(tr, lang, 'cmd_na_short')
+    const causeBody = String(cr.cause_text || '').trim()
+    const actionBody = String(cr.action_text || '').trim()
+    return (
+      <>
+        <div style={{ fontSize: 17, fontWeight: 800, color: T.text1, lineHeight: 1.3, marginBottom: 8, ...CLAMP_FADE_MASK_SHORT }}>
           <CmdServerText lang={lang} tr={tr} as="span">
-            {payload.reason}
+            {headline}
           </CmdServerText>
-        </p>
-        {extra?.causes?.slice(0,2).map((c,i) => (
-          <div key={i} style={{marginTop:7,padding:'8px 11px',borderRadius:8,
-            background:`${T.red}08`,border:`1px solid ${T.red}18`}}>
-            <div style={{fontSize:10,fontWeight:700,color:T.text1,marginBottom:2}}>
-              <CmdServerText lang={lang} tr={tr} as="span">
-                {c.title}
-              </CmdServerText>
-            </div>
-            <div style={{fontSize:10,color:T.text2,lineHeight:1.5, ...CLAMP_FADE_MASK_SHORT}}>
-              <CmdServerText lang={lang} tr={tr} as="span">
-                {c.description}
-              </CmdServerText>
-            </div>
-          </div>
-        ))}
-      </Sec>
+        </div>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 22 }}>
+          <Pill label={strictT(tr, lang, `urgency_${payload.urgency}`)} critical={payload.urgency === 'high'} />
+          {payload.impact_level ? (
+            <Pill label={strictT(tr, lang, `impact_${payload.impact_level}`)} critical={payload.impact_level === 'high'} />
+          ) : null}
+          <Pill
+            label={
+              payload.confidence != null && Number.isFinite(Number(payload.confidence))
+                ? formatPctForLang(Number(payload.confidence), 0, lang)
+                : '—'
+            }
+          />
+        </div>
 
-      <Sec label={strictT(tr, lang, 'exec_actions')} color={dc}>
-        <Steps text={payload.action}/>
-      </Sec>
+        <DrillIntelligenceBlock
+          what={drillLines.what}
+          why={drillLines.why}
+          do={drillLines.do}
+          tr={tr}
+          lang={lang}
+          theme={drillTheme}
+        />
 
-      {payload.expected_effect && (
-        <Sec label={strictT(tr, lang, 'exec_effect')} color={T.green}>
-          <div style={{background:`${T.green}08`,borderRadius:9,padding:'12px 14px',
-            border:`1px solid ${T.green}1a`,fontSize:12,color:T.text2,lineHeight:1.75, ...CLAMP_FADE_MASK_SHORT}}>
-            <CmdServerText lang={lang} tr={tr} as="span">
-              {payload.expected_effect}
-            </CmdServerText>
-          </div>
-        </Sec>
-      )}
-
-      {(()=>{
-        const impKey = payload?.key||payload?.domain
-        const imp = impacts[impKey]?.impact || impacts[payload?.domain]?.impact
-        if (!imp||imp.type==='qualitative'||imp.value==null) return null
-        const fmtImpactQuant = (v) => {
-          if (v == null || !Number.isFinite(Number(v))) return '—'
-          const n = Number(v)
-          if (n < 0) return formatCompactForLang(n, lang)
-          return `+${formatCompactForLang(n, lang)}`
-        }
-        return (
-          <div style={{background:`${T.green}08`,border:`1px solid ${T.green}25`,borderRadius:11,padding:'14px 16px',marginBottom:16}}>
-            <div style={{display:'flex',alignItems:'center',gap:7,marginBottom:10}}>
-              <div style={{width:18,height:2,background:T.green,borderRadius:2}}/>
-              <span style={{fontSize:9,fontWeight:800,color:T.green,textTransform:'uppercase',letterSpacing:'.08em'}}>
-                {strictT(tr, lang, 'impact_expected_label')}
-              </span>
-            </div>
-            <div style={{fontFamily:'monospace',fontSize:24,fontWeight:800,color:T.green,direction:'ltr',marginBottom:4}}>
-              {fmtImpactQuant(imp.value)}
-            </div>
-            {imp.range?.low!=null&&imp.range?.high!=null&&(
-              <div style={{fontSize:10,color:T.text2,marginBottom:8,fontFamily:'monospace'}}>
-                {fmtImpactQuant(imp.range.low)} – {fmtImpactQuant(imp.range.high)} {strictT(tr, lang, 'impact_range_label')}
-              </div>
-            )}
-            <p style={{fontSize:11,color:T.text2,lineHeight:1.6,margin:'0 0 10px', ...CLAMP_FADE_MASK_SHORT}}>
+        {causeBody ? (
+          <Sec label={strictT(tr, lang, 'exec_why')} color={T.red}>
+            <p style={{ fontSize: 12, color: T.text2, lineHeight: 1.75, margin: 0, ...CLAMP_FADE_MASK_SHORT }}>
               <CmdServerText lang={lang} tr={tr} as="span">
-                {imp.description}
+                {causeBody}
               </CmdServerText>
             </p>
-            <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
-              <span style={{fontSize:9,color:T.green,background:`${T.green}15`,padding:'2px 8px',borderRadius:20,fontWeight:700,border:`1px solid ${T.green}30`}}>
-                {imp.confidence != null && Number.isFinite(Number(imp.confidence))
-                  ? `${strictT(tr, lang, 'fc_confidence')}: ${formatPctForLang(Number(imp.confidence), 0, lang)}`
-                  : `${strictT(tr, lang, 'fc_confidence')}: —`}
-              </span>
-              {imp.assumption ? (
-                <span style={{ fontSize: 10, color: T.text2, fontStyle: 'italic' }}>
-                  {strictT(tr, lang, 'impact_based_on')}:{' '}
-                  <CmdServerText lang={lang} tr={tr} as="span">
-                    {imp.assumption}
-                  </CmdServerText>
+          </Sec>
+        ) : null}
+
+        {actionBody ? (
+          <Sec label={strictT(tr, lang, 'exec_actions')} color={dc}>
+            <p style={{ fontSize: 12, color: T.text2, lineHeight: 1.75, margin: 0, ...CLAMP_FADE_MASK_SHORT }}>
+              <CmdServerText lang={lang} tr={tr} as="span">
+                {actionBody}
+              </CmdServerText>
+            </p>
+          </Sec>
+        ) : null}
+
+        {(() => {
+          const impKey = payload?.key || payload?.domain
+          const imp = impacts[impKey]?.impact || impacts[payload?.domain]?.impact
+          if (!imp || imp.type === 'qualitative' || imp.value == null) return null
+          const fmtImpactQuant = (v) => {
+            if (v == null || !Number.isFinite(Number(v))) return '—'
+            const n = Number(v)
+            if (n < 0) return formatCompactForLang(n, lang)
+            return `+${formatCompactForLang(n, lang)}`
+          }
+          return (
+            <div
+              style={{
+                background: `${T.green}08`,
+                border: `1px solid ${T.green}25`,
+                borderRadius: 11,
+                padding: '14px 16px',
+                marginBottom: 16,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 10 }}>
+                <div style={{ width: 18, height: 2, background: T.green, borderRadius: 2 }} />
+                <span
+                  style={{
+                    fontSize: 9,
+                    fontWeight: 800,
+                    color: T.green,
+                    textTransform: 'uppercase',
+                    letterSpacing: '.08em',
+                  }}
+                >
+                  {strictT(tr, lang, 'impact_expected_label')}
                 </span>
-              ) : null}
+              </div>
+              <div
+                style={{
+                  fontFamily: 'monospace',
+                  fontSize: 24,
+                  fontWeight: 800,
+                  color: T.green,
+                  direction: 'ltr',
+                  marginBottom: 4,
+                }}
+              >
+                {fmtImpactQuant(imp.value)}
+              </div>
+              {imp.range?.low != null && imp.range?.high != null && (
+                <div style={{ fontSize: 10, color: T.text2, marginBottom: 8, fontFamily: 'monospace' }}>
+                  {fmtImpactQuant(imp.range.low)} – {fmtImpactQuant(imp.range.high)}{' '}
+                  {strictT(tr, lang, 'impact_range_label')}
+                </div>
+              )}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <span
+                  style={{
+                    fontSize: 9,
+                    color: T.green,
+                    background: `${T.green}15`,
+                    padding: '2px 8px',
+                    borderRadius: 20,
+                    fontWeight: 700,
+                    border: `1px solid ${T.green}30`,
+                  }}
+                >
+                  {imp.confidence != null && Number.isFinite(Number(imp.confidence))
+                    ? `${strictT(tr, lang, 'fc_confidence')}: ${formatPctForLang(Number(imp.confidence), 0, lang)}`
+                    : `${strictT(tr, lang, 'fc_confidence')}: —`}
+                </span>
+              </div>
+            </div>
+          )
+        })()}
+
+        {extra?.execChartBundle?.kpi_block ? (
+          <ExecutiveProfitBridgeChart kpiBlock={extra.execChartBundle.kpi_block} tr={tr} lang={lang} />
+        ) : null}
+
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 12,
+            background: T.card,
+            borderRadius: 11,
+            padding: '12px 16px',
+            border: `1px solid ${T.border}`,
+          }}
+        >
+          <span style={{ fontSize: 22, opacity: 0.45 }}>⏱</span>
+          <div>
+            <div
+              style={{
+                fontSize: 9,
+                color: T.text3,
+                textTransform: 'uppercase',
+                letterSpacing: '.07em',
+                marginBottom: 3,
+              }}
+            >
+              {strictT(tr, lang, 'exec_timeframe')}
+            </div>
+            <div
+              style={{
+                fontSize: 16,
+                fontWeight: 800,
+                color: uClr[payload.urgency] || T.accent,
+                fontFamily: 'monospace',
+              }}
+            >
+              <CmdServerText lang={lang} tr={tr} as="span">
+                {payload.timeframe}
+              </CmdServerText>
             </div>
           </div>
-        )
-      })()}
-
-      {extra?.execChartBundle?.kpi_block ? (
-        <ExecutiveProfitBridgeChart kpiBlock={extra.execChartBundle.kpi_block} tr={tr} lang={lang} />
-      ) : null}
-
-      <div style={{display:'flex',alignItems:'center',gap:12,
-        background:T.card,borderRadius:11,padding:'12px 16px',border:`1px solid ${T.border}`}}>
-        <span style={{fontSize:22,opacity:.45}}>⏱</span>
-        <div>
-          <div style={{fontSize:9,color:T.text3,textTransform:'uppercase',letterSpacing:'.07em',marginBottom:3}}>
-            {strictT(tr, lang, 'exec_timeframe')}
-          </div>
-          <div style={{fontSize:16,fontWeight:800,color:uClr[payload.urgency]||T.accent,fontFamily:'monospace'}}>
-            <CmdServerText lang={lang} tr={tr} as="span">
-              {payload.timeframe}
-            </CmdServerText>
-          </div>
         </div>
-      </div>
-    </>
+      </>
+    )
+  }
+
+  const CausalItem = () => (
+    <DrillIntelligenceBlock
+      what={drillLines.what}
+      why={drillLines.why}
+      do={drillLines.do}
+      tr={tr}
+      lang={lang}
+      theme={drillTheme}
+    />
   )
 
   const Kpi = () => {
@@ -1088,7 +1150,8 @@ function ContextPanel({ type, payload, extra, tr, lang, onClose, onNavigate, imp
                 background:`${dc}08`,border:`1px solid ${dc}20`}}>
                 <div style={{fontSize:11,fontWeight:700,color:T.text1,marginBottom:2}}>
                   <CmdServerText lang={lang} tr={tr} as="span">
-                    {d.title}
+                    {String(d.causal_realized?.change_text || d.causal_realized?.action_text || '').trim() ||
+                      strictT(tr, lang, 'cmd_na_short')}
                   </CmdServerText>
                 </div>
                 <div style={{fontSize:10,color:T.text2,fontFamily:'monospace'}}>
@@ -1164,15 +1227,21 @@ function ContextPanel({ type, payload, extra, tr, lang, onClose, onNavigate, imp
   const ExpenseDecisionV2 = () => {
     const d = payload || {}
     const pri = String(d.priority || 'medium').toLowerCase()
-    const act = d.action
-    const steps = act && typeof act === 'object' && Array.isArray(act.steps) ? act.steps : null
     const efi = d.expected_financial_impact || {}
     const sav = efi.estimated_monthly_savings
+    const rc =
+      (d.causal_realized && String(d.causal_realized.change_text || d.causal_realized.action_text || '').trim()
+        ? d.causal_realized
+        : null) || pickExpenseCausalRow(extra?.drillIntelBundle?.realizedCausalItems)
+    const headline =
+      String(rc?.change_text || rc?.action_text || '').trim() || strictT(tr, lang, 'cmd_na_short')
+    const causeBody = String(rc?.cause_text || '').trim()
+    const actionBody = String(rc?.action_text || '').trim()
     return (
       <>
         <div style={{ fontSize: 17, fontWeight: 800, color: T.text1, marginBottom: 10, ...CLAMP_FADE_MASK_SHORT }}>
           <CmdServerText lang={lang} tr={tr} as="span">
-            {d.title}
+            {headline}
           </CmdServerText>
         </div>
         <div style={{ marginBottom: 16 }}>
@@ -1186,32 +1255,20 @@ function ContextPanel({ type, payload, extra, tr, lang, onClose, onNavigate, imp
           lang={lang}
           theme={drillTheme}
         />
-        {d.rationale ? (
+        {causeBody ? (
           <Sec label={strictT(tr, lang, 'exec_why')} color={T.red}>
             <p style={{ margin: 0, fontSize: 12, color: T.text2, lineHeight: 1.75, ...CLAMP_FADE_MASK_SHORT }}>
               <CmdServerText lang={lang} tr={tr} as="span">
-                {d.rationale}
+                {causeBody}
               </CmdServerText>
             </p>
           </Sec>
         ) : null}
-        {steps?.length ? (
-          <Sec label={strictT(tr, lang, 'exec_actions')} color={T.accent}>
-            <ol style={{ margin: 0, paddingLeft: 18, color: T.text2, fontSize: 12, lineHeight: 1.7 }}>
-              {steps.map((s, i) => (
-                <li key={i} style={{ marginBottom: 8 }}>
-                  <CmdServerText lang={lang} tr={tr} as="span">
-                    {String(s)}
-                  </CmdServerText>
-                </li>
-              ))}
-            </ol>
-          </Sec>
-        ) : typeof act === 'string' && act.trim() ? (
+        {actionBody ? (
           <Sec label={strictT(tr, lang, 'exec_actions')} color={T.accent}>
             <p style={{ margin: 0, fontSize: 12, color: T.text2, lineHeight: 1.75, ...CLAMP_FADE_MASK_SHORT }}>
               <CmdServerText lang={lang} tr={tr} as="span">
-                {act}
+                {actionBody}
               </CmdServerText>
             </p>
           </Sec>
@@ -1243,6 +1300,7 @@ function ContextPanel({ type, payload, extra, tr, lang, onClose, onNavigate, imp
           <div style={{flex:1,fontSize:10,fontWeight:700,color:T.text2,
             textTransform:'uppercase',letterSpacing:'.07em'}}>
             {type==='expense_v2'?strictT(tr, lang, 'cmd_expense_decision_detail')
+             :type==='causal_item'?strictT(tr, lang, 'tab_decisions_v2')
              :type==='decision'?strictT(tr, lang, 'tab_decisions_v2')
              :type==='kpi'?strictT(tr, lang, 'exec_kpi_title')
              :type==='domain'?strictT(tr, lang, 'exec_domain_title')
@@ -1257,6 +1315,7 @@ function ContextPanel({ type, payload, extra, tr, lang, onClose, onNavigate, imp
         </div>
         <div style={{flex:1,overflowY:'auto',padding:'24px 24px'}}>
           {type==='expense_v2' && <ExpenseDecisionV2/>}
+          {type==='causal_item' && <CausalItem/>}
           {type==='decision' && <Decision/>}
           {type==='kpi'      && <Kpi/>}
           {type==='domain'   && <Domain/>}
@@ -1284,7 +1343,7 @@ function ContextPanel({ type, payload, extra, tr, lang, onClose, onNavigate, imp
             <button onClick={onNavigate} style={{width:'100%',padding:'10px 12px',borderRadius:10,
               border:`1px solid ${T.border}`,background:'transparent',color:T.text1,
               fontSize:12,fontWeight:800,cursor:'pointer'}}>
-              {type==='expense_v2'
+              {type==='expense_v2' || type==='causal_item'
                 ? strictT(tr, lang, 'cmd_open_full_analysis_decisions')
                 : type==='branch_compare'
                   ? strictT(tr, lang, 'cmd_open_branches')
@@ -1951,6 +2010,7 @@ export default function CommandCenter() {
         financial_brain:          d.financial_brain ?? null,
         expense_decisions_v2:     d.expense_decisions_v2 ?? [],
         expense_intelligence:     d.expense_intelligence ?? null,
+        realized_causal_items:    d.realized_causal_items ?? [],
       })
       try {
         const fqs = buildAnalysisQuery(scopeQS, { lang, window: win, consolidate: false })
@@ -2010,6 +2070,20 @@ export default function CommandCenter() {
       ? new Set([primaryResolution.expense.decision_id])
       : null
 
+  const omitCausalIds = (() => {
+    if (!primaryResolution || !main?.realized_causal_items?.length) return null
+    const s = new Set()
+    if (primaryResolution.kind === 'cfo') {
+      const id = primaryResolution.decision?.causal_realized?.id
+      if (id) s.add(String(id))
+    }
+    if (primaryResolution.kind === 'expense') {
+      const row = pickExpenseCausalRow(main.realized_causal_items)
+      if (row?.id) s.add(String(row.id))
+    }
+    return s.size ? s : null
+  })()
+
   const primaryHeroKey =
     primaryResolution?.kind === 'expense'
       ? `h-ex-${primaryResolution.expense?.decision_id || 'x'}`
@@ -2043,6 +2117,7 @@ export default function CommandCenter() {
         panelType === 'kpi' ||
         panelType === 'decision' ||
         panelType === 'expense_v2' ||
+        panelType === 'causal_item' ||
         panelType === 'branch_compare'
       setPXtra({
         ...(x || {}),
@@ -2061,6 +2136,7 @@ export default function CommandCenter() {
           expenseIntel,
           decisions: Array.isArray(decs) ? decs : [],
           health,
+          realizedCausalItems: main?.realized_causal_items ?? [],
         },
       })
     },
@@ -2229,6 +2305,7 @@ export default function CommandCenter() {
                   causes={causes}
                   allDecisions={decs}
                   onOpen={open}
+                  realizedCausalItems={main?.realized_causal_items}
                 />
               ) : null
             }
@@ -2275,7 +2352,7 @@ export default function CommandCenter() {
             }
             row3Signals={
               <KeySignalsSection
-                financialBrain={main?.financial_brain}
+                financialBrain={null}
                 comparativeIntel={main?.comparative_intelligence}
                 alerts={alerts}
                 narrative={narrative}
@@ -2330,12 +2407,14 @@ export default function CommandCenter() {
                 }
                 expenseDecisionsV2={main?.expense_decisions_v2}
                 expenseIntel={expenseIntel}
+                realizedCausalItems={main?.realized_causal_items}
                 tr={tr}
                 lang={lang}
-                onOpenDecision={(d) => open('expense_v2', d, {})}
+                onOpenDecision={(d) => open('causal_item', d, {})}
                 visualTier={primaryResolution ? 3 : 2}
                 defaultCollapsed={!!primaryResolution}
                 omitDecisionIds={omitPrimaryExpenseId}
+                omitCausalIds={omitCausalIds}
               />
             }
             secondaryTitle={

@@ -152,11 +152,17 @@ function ContextPanel({ type, payload, extra, tr, lang, onClose, onNavigate, imp
     )
   }
 
-  // DECISION
-  const Decision = () => (
+  // DECISION — realized causal text only (aligned with Command Center / Analysis)
+  const Decision = () => {
+    const cr = payload.causal_realized || {}
+    const headline =
+      String(cr.change_text || cr.action_text || '').trim() || strictT(tr, lang, 'cmd_na_short')
+    const causeBody = String(cr.cause_text || '').trim()
+    const actionBody = String(cr.action_text || '').trim()
+    return (
     <>
       <div style={{fontSize:17,fontWeight:800,color:T.text1,lineHeight:1.3,marginBottom:8, ...CLAMP_FADE_MASK_SHORT}}>
-        <CmdServerText lang={lang} tr={tr} as="span">{payload.title}</CmdServerText>
+        <CmdServerText lang={lang} tr={tr} as="span">{headline}</CmdServerText>
       </div>
       <div style={{display:'flex',gap:6,flexWrap:'wrap',marginBottom:22}}>
         <Pill label={strictT(tr, lang, `urgency_${payload.urgency}`)} color={uClr[payload.urgency]||T.text3}/>
@@ -171,35 +177,21 @@ function ContextPanel({ type, payload, extra, tr, lang, onClose, onNavigate, imp
         />
       </div>
 
-      <Sec label={strictT(tr, lang, 'exec_why')} color={T.red}>
-        <p style={{fontSize:12,color:T.text2,lineHeight:1.75,margin:0,marginBottom:extra?.causes?.length?10:0, ...CLAMP_FADE_MASK_SHORT}}>
-          <CmdServerText lang={lang} tr={tr} as="span">{payload.reason}</CmdServerText>
-        </p>
-        {extra?.causes?.slice(0,2).map((c,i) => (
-          <div key={i} style={{marginTop:7,padding:'8px 11px',borderRadius:8,
-            background:`${T.red}08`,border:`1px solid ${T.red}18`}}>
-            <div style={{fontSize:10,fontWeight:700,color:T.text1,marginBottom:2}}>
-              <CmdServerText lang={lang} tr={tr} as="span">{c.title}</CmdServerText>
-            </div>
-            <div style={{fontSize:10,color:T.text2,lineHeight:1.5, ...CLAMP_FADE_MASK_SHORT}}>
-              <CmdServerText lang={lang} tr={tr} as="span">{c.description}</CmdServerText>
-            </div>
-          </div>
-        ))}
-      </Sec>
-
-      <Sec label={strictT(tr, lang, 'exec_actions')} color={dc}>
-        <Steps text={payload.action}/>
-      </Sec>
-
-      {payload.expected_effect && (
-        <Sec label={strictT(tr, lang, 'exec_effect')} color={T.green}>
-          <div style={{background:`${T.green}08`,borderRadius:9,padding:'12px 14px',
-            border:`1px solid ${T.green}1a`,fontSize:12,color:T.text2,lineHeight:1.75, ...CLAMP_FADE_MASK_SHORT}}>
-            <CmdServerText lang={lang} tr={tr} as="span">{payload.expected_effect}</CmdServerText>
-          </div>
+      {causeBody ? (
+        <Sec label={strictT(tr, lang, 'exec_why')} color={T.red}>
+          <p style={{fontSize:12,color:T.text2,lineHeight:1.75,margin:0, ...CLAMP_FADE_MASK_SHORT}}>
+            <CmdServerText lang={lang} tr={tr} as="span">{causeBody}</CmdServerText>
+          </p>
         </Sec>
-      )}
+      ) : null}
+
+      {actionBody ? (
+        <Sec label={strictT(tr, lang, 'exec_actions')} color={dc}>
+          <p style={{fontSize:12,color:T.text2,lineHeight:1.75,margin:0, ...CLAMP_FADE_MASK_SHORT}}>
+            <CmdServerText lang={lang} tr={tr} as="span">{actionBody}</CmdServerText>
+          </p>
+        </Sec>
+      ) : null}
 
       {/* Expected Impact section */}
       {(()=>{
@@ -228,21 +220,12 @@ function ContextPanel({ type, payload, extra, tr, lang, onClose, onNavigate, imp
                 {fmtImpactQuant(imp.range.low)} – {fmtImpactQuant(imp.range.high)} {strictT(tr, lang, 'impact_range_label')}
               </div>
             )}
-            <p style={{fontSize:11,color:T.text2,lineHeight:1.6,margin:'0 0 10px', ...CLAMP_FADE_MASK_SHORT}}>
-              <CmdServerText lang={lang} tr={tr} as="span">{imp.description}</CmdServerText>
-            </p>
             <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
               <span style={{fontSize:9,color:T.green,background:`${T.green}15`,padding:'2px 8px',borderRadius:20,fontWeight:700,border:`1px solid ${T.green}30`}}>
                 {imp.confidence != null && Number.isFinite(Number(imp.confidence))
                   ? `${strictT(tr, lang, 'fc_confidence')}: ${formatPctForLang(Number(imp.confidence), 0, lang)}`
                   : `${strictT(tr, lang, 'fc_confidence')}: —`}
               </span>
-              {imp.assumption ? (
-                <span style={{ fontSize: 10, color: T.text2, fontStyle: 'italic' }}>
-                  {strictT(tr, lang, 'impact_based_on')}:{' '}
-                  <CmdServerText lang={lang} tr={tr} as="span">{imp.assumption}</CmdServerText>
-                </span>
-              ) : null}
             </div>
           </div>
         )
@@ -260,7 +243,8 @@ function ContextPanel({ type, payload, extra, tr, lang, onClose, onNavigate, imp
         </div>
       </div>
     </>
-  )
+    )
+  }
 
   // KPI
   const Kpi = () => (
@@ -530,7 +514,8 @@ function ActionStrip({ decisions, tr, lang, onSelect, causes, impacts={} }) {
           const miss = localizedMissingPlaceholder(lang)
           const stShort = strictT(tr, lang, `dec_short_${dec.domain}`)
           const shortTitle = stShort !== miss ? stShort : dec.title
-          const hint       = dec.reason?.split('. ')[0]||''
+          const cr = dec.causal_realized || {}
+          const hint = String(cr.cause_text || cr.change_text || cr.action_text || '').trim().split('\n')[0] || ''
           const linkedC    = causes?.filter(c=>c.domain===dec.domain||c.domain==='cross_domain')||[]
 
           return (
@@ -551,7 +536,13 @@ function ActionStrip({ decisions, tr, lang, onSelect, causes, impacts={} }) {
               </div>
               {/* Title: max 4 words */}
               <div style={{fontSize:13,fontWeight:800,color:T.text1,lineHeight:1.3,marginBottom:5, ...CLAMP_FADE_MASK_SHORT}}>
-                {stShort !== miss ? shortTitle : <CmdServerText lang={lang} tr={tr} as="span">{dec.title}</CmdServerText>}
+                {stShort !== miss ? (
+                  shortTitle
+                ) : (
+                  <CmdServerText lang={lang} tr={tr} as="span">
+                    {String(cr.change_text || cr.action_text || '').trim() || dec.title}
+                  </CmdServerText>
+                )}
               </div>
               {/* Impact preview chip */}
               {(()=>{
@@ -881,12 +872,15 @@ function KeyInsightsStrip({ stmtInsights, decisions, fcData, lang, tr }) {
     if (!ins?.message) return
     // cause: first matching decision reason for same domain
     const dec = (decisions||[]).find(d=>d.domain===ins.domain)
-    const cause = dec?.reason ? dec.reason.split('. ')[0].slice(0,60) : null
+    const ctxt = dec?.causal_realized
+      ? String(dec.causal_realized.cause_text || dec.causal_realized.change_text || '').trim()
+      : ''
+    const cause = ctxt ? ctxt.slice(0, 60) : null
     items.push({ text: ins.message.split('. ')[0], domain: ins.domain, cause })
   })
   ;(decisions || []).slice(0, 2).forEach(dec => {
     if (items.length >= 3) return
-    const sentence = (dec.reason || '').split('. ')[0]
+    const sentence = String(dec.causal_realized?.change_text || dec.causal_realized?.action_text || '').trim()
     if (sentence.length > 10) items.push({ text: sentence, domain: dec.domain, cause: null })
   })
   if (!items.length && !fcData?.available) return null

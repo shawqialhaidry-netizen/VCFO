@@ -37,23 +37,27 @@ function primaryBlock(res) {
   if (!res) return null
   if (res.kind === 'expense' && res.expense) {
     const ex = res.expense
-    const rat = ex.rationale && String(ex.rationale).trim()
+    const cr = ex.causal_realized || {}
+    const sn = String(cr.action_text || cr.cause_text || cr.change_text || '').trim()
+    const head = String(cr.change_text || cr.action_text || '').trim()
     return {
       kind: 'expense',
-      title: ex.title ? String(ex.title).trim() : '',
+      title: head,
       domain: 'profitability',
-      rationaleSnippet: rat ? rat.slice(0, 140) : '',
+      rationaleSnippet: sn ? sn.slice(0, 140) : '',
       priority: String(ex.priority || 'medium').toLowerCase(),
     }
   }
   if (res.decision) {
     const d = res.decision
-    const reason = d.reason && String(d.reason).trim()
+    const cr = d.causal_realized || {}
+    const sn = String(cr.action_text || cr.cause_text || cr.change_text || '').trim()
+    const head = String(cr.change_text || cr.action_text || '').trim()
     return {
       kind: 'cfo',
-      title: d.title ? String(d.title).trim() : '',
+      title: head,
       domain: d.domain ? String(d.domain).toLowerCase() : '',
-      rationaleSnippet: reason ? reason.slice(0, 140) : '',
+      rationaleSnippet: sn ? sn.slice(0, 140) : '',
       urgency: String(d.urgency || 'medium').toLowerCase(),
     }
   }
@@ -172,9 +176,9 @@ export function buildAiCfoExecutiveContext(p) {
       .slice(0, 3)
       .map((x) => String(x).trim()),
     ranked_decision_titles: (Array.isArray(p.decisions) ? p.decisions : [])
-      .filter((d) => d && d.title)
+      .filter((d) => d && (d.causal_realized?.change_text || d.causal_realized?.action_text))
       .slice(0, 3)
-      .map((d) => String(d.title).trim()),
+      .map((d) => String(d.causal_realized.change_text || d.causal_realized.action_text).trim()),
   }
 }
 
@@ -184,7 +188,7 @@ export function buildAiCfoExecutiveContext(p) {
  */
 export function primaryDecisionRelevant(cx, intent) {
   const pd = cx.primary_decision
-  if (!pd?.title) return false
+  if (!pd?.title && !pd?.rationaleSnippet) return false
   if (pd.kind === 'expense') {
     return (
       intent === 'WHY_PROFIT' ||

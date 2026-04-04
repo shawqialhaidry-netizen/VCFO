@@ -650,41 +650,51 @@ function DecisionImpactAmount({ savingsRaw, tr, lang }) {
   )
 }
 
-/** expense_decisions_v2; max 3; always at least one row (baseline if empty). */
+/** Prioritized calls-to-action: realized `causal_items` only (executive payload). */
 export function DecisionsSection({
-  expenseDecisionsV2,
-  expenseIntel,
+  expenseDecisionsV2: _v2,
+  expenseIntel: _intel,
+  realizedCausalItems,
   tr,
   lang,
   onOpenDecision,
   visualTier = 2,
   defaultCollapsed = false,
-  omitDecisionIds = null,
+  omitDecisionIds: _omitDecisionIds,
+  omitCausalIds = null,
 }) {
+  void _v2
+  void _intel
+  void _omitDecisionIds
   const [expanded, setExpanded] = useState(!defaultCollapsed)
 
-  let list = Array.isArray(expenseDecisionsV2) ? expenseDecisionsV2.filter((d) => d && d.title) : []
-  if (!list.length && expenseIntel?.available && Array.isArray(expenseIntel.decisions)) {
-    list = expenseIntel.decisions
-      .filter((d) => d && d.title)
-      .map((d) => ({
-        decision_id: d.decision_id,
-        title: d.title,
-        rationale: d.rationale || (typeof d.action === 'string' ? d.action : null),
-        priority: d.priority || 'medium',
-        expected_financial_impact: d.expected_financial_impact,
-        action: typeof d.action === 'object' && d.action != null ? d.action : undefined,
+  let list = []
+  if (Array.isArray(realizedCausalItems) && realizedCausalItems.length) {
+    list = realizedCausalItems
+      .filter((it) => it && (String(it.change_text || '').trim() || String(it.action_text || '').trim()))
+      .filter((it) => {
+        const id = String(it.id || '')
+        return !omitCausalIds || !omitCausalIds.size || !id || !omitCausalIds.has(id)
+      })
+      .map((it, idx) => ({
+        decision_id: String(it.id || `causal_${idx}`),
+        causalRow: it,
+        title: String(it.change_text || it.action_text || '').trim(),
+        bodyCause: String(it.cause_text || '').trim(),
+        bodyAction: String(it.action_text || '').trim(),
+        priority: 'medium',
+        expected_financial_impact: undefined,
+        action: undefined,
       }))
-  }
-  if (omitDecisionIds && omitDecisionIds.size > 0) {
-    list = list.filter((d) => d.decision_id && !omitDecisionIds.has(d.decision_id))
   }
   if (!list.length) {
     list = [
       {
         decision_id: '_cmd_baseline',
+        causalRow: null,
         title: st(tr, lang, 'cmd_decision_baseline'),
-        rationale: null,
+        bodyCause: '',
+        bodyAction: '',
         priority: 'medium',
       },
     ]
@@ -705,19 +715,24 @@ export function DecisionsSection({
         const savingsRaw = d.expected_financial_impact?.estimated_monthly_savings
         const savingsOk =
           savingsRaw != null && Number.isFinite(Number(savingsRaw)) && Number(savingsRaw) > 0
+        const openPayload = d.causalRow || {
+          change_text: d.title,
+          cause_text: d.bodyCause,
+          action_text: d.bodyAction,
+        }
         return (
           <div
             key={d.decision_id || d.title}
             className={`cmd-decision-tile cmd-card-hover${first ? ' cmd-decision-priority-ring' : ''}`.trim()}
             role={onOpenDecision ? 'button' : undefined}
             tabIndex={onOpenDecision ? 0 : undefined}
-            onClick={onOpenDecision ? () => onOpenDecision(d) : undefined}
+            onClick={onOpenDecision ? () => onOpenDecision(openPayload) : undefined}
             onKeyDown={
               onOpenDecision
                 ? (e) => {
                     if (e.key === 'Enter' || e.key === ' ') {
                       e.preventDefault()
-                      onOpenDecision(d)
+                      onOpenDecision(openPayload)
                     }
                   }
                 : undefined
@@ -792,7 +807,7 @@ export function DecisionsSection({
                 </div>
               </div>
             </div>
-            {d.rationale ? (
+            {d.bodyCause || d.bodyAction ? (
               <div
                 style={{
                   fontSize: first ? 12 : 11,
@@ -805,9 +820,16 @@ export function DecisionsSection({
                   maskImage: 'linear-gradient(to bottom, #000 75%, transparent 100%)',
                 }}
               >
-                <CmdServerText lang={lang} tr={tr} as="span" style={{ color: 'inherit' }}>
-                  {d.rationale}
-                </CmdServerText>
+                {d.bodyCause ? (
+                  <CmdServerText lang={lang} tr={tr} as="span" style={{ color: 'inherit', display: 'block' }}>
+                    {d.bodyCause}
+                  </CmdServerText>
+                ) : null}
+                {d.bodyAction ? (
+                  <CmdServerText lang={lang} tr={tr} as="span" style={{ color: 'inherit', display: 'block' }}>
+                    {d.bodyAction}
+                  </CmdServerText>
+                ) : null}
               </div>
             ) : null}
           </div>

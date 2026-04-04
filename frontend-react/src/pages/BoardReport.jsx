@@ -16,6 +16,7 @@ import {
   formatMultipleForLang,
   formatDays,
 } from '../utils/numberFormat.js'
+import CmdServerText from '../components/CmdServerText.jsx'
 
 const API = '/api/v1'
 function auth() {
@@ -510,95 +511,41 @@ export default function BoardReport(){
           </div>
         </>}
 
-        {/* §4.75 Financial brain (API brain_pack + structured causes/decisions) */}
-        {(() => {
-          const brain = data?.brain_pack || {}
-          const press = brain.expense_pressure || {}
-          const tstats = brain.trend_series_stats || {}
-          const profBr = brain.profitability || {}
-          const interp = profBr.interpretation || {}
-          const sigs = brain.trend_signals || []
-          const srcRC = data?.structured_root_causes || []
-          const srcDec = data?.structured_decisions || []
-          const hasBrain = press?.interpretation || (sigs && sigs.length) || (interp?.notes && interp.notes.length)
-            || srcRC.length || srcDec.length
-          if (!hasBrain) return null
-          return <>
+        {/* §4.75 Realized causal items only (same pipeline as Command Center / Analysis) */}
+        {Array.isArray(data?.realized_causal_items) && data.realized_causal_items.length > 0 ? (
+          <>
             <SDiv n={4.75} title={tr('board_financial_brain')} accent={T.blue}/>
-            <div className="two-col" style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
-              <Sec accent={T.blue}>
-                <div style={{fontSize:10,fontWeight:800,color:T.blue,textTransform:'uppercase',letterSpacing:'.08em',marginBottom:12}}>
-                  {tr('board_cost_pressure')}
-                </div>
-                {press.pressure_level && (
-                  <p style={{fontSize:12,color:T.text2,margin:'0 0 8px'}}>
-                    <strong>{tr('board_pressure_level')}:</strong> {press.pressure_level}
-                    {press.headline_metrics?.total_cost_ratio_pct != null && (
-                      <> · {tr('board_total_cost_ratio')}: {formatPctForLang(press.headline_metrics.total_cost_ratio_pct, 1, lang)}</>
-                    )}
-                  </p>
-                )}
-                {press.interpretation && (
-                  <p style={{fontSize:12,color:T.text2,lineHeight:1.6,margin:0}}>{press.interpretation}</p>
-                )}
-                {(interp.notes || []).length > 0 && (
-                  <ul style={{margin:'8px 0 0',paddingLeft:18,fontSize:11,color:T.text2,lineHeight:1.5}}>
-                    {interp.notes.map((n, i) => <li key={i}>{n}</li>)}
-                  </ul>
-                )}
-                {tstats.revenue_mom_cv_6 != null && (
-                  <p style={{fontSize:10,color:T.text3,margin:'8px 0 0'}}>
-                    MoM CV (6): revenue {tstats.revenue_mom_cv_6} · profit {tstats.net_profit_mom_cv_6 ?? '—'}
-                  </p>
-                )}
-              </Sec>
-              <Sec accent={T.violet}>
-                <div style={{fontSize:10,fontWeight:800,color:T.violet,textTransform:'uppercase',letterSpacing:'.08em',marginBottom:12}}>
-                  {tr('board_trend_signals')}
-                </div>
-                {sigs.length === 0
-                  ? <p style={{fontSize:12,color:T.text3,fontStyle:'italic',margin:0}}>—</p>
-                  : <ul style={{margin:0,paddingLeft:18,fontSize:11,color:T.text2,lineHeight:1.55}}>
-                      {sigs.slice(0, 8).map((s, i) => (
-                        <li key={i}><strong>{s.type || 'signal'}</strong>{s.metric ? ` (${s.metric})` : ''}{s.value != null ? `: ${s.value}` : ''}</li>
-                      ))}
-                    </ul>
-                }
-                {srcRC.length > 0 && (
-                  <div style={{marginTop:12}}>
-                    <div style={{fontSize:9,fontWeight:800,color:T.red,textTransform:'uppercase',letterSpacing:'.06em',marginBottom:6}}>
-                      {tr('board_root_causes')}
-                    </div>
-                    <ul style={{margin:0,paddingLeft:18,fontSize:11,color:T.text2,lineHeight:1.5}}>
-                      {srcRC.slice(0, 5).map((r, i) => (
-                        <li key={i}>
-                          <strong>{r.cause || r.type}</strong>
-                          {r.metric ? ` · ${r.metric}` : ''}{r.direction ? ` · ${r.direction}` : ''}{r.impact_level ? ` · ${r.impact_level}` : ''}
-                          {r.what_happened ? ` — ${r.what_happened}` : ''}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-                {srcDec.length > 0 && (
-                  <div style={{marginTop:12}}>
-                    <div style={{fontSize:9,fontWeight:800,color:T.green,textTransform:'uppercase',letterSpacing:'.06em',marginBottom:6}}>
-                      {tr('board_cfo_decisions')}
-                    </div>
-                    <ul style={{margin:0,paddingLeft:18,fontSize:11,color:T.text2,lineHeight:1.5}}>
-                      {srcDec.slice(0, 5).map((d, i) => (
-                        <li key={i}>
-                          <strong>{d.title || d.domain}</strong>{d.priority != null ? ` (#${d.priority})` : ''}
-                          {d.reason ? ` — ${String(d.reason).slice(0, 120)}${String(d.reason).length > 120 ? '…' : ''}` : ''}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-              </Sec>
-            </div>
+            <Sec accent={T.blue}>
+              <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, color: T.text2, lineHeight: 1.55 }}>
+                {data.realized_causal_items.slice(0, 12).map((it, i) => (
+                  <li key={it.id || i} style={{ marginBottom: 12 }}>
+                    {it.change_text ? (
+                      <p style={{ margin: '0 0 6px' }}>
+                        <CmdServerText lang={lang} tr={tr} style={{ color: 'inherit' }}>
+                          {it.change_text}
+                        </CmdServerText>
+                      </p>
+                    ) : null}
+                    {it.cause_text ? (
+                      <p style={{ margin: '0 0 6px' }}>
+                        <CmdServerText lang={lang} tr={tr} style={{ color: 'inherit' }}>
+                          {it.cause_text}
+                        </CmdServerText>
+                      </p>
+                    ) : null}
+                    {it.action_text ? (
+                      <p style={{ margin: 0 }}>
+                        <CmdServerText lang={lang} tr={tr} style={{ color: 'inherit' }}>
+                          {it.action_text}
+                        </CmdServerText>
+                      </p>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            </Sec>
           </>
-        })()}
+        ) : null}
 
         {/* §5 Priorities */}
         <SDiv n={5} title={tr('priorities_label')} accent={T.amber}/>
