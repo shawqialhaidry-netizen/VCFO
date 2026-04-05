@@ -39,12 +39,10 @@ def build_advisor_context(
     """
     from app.models.company            import Company
     from app.models.trial_balance      import TrialBalanceUpload
-    from app.services.financial_statements import build_statements, statements_to_dict
-    from app.services.account_classifier   import classify_dataframe
+    from app.services.canonical_period_statements import build_period_statements_from_uploads
     from app.services.analysis_engine      import run_analysis
     from app.services.cashflow_engine      import build_cashflow
     from app.services.reconciliation_engine import build_validation_block
-    import pandas as pd
 
     def _r2(v): return round(float(v or 0), 2)
 
@@ -76,24 +74,9 @@ def build_advisor_context(
     tb_debit = tb_credit = None
 
     if uploads:
-        for upload in uploads:
-            if not upload.normalized_path:
-                continue
-            try:
-                df = pd.read_csv(upload.normalized_path)
-                if df.empty:
-                    continue
-                classified = classify_dataframe(df)
-                fs = build_statements(classified, company_id=company_id, period=upload.period or "")
-                d  = statements_to_dict(fs)
-                d["period"] = upload.period
-                all_stmts.append(d)
-            except Exception as e:
-                logger.warning("context load_stmt %s: %s", upload.id, e)
-
-        if uploads:
-            tb_debit  = float(uploads[-1].total_debit  or 0)
-            tb_credit = float(uploads[-1].total_credit or 0)
+        all_stmts = build_period_statements_from_uploads(company_id, uploads)
+        tb_debit  = float(uploads[-1].total_debit  or 0)
+        tb_credit = float(uploads[-1].total_credit or 0)
 
     # Apply window filter
     if all_stmts:

@@ -27,6 +27,34 @@ from app.services.structured_profit_bridge import (
 from app.services.structured_profit_story import build_structured_profit_story_from_window
 
 
+# Keys duplicated at executive root via extract_structured_financial_overlay — omit from nested `statements` to avoid payload drift.
+STRUCTURED_FINANCIAL_KEYS = frozenset({
+    "structured_income_statement",
+    "structured_income_statement_meta",
+    "structured_income_statement_variance",
+    "structured_income_statement_margin_variance",
+    "structured_income_statement_variance_meta",
+    "structured_profit_bridge",
+    "structured_profit_bridge_interpretation",
+    "structured_profit_bridge_meta",
+    "structured_profit_story",
+})
+
+
+def extract_structured_financial_overlay(bundle: dict) -> dict:
+    """Lift canonical structured blocks from build_statement_bundle (single construction site)."""
+    if not isinstance(bundle, dict):
+        return {}
+    return {k: bundle[k] for k in STRUCTURED_FINANCIAL_KEYS if k in bundle}
+
+
+def strip_structured_keys_for_nested_statements(bundle: dict) -> dict:
+    """Remove structured keys from the nested `data.statements` object only."""
+    if not isinstance(bundle, dict):
+        return bundle
+    return {k: v for k, v in bundle.items() if k not in STRUCTURED_FINANCIAL_KEYS}
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _r2(v) -> Optional[float]:
@@ -210,8 +238,8 @@ def build_statement_bundle(
     ca  = bs_.get("current_assets")
     cl  = bs_.get("current_liabilities")
 
-    # current_ratio derived here from the authoritative ca/cl values
-    cr  = _r2(ca / cl) if (ca and cl and cl != 0) else _get(liq_r, "current_ratio", "value")
+    # current_ratio — Phase 2: statement-derived only (no intelligence ratio fallback / drift)
+    cr  = _r2(ca / cl) if (ca is not None and cl is not None and float(cl) != 0) else None
     dr  = None
     if total_assets and total_assets > 0 and total_liab:
         dr = _r2(total_liab / total_assets * 100)

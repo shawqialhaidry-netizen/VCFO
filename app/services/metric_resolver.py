@@ -1,11 +1,16 @@
 """
-metric_resolver.py — Metric Resolver (single source of truth access layer).
+metric_resolver.py — Metric Resolver (Phase 2: DIAGNOSTIC / EVIDENCE ONLY).
 
-Provides canonical metric access across:
-- root causes
-- decisions
-- deep intelligence
-- branch intelligence
+NOT authoritative for product financial truth. Authoritative numbers for UI are:
+  - period statement dicts from ``canonical_period_statements.build_period_statements_from_uploads``
+  - ``analysis_engine.run_analysis`` → ``latest`` / ``trends``
+  - ``time_intelligence.build_kpi_block`` on the same windowed statements
+  - ``cashflow_engine.build_cashflow`` for operating cashflow
+
+MetricResolver remains for:
+  - optional evidence blocks on some API responses
+  - log-only shadow parity checks (``api.analysis._shadow_compare_metrics``)
+  - branch drill-down confidence helpers
 
 Design rules:
 - Read-only: no DB, no HTTP, no side effects.

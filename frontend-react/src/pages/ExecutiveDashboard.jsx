@@ -1,7 +1,9 @@
 /**
  * ExecutiveDashboard.jsx — Phase 30
  * Decision-first executive screen.
- * Data sources: GET /analysis/{id}/executive and GET /analysis/{id}/forecast only (no legacy aggregate /analysis).
+ * Data sources: GET /analysis/{id}/executive (canonical). Secondary GET /forecast is the
+ * same engine/object as `data.forecast` — redundant; migration later to executive-only.
+ * No legacy aggregate GET /analysis/{id} on this page.
  * Alternate experiment tabs live on Dashboard.jsx; see QUARANTINE notes there for POST scenario ranker vs executive.
  * Hover = simple explanation. Click = deep panel.
  * Arabic = plain language, zero jargon.

@@ -67,7 +67,6 @@ import CommandCenterIntelligenceGrid, {
 } from '../components/CommandCenterIntelligenceGrid.jsx'
 import CommandCenterIntelligenceMosaic from '../components/CommandCenterIntelligenceMosaic.jsx'
 import CommandCenterIntelligenceExpanded from '../components/CommandCenterIntelligenceExpanded.jsx'
-import { riskScoreFromIntel, scoreFromCategory } from '../utils/commandCenterIntelScores.js'
 import {
   CommandCenterBranchGroupedChart,
   CommandCenterTripleTrendChart,
@@ -1891,8 +1890,6 @@ function ExecutiveKpiRow({
   const dispFull = (v) => (v == null || v === '' || isNaN(Number(v)) ? null : formatFullForLang(v, lang))
   const cfEstimated = cashflow?.reliability === 'estimated'
   const wc       = kpis.working_capital?.value
-             ?? cashflow?.working_capital
-             ?? main?.statements?.balance_sheet?.working_capital
   const wcColor  = wc==null?T.text3:wc>=0?T.green:T.red
   const heroKey = 'net_profit'
   const cards = [
@@ -2247,14 +2244,9 @@ export default function CommandCenter() {
         structured_profit_bridge: d.structured_profit_bridge ?? null,
         structured_profit_bridge_interpretation: d.structured_profit_bridge_interpretation ?? null,
         structured_profit_story: d.structured_profit_story ?? null,
+        intel_tile_hints: d.intel_tile_hints ?? null,
       })
-      try {
-        const fqs = buildAnalysisQuery(scopeQS, { lang, window: win, consolidate })
-        if (fqs !== null) {
-          const fr = await authFetch(`${API}/analysis/${selectedId}/forecast?${fqs}`, { headers: auth() })
-          if (fr.ok) { const fj = await fr.json(); if (fj?.data) setFcData(fj.data) }
-        }
-      } catch (_) {}
+      setFcData(d.forecast && typeof d.forecast === 'object' ? d.forecast : null)
     } finally {
       setLoading(false)
     }
@@ -2279,21 +2271,30 @@ export default function CommandCenter() {
     [fcData],
   )
   const intelLiquidityHint = useMemo(
-    () => (main ? liquidityHintLine(main.cashflow, kpis, tr, lang) : null),
-    [main, kpis, tr, lang],
+    () => (main ? liquidityHintLine(main.intel_tile_hints, tr, lang) : null),
+    [main, tr, lang],
   )
   const intelEfficiencyHint = useMemo(
-    () => (main ? efficiencyHintLine(kpis, tr, lang) : null),
-    [main, kpis, tr, lang],
+    () => (main ? efficiencyHintLine(main.intel_tile_hints, tr, lang) : null),
+    [main, tr, lang],
   )
-  const intelRiskScore = useMemo(() => riskScoreFromIntel(intel, alerts || []), [intel, alerts])
+  const intelRiskScore = useMemo(() => {
+    const s = intel?.surface_scores?.risk_composite
+    return s != null && Number.isFinite(Number(s)) ? Number(s) : null
+  }, [intel])
   const intelHighAlertCount = useMemo(
     () => (alerts || []).filter((a) => a.severity === 'high').length,
     [alerts],
   )
   const intelAlertCount = useMemo(() => (alerts || []).length, [alerts])
-  const intelLiquidityScore = useMemo(() => scoreFromCategory(intel?.ratios || {}, 'liquidity'), [intel])
-  const intelEfficiencyScore = useMemo(() => scoreFromCategory(intel?.ratios || {}, 'efficiency'), [intel])
+  const intelLiquidityScore = useMemo(() => {
+    const s = intel?.surface_scores?.liquidity
+    return s != null && Number.isFinite(Number(s)) ? Number(s) : null
+  }, [intel])
+  const intelEfficiencyScore = useMemo(() => {
+    const s = intel?.surface_scores?.efficiency
+    return s != null && Number.isFinite(Number(s)) ? Number(s) : null
+  }, [intel])
   const intelForecastPrimaryMetric = useMemo(() => {
     if (!fcData?.available) return null
     const bRev = fcData?.scenarios?.base?.revenue?.[0]

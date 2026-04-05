@@ -165,7 +165,8 @@ def test_mom_change_requires_two_numeric_points():
 
 def test_empty_windowed_unavailable():
     out = se.build_statement_bundle([], _cashflow(), _intelligence())
-    assert out == {"available": False, "reason": "No period data"}
+    assert out.get("available") is False
+    assert out.get("reason") == "No period data"
 
 
 def test_invalid_lang_defaults_to_en():
@@ -217,7 +218,8 @@ def test_current_ratio_from_balance_sheet_when_ca_cl_present():
     assert out["balance_sheet"]["ratios"]["current_ratio"] == 2.0
 
 
-def test_current_ratio_fallback_from_intelligence():
+def test_current_ratio_none_without_balance_sheet_ca_cl_phase2():
+    """Phase 2: no intelligence fallback — ratio only from statement CA/CL."""
     w = [
         _period(
             "2025-01",
@@ -233,7 +235,7 @@ def test_current_ratio_fallback_from_intelligence():
         }
     )
     out = se.build_statement_bundle(w, _cashflow(), intel)
-    assert out["balance_sheet"]["ratios"]["current_ratio"] == 1.55
+    assert out["balance_sheet"]["ratios"]["current_ratio"] is None
 
 
 def test_debt_ratio_pct():
@@ -460,13 +462,13 @@ def test_missing_optional_balance_sheet_keys():
     assert out["balance_sheet"]["ratios"]["debt_ratio_pct"] is None
 
 
-def test_current_liabilities_zero_falls_back_to_intelligence_for_current_ratio():
+def test_current_liabilities_zero_no_current_ratio_phase2():
     intel = _intelligence(
         ratios={"profitability": {}, "liquidity": {"current_ratio": {"value": 1.1}}}
     )
     w = [_period("2025-01", ca=50_000.0, cl=0.0)]
     out = se.build_statement_bundle(w, _cashflow(), intel)
-    assert out["balance_sheet"]["ratios"]["current_ratio"] == 1.1
+    assert out["balance_sheet"]["ratios"]["current_ratio"] is None
 
 
 def test_total_assets_zero_skips_debt_ratio():

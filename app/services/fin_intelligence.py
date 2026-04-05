@@ -1,8 +1,12 @@
 """
-fin_intelligence.py — Phase 21
-Combines financial_ratios, trend_analysis, anomaly_detector into one
-intelligence response. Computes health_score_v2 independently of
-Phase 12 decision_engine/intelligence_engine (no interference).
+fin_intelligence.py — Phase 21 / Phase 3
+
+CANONICAL product intelligence (ratios, trends, anomalies, health_score_v2) for all
+executive-aligned endpoints. Every product surface must use this on the same
+scoped ``windowed`` statements as GET /executive.
+
+``intelligence_engine.run_intelligence`` is legacy-only (GET /{company_id} aggregate)
+and must not be treated as a second product brain.
 """
 from __future__ import annotations
 from app.services.financial_ratios import extract_ratios

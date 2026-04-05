@@ -2,11 +2,15 @@
 intelligence_engine.py — Phase 8
 CFO Intelligence Layer.
 
+LEGACY / NON-CANONICAL FOR PRODUCT (Phase 3): ``run_intelligence`` feeds only the
+historical GET /{company_id} aggregate response. Product Command Center / executive
+use ``fin_intelligence.build_intelligence`` + ``build_cfo_decisions`` instead.
+
 Sits ABOVE the existing decision_engine.py.
 Takes the full analysis + trends and produces CFO-grade intelligence:
   - Structured insights with what/why/impact
   - Financial reasoning (margin compression, cost pressure, revenue root cause)
-  - Simple trend-based forecast (next period direction + range)
+  - Forecast in ``run_intelligence`` uses ``forecast_engine.build_forecast`` only (not ad-hoc series)
 
 Design rules:
   - NO external AI APIs — pure deterministic logic
@@ -46,9 +50,7 @@ class I:
     OPEX_GROWING_FASTER        = 2.0     # OpEx MoM > Revenue MoM by this %
     OPEX_TO_REVENUE_HIGH       = 35.0    # OpEx/Revenue %
 
-    # Forecasting
-    FORECAST_WINDOW            = 3       # periods used for weighted trend
-    FORECAST_CONFIDENCE_MIN    = 3       # minimum periods needed for forecast
+    # (Legacy forecast constants removed — run_intelligence uses forecast_engine only.)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -474,173 +476,10 @@ def _profitability_trend_analysis(trends: dict, latest: dict) -> list[dict]:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  Forecasting engine (trend-based)
+#  Legacy internal forecast helpers (Phase 1.1)
+#  REMOVED: former _build_forecast / narrative helpers. Product + GET /analysis
+#  decision.forecast both use forecast_engine.build_forecast via run_intelligence().
 # ══════════════════════════════════════════════════════════════════════════════
-
-def _build_forecast(trends: dict, latest: dict) -> dict:
-    """
-    Simple trend-based 1-period-ahead forecast.
-    Uses weighted moving average of recent MoM changes to project next period.
-
-    Method:
-      - Weights: most recent period = 3×, second = 2×, third = 1×
-      - Apply weighted average MoM to latest value
-      - Compute confidence band: ± 1 std-dev of last 3 MoM values
-
-    Returns:
-    {
-      available: bool,
-      method: str,
-      next_period_label: str,
-      revenue: { point, low, high, direction, confidence },
-      net_profit: { point, low, high, direction, confidence },
-      gross_margin: { point_pct },
-      narrative: str,
-      warning: str | None,
-    }
-    """
-    rev_series  = _g(trends, "revenue_series")       or []
-    np_series   = _g(trends, "net_profit_series")    or []
-    gm_series   = _g(trends, "gross_margin_series")  or []
-    rev_mom     = _g(trends, "revenue_mom_pct")      or []
-    np_mom      = _g(trends, "net_profit_mom_pct")   or []
-    periods     = _g(trends, "periods")              or []
-
-    n_req = I.FORECAST_CONFIDENCE_MIN
-    if (len(rev_series) < n_req or len(np_series) < n_req
-            or len(rev_mom) < n_req or len(np_mom) < n_req):
-        return {
-            "available": False,
-            "reason":    f"Minimum {n_req} periods of data required for forecasting.",
-        }
-
-    # ── Next period label ──────────────────────────────────────────────────────
-    latest_period = periods[-1] if periods else ""
-    next_label = _next_period_label(latest_period)
-
-    # ── Weighted MoM forecast ─────────────────────────────────────────────────
-    def _weighted_forecast(series, mom_series, label):
-        # Recent MoM values — last 3
-        recent_mom = [v for v in mom_series[-3:] if v is not None]
-        if not recent_mom:
-            return None
-
-        weights   = list(range(1, len(recent_mom) + 1))   # [1, 2, 3] most-recent = highest
-        w_sum     = sum(weights)
-        w_avg_mom = sum(w * m for w, m in zip(weights, recent_mom)) / w_sum
-
-        current   = series[-1] if series[-1] is not None else 0
-        point     = round(current * (1 + w_avg_mom / 100), 0)
-
-        # Confidence band: ± 1 std-dev of recent MoM values
-        if len(recent_mom) >= 2:
-            mean = sum(recent_mom) / len(recent_mom)
-            variance = sum((x - mean) ** 2 for x in recent_mom) / len(recent_mom)
-            std  = math.sqrt(variance)
-        else:
-            std = abs(recent_mom[0]) * 0.3   # 30% uncertainty if only 1 value
-
-        low   = round(current * (1 + (w_avg_mom - std) / 100), 0)
-        high  = round(current * (1 + (w_avg_mom + std) / 100), 0)
-        direction = "up" if w_avg_mom > 0.5 else "down" if w_avg_mom < -0.5 else "flat"
-
-        # Confidence: high if std < 5%, medium if < 15%, low otherwise
-        confidence = "high" if std < 5 else "medium" if std < 15 else "low"
-
-        return {
-            "current":          current,
-            "point":            point,
-            "low":              min(low, high),
-            "high":             max(low, high),
-            "weighted_mom_pct": round(w_avg_mom, 2),
-            "std_pct":          round(std, 2),
-            "direction":        direction,
-            "confidence":       confidence,
-        }
-
-    rev_fc = _weighted_forecast(rev_series,  rev_mom, "revenue")
-    np_fc  = _weighted_forecast(np_series,   np_mom,  "net_profit")
-
-    # Gross margin projection: simple average of last 3
-    gm_valid = [v for v in gm_series[-3:] if v is not None]
-    gm_proj  = round(sum(gm_valid) / len(gm_valid), 2) if gm_valid else None
-
-    # ── Narrative ─────────────────────────────────────────────────────────────
-    narrative = _build_forecast_narrative(rev_fc, np_fc, gm_proj, next_label)
-
-    # ── Warning if high uncertainty ────────────────────────────────────────────
-    warning     = None
-    warning_key = None
-    if rev_fc and rev_fc["confidence"] == "low":
-        warning_key = "forecast_volatility_warning"
-        warning = "High volatility in recent revenue — forecast range is wide. Treat as directional guidance only."
-
-    return {
-        "available":        True,
-        "method":           "weighted_moving_average_mom",
-        "next_period":      next_label,
-        "revenue":          rev_fc,
-        "net_profit":       np_fc,
-        "gross_margin_pct": {"point": gm_proj},
-        "narrative":        narrative,
-        "warning":          warning,
-        "warning_key":      warning_key if "warning_key" in dir() else None,
-        "periods_used":     min(3, len([v for v in rev_mom if v is not None])),
-    }
-
-
-def _next_period_label(period: str) -> str:
-    """Advance YYYY-MM by one month."""
-    if not period or len(period) < 7:
-        return "next period"
-    try:
-        y, m = int(period[:4]), int(period[5:7])
-        m += 1
-        if m > 12:
-            m = 1
-            y += 1
-        return f"{y}-{m:02d}"
-    except (ValueError, IndexError):
-        return "next period"
-
-
-def _build_forecast_narrative(rev_fc, np_fc, gm_proj, next_label: str) -> dict:
-    """
-    Key-based forecast narrative for i18n.
-    Returns {parts: [{key, data}], fallback: str (English)}.
-    """
-    if not rev_fc or not np_fc:
-        return {"parts": [], "fallback": "Insufficient data for forecast narrative."}
-
-    rev_dir = rev_fc["direction"]
-    np_dir  = np_fc["direction"]
-    conf    = rev_fc["confidence"]
-
-    rev_key = "forecast_rev_up"   if rev_dir == "up"   else ("forecast_rev_down"  if rev_dir == "down"  else "forecast_rev_flat")
-    np_key  = "forecast_np_up"    if np_dir  == "up"   else ("forecast_np_down"   if np_dir  == "down"  else "forecast_np_flat")
-    conf_key = f"forecast_confidence_{conf}"
-
-    parts = [
-        {"key": "forecast_for_period", "data": {"period": next_label}},
-        {"key": rev_key, "data": {"point": _fmtK(rev_fc["point"]), "low": _fmtK(rev_fc["low"]), "high": _fmtK(rev_fc["high"])}},
-        {"key": np_key,  "data": {"point": _fmtK(np_fc["point"])}},
-    ]
-    if gm_proj:
-        parts.append({"key": "forecast_gm", "data": {"gm": gm_proj}})
-    parts.append({"key": "forecast_confidence", "data": {"level_key": conf_key, "level": conf.upper()}})
-
-    # English fallback for backward compat
-    fb = [f"For {next_label}:"]
-    if rev_dir == "up":    fb.append(f"Revenue projected to grow to {_fmtK(rev_fc['point'])} ({_fmtK(rev_fc['low'])}–{_fmtK(rev_fc['high'])}).")
-    elif rev_dir == "down": fb.append(f"Revenue projected to decline to {_fmtK(rev_fc['point'])} ({_fmtK(rev_fc['low'])}–{_fmtK(rev_fc['high'])}).")
-    else:                  fb.append(f"Revenue projected to remain stable at {_fmtK(rev_fc['point'])}.")
-    if np_dir == "up":     fb.append(f"Net profit expected to improve to {_fmtK(np_fc['point'])}.")
-    elif np_dir == "down": fb.append(f"Net profit expected to decline to {_fmtK(np_fc['point'])}.")
-    else:                  fb.append(f"Net profit expected to remain near {_fmtK(np_fc['point'])}.")
-    if gm_proj:            fb.append(f"Gross margin expected around {gm_proj:.1f}%.")
-    fb.append(f"Forecast confidence: {conf.upper()}.")
-
-    return {"parts": parts, "fallback": " ".join(fb)}
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1158,8 +997,10 @@ def run_intelligence(analysis: dict, advanced_metrics: dict | None = None, cashf
     if root_cause and not root_cause.get("error"):
         _root_cause_rules(root_cause, structured, warnings_compat, recs_compat)
 
-    # ── Forecast ──────────────────────────────────────────────────────────────
-    forecast = _build_forecast(trends, latest)
+    # ── Forecast (canonical engine — same as GET /forecast; lang defaults EN here) ─
+    from app.services.forecast_engine import build_forecast as _canonical_forecast
+
+    forecast = _canonical_forecast(analysis, lang="en")
 
     # ── Health score ──────────────────────────────────────────────────────────
     health_score = _compute_health_score(structured, warnings_compat, [])
@@ -1168,10 +1009,21 @@ def run_intelligence(analysis: dict, advanced_metrics: dict | None = None, cashf
     top_risk = structured[0]["what"] if structured else None
     top_opp  = None
     if forecast.get("available"):
-        fc_rev = forecast.get("revenue", {})
-        if fc_rev.get("direction") == "up" and fc_rev.get("confidence") in ("high", "medium"):
-            top_opp = (f"Revenue expected to grow to {_fmtK(fc_rev.get('point'))} "
-                       f"next period ({fc_rev.get('confidence')} confidence).")
+        sm = forecast.get("summary") or {}
+        mom_rev = sm.get("trend_mom_revenue")
+        risk = sm.get("risk_level")
+        try:
+            mom_ok = mom_rev is not None and float(mom_rev) > 0
+        except (TypeError, ValueError):
+            mom_ok = False
+        if mom_ok and risk != "high":
+            br = ((forecast.get("scenarios") or {}).get("base") or {}).get("revenue") or []
+            pt = br[0].get("point") if br and isinstance(br[0], dict) else None
+            if pt is not None:
+                top_opp = (
+                    f"Base scenario Month-1 revenue ~{_fmtK(float(pt))} "
+                    f"(MoM trend {float(mom_rev):+.1f}%, risk {risk})."
+                )
 
     return {
         "insights":        structured,

@@ -3,7 +3,7 @@
  *
  * A right-side slide-in panel that maps questions to existing backend data.
  * NO external AI. NO calculations. NO API changes.
- * Reads: d.decisions, d.root_causes, d.intelligence, d.forecast (fetched once on open)
+ * Reads: d.decisions, d.root_causes, d.intelligence, d.forecast — all from GET /executive `data` (single source).
  */
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useLang }    from '../context/LangContext.jsx'
@@ -261,7 +261,7 @@ export default function CfoPanel({ open, onClose }) {
   const [msgs,     setMsgs]    = useState([])
   const [loading,  setLoading] = useState(false)
   const [d,        setD]       = useState(null)   // /executive data
-  const [fcData,   setFcData]  = useState(null)   // /forecast data
+  const [fcData,   setFcData]  = useState(null)   // copy of d.forecast (same as GET /forecast object)
   const [consolidate] = useState(false)
   const inputRef    = useRef()
   const bottomRef   = useRef()
@@ -278,14 +278,12 @@ export default function CfoPanel({ open, onClose }) {
         setLoading(false)
         return
       }
-      const [exR, fcR] = await Promise.all([
-        fetch(`${API}/analysis/${selectedId}/executive?${qs}`, { headers: auth() }),
-        fetch(`${API}/analysis/${selectedId}/forecast?${qs}`, { headers: auth() }),
-      ])
+      const exR = await fetch(`${API}/analysis/${selectedId}/executive?${qs}`, { headers: auth() })
       const exJ = exR.ok ? await exR.json() : null
-      const fcJ = fcR.ok ? await fcR.json() : null
-      if (exJ?.data) setD(exJ.data)
-      if (fcJ?.data) setFcData(fcJ.data)
+      if (exJ?.data) {
+        setD(exJ.data)
+        setFcData(exJ.data.forecast && typeof exJ.data.forecast === 'object' ? exJ.data.forecast : null)
+      }
 
       // Welcome message
       const health = exJ?.data?.health_score_v2

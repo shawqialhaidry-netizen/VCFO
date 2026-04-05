@@ -19,7 +19,6 @@ from __future__ import annotations
 from collections import defaultdict
 from typing import Any, Optional
 
-import pandas as pd
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -27,10 +26,8 @@ from app.models.branch import Branch
 from app.models.company import Company
 from app.models.trial_balance import TrialBalanceUpload
 from app.models.user import User
-from app.services.account_classifier import classify_dataframe
+from app.services.canonical_period_statements import build_period_statements_from_uploads
 from app.services.expense_intelligence_engine import build_expense_intelligence_bundle
-from app.services.financial_statements import build_statements, statements_to_dict
-from app.services.structured_income_statement import attach_structured_income_statement
 from app.services.scope_resolver import ResolvedScope, resolve_financial_scope
 
 # ---------------------------------------------------------------------------
@@ -89,69 +86,8 @@ from app.services.scope_resolver import ResolvedScope, resolve_financial_scope
 
 
 # ---------------------------------------------------------------------------
-# TB → statements (reuses financial_statements single source of truth)
+# TB → statements: use canonical_period_statements (Phase 2 — no duplicate builders)
 # ---------------------------------------------------------------------------
-
-def _load_df(record: TrialBalanceUpload) -> Optional[pd.DataFrame]:
-    if not record.normalized_path:
-        return None
-    try:
-        df = pd.read_csv(record.normalized_path)
-    except Exception:
-        return None
-    required = {"account_code", "account_name", "debit", "credit"}
-    return df if required.issubset(set(df.columns)) else None
-
-
-def _build_period_statements_from_uploads(company_id: str, uploads: list[TrialBalanceUpload]) -> list[dict]:
-    """
-    Minimal statement builder aligned with analysis.py:
-      - prefer df.period grouping if present
-      - else record.period
-      - carry tb_type into build_statements
-    """
-    period_dfs: dict[str, pd.DataFrame] = {}
-    for record in uploads:
-        df = _load_df(record)
-        if df is None or df.empty:
-            continue
-        if "period" in df.columns:
-            for period, grp in df.groupby("period"):
-                period_dfs[str(period)] = grp.copy()
-        elif record.period:
-            period_dfs[record.period] = df.copy()
-
-    if not period_dfs:
-        return []
-
-    # Map tb_type by period (best-effort, same semantics as analysis.py)
-    import re as _re
-
-    period_tb_type: dict[str, str | None] = {}
-    for record in uploads:
-        tt = getattr(record, "tb_type", None)
-        if not tt:
-            continue
-        rp = record.period or ""
-        if _re.match(r"^\d{4}-\d{2}$", rp):
-            period_tb_type[rp] = tt
-        elif _re.match(r"^\d{4}$", rp):
-            for p in period_dfs:
-                if str(p).startswith(rp + "-"):
-                    period_tb_type[p] = tt
-        elif rp:
-            period_tb_type[rp] = tt
-
-    stmts: list[dict] = []
-    for period in sorted(period_dfs.keys()):
-        tb_type = period_tb_type.get(period)
-        classified = classify_dataframe(period_dfs[period])
-        fs = build_statements(classified, company_id=company_id, period=period, tb_type=tb_type)
-        d = statements_to_dict(fs)
-        d["period"] = period
-        attach_structured_income_statement(d)
-        stmts.append(d)
-    return stmts
 
 
 # ---------------------------------------------------------------------------
@@ -446,7 +382,7 @@ def build_scope_expense_intelligence(
             .order_by(TrialBalanceUpload.uploaded_at)
             .all()
         )
-        stmts = _build_period_statements_from_uploads(rs.company_ids[0], uploads)
+        stmts = build_period_statements_from_uploads(rs.company_ids[0], uploads)
         bundle = build_expense_intelligence_bundle(stmts, lang=safe_lang)
         b = db.query(Branch).filter(Branch.id == rs.branch_id).first()
         entities.append(
@@ -471,7 +407,7 @@ def build_scope_expense_intelligence(
             .order_by(TrialBalanceUpload.uploaded_at)
             .all()
         )
-        stmts = _build_period_statements_from_uploads(rs.company_ids[0], uploads)
+        stmts = build_period_statements_from_uploads(rs.company_ids[0], uploads)
         bundle = build_expense_intelligence_bundle(stmts, lang=safe_lang)
         c = db.query(Company).filter(Company.id == rs.company_ids[0]).first()
         entities.append(
@@ -498,7 +434,7 @@ def build_scope_expense_intelligence(
                 .order_by(TrialBalanceUpload.uploaded_at)
                 .all()
             )
-            stmts = _build_period_statements_from_uploads(cid, uploads)
+            stmts = build_period_statements_from_uploads(cid, uploads)
             bundle = build_expense_intelligence_bundle(stmts, lang=safe_lang)
             c = db.query(Company).filter(Company.id == cid).first()
             entities.append(

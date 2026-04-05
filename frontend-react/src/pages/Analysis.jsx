@@ -5,6 +5,9 @@
  * Other tabs keep domain drill + ratio/cause content; data quality banner shows when not on Overview.
  *
  * Data: single /executive fetch — no duplicate calculations.
+ *
+ * Phase 1.1 — migration later: some tabs also fetch GET /forecast for the same canonical
+ * object already present as `data.forecast` on executive; harmless but redundant.
  */
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { strictT, strictTParams } from '../utils/strictI18n.js'

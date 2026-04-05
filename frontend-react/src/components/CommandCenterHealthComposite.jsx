@@ -22,16 +22,6 @@ const dClr = {
   efficiency: '#fbbf24',
 }
 
-function scoreFromCategory(cat) {
-  if (!cat) return 50
-  const s2 = { good: 100, neutral: 60, warning: 35, risk: 10 }
-  const vs = Object.values(cat)
-    .map((v) => s2[v?.status] || 50)
-    .filter((v) => Number.isFinite(v))
-  if (!vs.length) return 50
-  return Math.round(vs.reduce((a, b) => a + b, 0) / vs.length)
-}
-
 function DomainPill({ label, score, color, tr, lang, onClick }) {
   const st = score >= 70 ? 'good' : score >= 45 ? 'warning' : 'risk'
   const sc = stC[st]
@@ -89,9 +79,10 @@ export default function CommandCenterHealthComposite({
   executiveBand = false,
 }) {
   const ratios = intelligence?.ratios || {}
-  const profitability = scoreFromCategory(ratios.profitability)
-  const liquidity = scoreFromCategory(ratios.liquidity)
-  const efficiency = scoreFromCategory(ratios.efficiency)
+  const ss = intelligence?.surface_scores || {}
+  const profitability = Number.isFinite(Number(ss.profitability)) ? Number(ss.profitability) : 50
+  const liquidity = Number.isFinite(Number(ss.liquidity)) ? Number(ss.liquidity) : 50
+  const efficiency = Number.isFinite(Number(ss.efficiency)) ? Number(ss.efficiency) : 50
 
   const ratioMap = (key) => ratios[key] || {}
 

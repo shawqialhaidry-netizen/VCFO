@@ -1,6 +1,23 @@
 """
 api/analysis.py — Phase 9 Stabilized
-Execution order (strict):
+
+CANONICAL PRODUCT PATH (Phase 1 — single truth):
+  • Primary UI data: GET /{company_id}/executive
+  • Forecast: forecast_engine.build_forecast (in executive ``data.forecast`` and GET /{company_id}/forecast)
+  • Structured financial overlays: statement_engine.build_statement_bundle → root data + nested statements (stripped)
+  • CFO decisions: cfo_decision_engine.build_cfo_decisions
+  • Surfaces on canonical path: Command Center (/), Statements, CfoPanel (executive only)
+
+PHASE 3 — Intelligence / decisions lock:
+  • Product intelligence ratios/health: ``fin_intelligence.build_intelligence`` only (same scoped ``windowed`` as executive).
+  • Product decisions: ``build_cfo_decisions`` fed with ``alerts_engine.build_alerts`` outputs — never ad-hoc alert builders.
+  • ``intelligence_engine.run_intelligence`` — legacy GET /{company_id} aggregate only; does not define product truth.
+  • Deep / profitability / trend blocks on executive are ``interpretation_secondary`` (see ``meta.product_intelligence``).
+
+LEGACY (non-canonical — do not extend for product):
+  • GET /{company_id} (this file, get_analysis): run_intelligence + flat ``statements`` map; see response ``pipeline_profile``
+
+Legacy GET /analysis execution order (strict, historical):
   1. analysis          = run_analysis(windowed)
   2. kpi_block         = build_kpi_block(all_stmts, window)
   3. advanced_metrics  = compute_advanced_metrics(windowed, ratios)
@@ -21,16 +38,11 @@ from app.core.security import get_current_user
 from app.models.company import Company
 from app.models.trial_balance import TrialBalanceUpload
 from app.services.financial_statements import build_statements, statements_to_dict
-from app.services.structured_income_statement import (
-    attach_structured_income_statement,
-    build_structured_income_statement_bundle,
+from app.services.canonical_period_statements import (
+    build_period_statements_from_uploads,
+    load_normalized_tb_dataframe,
 )
-from app.services.structured_income_statement_variance import (
-    build_structured_income_statement_variance_bundle_from_window,
-)
-from app.services.structured_profit_bridge import (
-    build_structured_profit_bridge_bundle_from_window,
-)
+from app.services.structured_income_statement import attach_structured_income_statement
 from app.services.analysis_engine import run_analysis
 from app.services.time_intelligence import build_kpi_block, filter_periods
 from app.services.intelligence_engine import run_intelligence
@@ -91,7 +103,7 @@ def _apply_scope(all_stmts: list, scope_basis_type: str = "", scope_period: str 
 
 logger = logging.getLogger("vcfo.analysis")
 
-# ── Metric Resolver shadow-mode (log-only) ────────────────────────────────────
+# ── Metric Resolver — Phase 2 diagnostic-only (see metric_resolver module doc) ─
 _METRIC_SHADOW_KEYS = (
     "revenue",
     "net_profit",
@@ -112,7 +124,7 @@ def _shadow_compare_metrics(
     label: str,
 ) -> None:
     """
-    Shadow-mode metric consistency checks.
+    Diagnostic-only parity checks vs MetricResolver (never authoritative for product).
     Logs mismatches only; never raises and never changes responses.
     """
     try:
@@ -227,14 +239,8 @@ def _augment_cfo_decision_pack_for_api(
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _load_df(record: TrialBalanceUpload):
-    if not record.normalized_path:
-        return None
-    try:
-        df = pd.read_csv(record.normalized_path)
-    except Exception:
-        return None
-    required = {"account_code", "account_name", "debit", "credit", "mapped_type"}
-    return df if required.issubset(set(df.columns)) else None
+    """Branch / legacy CSV readers — same disk rules as canonical TB path (no mapped_type required)."""
+    return load_normalized_tb_dataframe(record)
 
 
 def _branch_context_for_cfo_decisions(db: Session, company_id: str) -> Optional[dict]:
@@ -516,68 +522,83 @@ def _build_single_branch_statements(branch_id: str, company_id: str, db) -> list
 
 
 def _build_period_statements(company_id: str, uploads: list) -> list[dict]:
-    period_dfs: dict[str, pd.DataFrame] = {}
-    for record in uploads:
-        df = _load_df(record)
-        if df is None or df.empty:
-            continue
-        if "period" in df.columns:
-            for period, grp in df.groupby("period"):
-                period_dfs[str(period)] = grp.copy()
-        elif record.period:
-            period_dfs[record.period] = df.copy()
-    if not period_dfs:
-        return []
-    # Build a tb_type lookup: period → tb_type from the DB record
-    # If a period appears in multiple uploads, last one wins (already sorted by date)
-    import re as _re
-    period_tb_type: dict[str, str | None] = {}
-    for record in uploads:
-        _tt = getattr(record, "tb_type", None)
-        if not _tt:
-            continue
-        rp = record.period or ""
-        if _re.match(r"^\d{4}-\d{2}$", rp):
-            # Monthly upload — map directly
-            period_tb_type[rp] = _tt
-        elif _re.match(r"^\d{4}$", rp):
-            # Annual upload — expand to all matching month keys in period_dfs
-            for p in period_dfs:
-                if str(p).startswith(rp + "-"):
-                    period_tb_type[p] = _tt
-        elif rp:
-            # Fallback: store as-is
-            period_tb_type[rp] = _tt
+    """Phase 2: delegate to canonical TB → statements builder (single truth)."""
+    return build_period_statements_from_uploads(company_id, uploads)
 
-    stmts = []
-    for period in sorted(period_dfs.keys()):
-        _tb_type = period_tb_type.get(period)  # FIX-2.1: carry tb_type into builder
-        fs = build_statements(period_dfs[period], company_id=company_id,
-                              period=period, tb_type=_tb_type)
-        d  = statements_to_dict(fs)
-        d["period"] = period
 
-        # ── Pre-closing TB detection (aggregation layer — statement_engine unchanged) ──
-        # In a pre-closing TB, the current period P&L has not yet been closed to
-        # retained earnings. This causes: balance_diff ≈ net_profit.
-        # We detect this pattern and flag it explicitly rather than treating it as error.
-        _net_profit  = abs(d.get("income_statement", {}).get("net_profit", 0) or 0)
-        _bal_diff    = abs(d.get("balance_sheet", {}).get("balance_diff", 0) or 0)
-        _pre_closing = (_bal_diff > 0.10 and _net_profit > 0.10
-                        and abs(_bal_diff - _net_profit) / max(_net_profit, 1) < 0.02)
-        if _pre_closing:
-            d.setdefault("balance_sheet", {})
-            d["balance_sheet"]["pre_closing_tb"]    = True
-            d["balance_sheet"]["is_balanced"]        = "pre_closing_expected"
-            d["balance_sheet"]["pre_closing_note"]   = (
-                "Balance sheet imbalance equals net profit — this is expected for a "                "trial balance before period-end closing entries."            )
-        else:
-            d.setdefault("balance_sheet", {})
-            d["balance_sheet"]["pre_closing_tb"] = False
+def _product_windowed_statements(
+    db: Session,
+    company_id: str,
+    *,
+    consolidate: bool,
+    window: str,
+    basis_type: str,
+    period: str,
+    year_scope: str,
+    from_period: str,
+    to_period: str,
+) -> tuple[Company, list[dict], list[dict], dict, Optional[dict]]:
+    """
+    Phase 3 — one statement + scope path for executive-aligned product endpoints.
 
-        attach_structured_income_statement(d)
-        stmts.append(d)
-    return stmts
+    Returns (company, all_stmts, windowed, resolved_scope, scope22_or_none).
+    """
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found.")
+
+    if consolidate:
+        all_stmts = _build_consolidated_statements(company_id, db)
+        if not all_stmts:
+            raise HTTPException(422, "No financial data uploaded yet (branch consolidation).")
+    else:
+        uploads = (
+            db.query(TrialBalanceUpload)
+            .filter(
+                TrialBalanceUpload.company_id == company_id,
+                TrialBalanceUpload.status == "ok",
+                TrialBalanceUpload.branch_id.is_(None),
+            )
+            .order_by(TrialBalanceUpload.uploaded_at.asc())
+            .all()
+        )
+        if not uploads:
+            raise HTTPException(422, "No financial data uploaded yet. Upload a Trial Balance first.")
+        all_stmts = _build_period_statements(company_id, uploads)
+        if not all_stmts:
+            raise HTTPException(422, "Could not build statements.")
+
+    scope22: Optional[dict] = None
+    if (basis_type or "").lower() not in ("all", ""):
+        scope22 = scope_from_params(
+            basis_type,
+            period or None,
+            year_scope or None,
+            from_period or None,
+            to_period or None,
+            all_stmts,
+        )
+        if scope22.get("error"):
+            raise HTTPException(400, scope22["error"])
+        windowed = filter_by_scope(all_stmts, scope22)
+    else:
+        windowed = filter_periods(
+            all_stmts,
+            window.upper() if window.upper() in VALID_WINDOWS else "ALL",
+        )
+
+    available = sorted(s.get("period", "") for s in windowed if s.get("period"))
+    resolved_scope = scope22 if scope22 else {
+        "basis_type": "all",
+        "label": f"{available[0]} → {available[-1]}" if len(available) > 1
+        else (available[0] if available else "all"),
+        "months": available,
+        "year": None,
+        "from_period": available[0] if available else None,
+        "to_period": available[-1] if available else None,
+        "error": None,
+    }
+    return company, all_stmts, windowed, resolved_scope, scope22
 
 
 # ── Validation Layer ─────────────────────────────────────────────────────────
@@ -701,6 +722,42 @@ def _validate_pipeline(
     }
 
 
+def _assess_financial_integrity(pipeline_validation: dict) -> dict:
+    """
+    Phase 2 — map pipeline_validation to a deterministic product integrity tier.
+
+    Blocking (suppresses governance outputs on GET /executive): any severity=error
+    warning from _validate_pipeline (NP/WC/BS/CF consistency failures).
+
+    Non-blocking: info-only codes (e.g. cashflow_estimated, tb_type_unknown).
+    """
+    if not isinstance(pipeline_validation, dict):
+        return {
+            "status": "unknown",
+            "blocking": False,
+            "suppress_governance_outputs": False,
+        }
+    if pipeline_validation.get("error"):
+        return {
+            "status": "unknown",
+            "blocking": False,
+            "suppress_governance_outputs": False,
+            "validation_error": str(pipeline_validation.get("error")),
+        }
+    consistent = pipeline_validation.get("consistent")
+    has_errors = bool(pipeline_validation.get("has_errors"))
+    blocking = (consistent is False) or has_errors
+    info_only = bool(pipeline_validation.get("has_info")) and not blocking
+    status = "blocking" if blocking else ("warning" if info_only else "ok")
+    return {
+        "status": status,
+        "blocking": blocking,
+        "suppress_governance_outputs": blocking,
+        "error_codes": list(pipeline_validation.get("error_codes") or []),
+        "info_codes": list(pipeline_validation.get("info_codes") or []),
+    }
+
+
 def _build_debug_block(windowed: list[dict]) -> dict:
     result = {}
     try:
@@ -748,6 +805,17 @@ def get_analysis(
     consolidate: bool = Query(default=False, description="true = derive company financials from branch uploads"),
     db: Session = Depends(get_db),
 ):
+    """
+    **LEGACY aggregate — not the canonical product path** (Phase 1.1).
+
+    Returns the historical full pipeline: flat ``statements`` map, ``decision`` from
+    ``run_intelligence`` (including its ``forecast`` block), ``intelligence_v2`` from
+    ``fin_intelligence``, etc. This is **not** interchangeable with
+    ``GET /{company_id}/executive`` (structured bundle, canonical forecast, CFO decisions).
+
+    Product surfaces must use ``GET /{company_id}/executive``. The response includes
+    ``pipeline_profile`` so clients can detect non-canonical payloads.
+    """
     if window not in VALID_WINDOWS:
         raise HTTPException(400, f"Invalid window '{window}'. Use: {sorted(VALID_WINDOWS)}")
 
@@ -954,6 +1022,14 @@ def get_analysis(
 
     # ── Response ──────────────────────────────────────────────────────────────
     return {
+        "pipeline_profile": {
+            "is_canonical_product_path": False,
+            "route": "GET /{company_id}",
+            "notes": (
+                "Legacy aggregate: run_intelligence + flat statements map. "
+                "Canonical product data: GET /{company_id}/executive."
+            ),
+        },
         "company_id":        company_id,
         "company_name":      company.name,
         "data_source":       data_source,        # "direct_uploads" | "branch_consolidation"
@@ -1043,7 +1119,10 @@ def get_consolidated(
     """
     Company financials derived entirely from branch uploads (consolidation mode).
     Aggregates branch_financials by period → runs through the full analysis pipeline.
-    Returns the same shape as GET /{company_id} with data_source='branch_consolidation'.
+
+    **Not the canonical product path** (Phase 1.1): different shape than
+    ``GET /{company_id}/executive``. Use executive for Command Center / Statements /
+    unified CFO decisions + structured bundle. See ``pipeline_profile`` in the JSON.
     """
     company = db.query(Company).filter(Company.id == company_id).first()
     if not company:
@@ -1165,21 +1244,10 @@ def get_consolidated(
 
     exec_forecast_consolidated: dict = {}
     try:
-        from app.services.deep_intelligence import (
-            build_executive_basic_forecast,
-            build_executive_forecast_unavailable,
-        )
-
-        exec_forecast_consolidated = build_executive_basic_forecast(
-            windowed, analysis, lang=safe_lang
-        )
+        exec_forecast_consolidated = _build_forecast(analysis, lang=safe_lang)
     except Exception as _efc_exc:
-        logger.warning("consolidated executive forecast failed: %s", _efc_exc)
-        from app.services.deep_intelligence import build_executive_forecast_unavailable
-
-        exec_forecast_consolidated = build_executive_forecast_unavailable(
-            safe_lang, reason="unavailable"
-        )
+        logger.warning("consolidated forecast_engine failed: %s", _efc_exc)
+        exec_forecast_consolidated = {"available": False, "reason": str(_efc_exc)}
 
     # ── Evidence blocks (additive) — consolidated financial brain payload ─────
     try:
@@ -1217,6 +1285,14 @@ def get_consolidated(
         pass
 
     return {
+        "pipeline_profile": {
+            "is_canonical_product_path": False,
+            "route": "GET /{company_id}/consolidated",
+            "notes": (
+                "Branch consolidation summary payload — not GET /executive. "
+                "Canonical UI bundle: GET /{company_id}/executive."
+            ),
+        },
         "company_id":       company_id,
         "company_name":     company.name,
         "data_source":      "branch_consolidation",
@@ -2407,151 +2483,86 @@ def get_expense_intelligence(
 def get_cfo_decisions(
     company_id:  str,
     lang:        str  = Query(default="en"),
+    window:      str  = Query(default="ALL"),
+    basis_type:  str  = Query(default="all"),
+    period:      str  = Query(default=""),
+    year_scope:  str  = Query(default="", alias="year"),
+    from_period: str  = Query(default=""),
+    to_period:   str  = Query(default=""),
     consolidate: bool = Query(default=False),
     current_user       = Depends(get_current_user),
     db:          Session = Depends(get_db),
 ):
     """
-    AI CFO Decision Engine — transforms financial analysis into prioritized actions.
-
-    Returns per company + per branch:
-      - decisions:   prioritized action list with action_type taxonomy
-      - risk_score:  0–100 deterministic risk score
-      - status:      PERFORMING | STABLE | AT_RISK | HIGH_RISK
-      - action_type: COST_REDUCTION | SCALE_UP | OPTIMIZE | CLOSE | RESTRUCTURE | MONITOR
-
-    All values derived from statement_engine → analysis_engine output.
-    No new financial calculations.
+    Canonical CFO decisions — same scope rules and engine as GET /executive.
+    Deterministic: build_cfo_decisions only (no secondary decision taxonomy layer).
     """
-    from app.services.ai_cfo_engine import build_company_decision_output
     from app.services.fin_intelligence import build_intelligence
     from app.services.period_aggregation import build_annual_layer
     from app.services.alerts_engine import build_alerts
-    from app.services.cfo_decision_engine import build_cfo_decisions
 
     safe_lang = lang if lang in ("en", "ar", "tr") else "en"
 
-    company = db.query(Company).filter(Company.id == company_id).first()
-    if not company:
-        raise HTTPException(404, "Company not found.")
+    company, _all_stmts, windowed, resolved_scope, _scope22 = _product_windowed_statements(
+        db,
+        company_id,
+        consolidate=consolidate,
+        window=window,
+        basis_type=basis_type,
+        period=period,
+        year_scope=year_scope,
+        from_period=from_period,
+        to_period=to_period,
+    )
 
-    # ── Build statement pipeline ───────────────────────────────────────────────
-    if consolidate:
-        all_stmts = _build_consolidated_statements(company_id, db)
-        if not all_stmts:
-            raise HTTPException(422, "No financial data uploaded yet (branch consolidation).")
-    else:
-        uploads = (
-            db.query(TrialBalanceUpload)
-            .filter(
-                TrialBalanceUpload.company_id == company_id,
-                TrialBalanceUpload.status == "ok",
-                TrialBalanceUpload.branch_id.is_(None),
-            )
-            .order_by(TrialBalanceUpload.uploaded_at.asc())
-            .all()
-        )
-        if not uploads:
-            raise HTTPException(422, "No financial data uploaded yet. Upload a Trial Balance first.")
-        all_stmts = _build_period_statements(company_id, uploads)
-        if not all_stmts:
-            raise HTTPException(422, "Could not build statements.")
-
-    # ── Run analysis pipeline (read-only from statement_engine output) ─────────
+    analysis: dict = {}
     try:
-        analysis  = run_analysis(all_stmts)
-        annual    = build_annual_layer(all_stmts)
-        intel     = build_intelligence(analysis=analysis, annual_layer=annual, currency=company.currency or "")
-        alerts    = build_alerts(intel, lang=safe_lang).get("alerts", [])
+        analysis = run_analysis(windowed)
+        annual = build_annual_layer(windowed)
+        intel = build_intelligence(
+            analysis=analysis, annual_layer=annual, currency=company.currency or "",
+        )
+        alerts = build_alerts(intel, lang=safe_lang).get("alerts", [])
         raw_dec = build_cfo_decisions(
             intel,
             alerts=alerts,
             lang=safe_lang,
-            n_periods=len(all_stmts),
+            n_periods=analysis.get("period_count", len(windowed)),
             analysis=analysis,
             branch_context=_branch_context_for_cfo_decisions(db, company_id),
         )
     except Exception as exc:
         logger.warning("cfo-decisions pipeline failed: %s", exc)
-        raw_dec = {"decisions": [], "recommendations": []}
-        analysis = {}
+        raw_dec = {
+            "decisions": [],
+            "recommendations": [],
+            "summary": {
+                "insufficient": True,
+                "reason_code": "pipeline_error",
+                "detail": str(exc),
+            },
+            "causal_items": [],
+        }
 
-    # ── Extract metrics from analysis_engine (no recalculation) ──────────────
-    latest = analysis.get("latest", {})
-    prof   = latest.get("profitability", {})
-    liq    = latest.get("liquidity", {})
-    trends = analysis.get("trends", {})
-
-    # Revenue MoM from trend series (last value)
-    rev_mom_series = trends.get("revenue_mom_pct", [])
-    revenue_mom_pct = next((v for v in reversed(rev_mom_series) if v is not None), None)
-
-    # Expense ratio: computed by statement_engine path in analysis
-    # Available in quick_metrics from executive endpoint; approximate here from IS
-    last_is = all_stmts[-1].get("income_statement", {}) if all_stmts else {}
-    rev     = last_is.get("revenue", {}).get("total") or 0
-    exp     = last_is.get("expenses", {}).get("total") or 0
-    cgs_l   = last_is.get("cogs", {}).get("total") or 0
-    unc_l   = float((last_is.get("unclassified_pnl_debits") or {}).get("total") or 0)
-    expense_ratio = total_cost_ratio_pct(
-        float(cgs_l), float(exp), float(rev) if rev else None, unc_l,
-    )
-
-    # Patch latest with computed context values for decision builder
-    latest_enriched = dict(latest)
-    latest_enriched["expense_ratio"]    = expense_ratio
-    latest_enriched["revenue_mom_pct"]  = revenue_mom_pct
-
-    # ── Branch data (if available) ────────────────────────────────────────────
-    branch_data = []
     try:
-        from app.models.branch import Branch as _Branch, BranchFinancial
-        branches = (
-            db.query(_Branch)
-            .filter(_Branch.company_id == company_id, _Branch.is_active == True)  # noqa
-            .all()
-        )
-        for b in branches:
-            bfs = (
-                db.query(BranchFinancial)
-                .filter(BranchFinancial.branch_id == b.id)
-                .order_by(BranchFinancial.period.desc())
-                .first()
-            )
-            if bfs:
-                b_rev = bfs.revenue or 0
-                b_exp = bfs.expenses or 0
-                b_er  = round(b_exp / b_rev * 100, 2) if b_rev else None
-                branch_data.append({
-                    "branch_id":   b.id,
-                    "branch_name": b.name,
-                    "kpis": {
-                        "net_margin_pct":  bfs.net_profit / b_rev * 100 if b_rev else None,
-                        "expense_ratio":   b_er,
-                        "revenue_mom_pct": None,   # not stored per-branch
-                        "current_ratio":   None,
-                        "revenue":         b_rev,
-                    },
-                })
-    except Exception as exc:
-        logger.warning("cfo-decisions branch data failed: %s", exc)
-
-    # ── Build output (no new calculations) ────────────────────────────────────
-    result = build_company_decision_output(
-        analysis_latest    = latest_enriched,
-        existing_decisions = raw_dec.get("decisions", []),
-        branch_data        = branch_data if branch_data else None,
-        lang               = safe_lang,
-        company_id         = company_id,
-    )
+        fc = _build_forecast(analysis, lang=safe_lang) if analysis else {"available": False, "reason": "unavailable"}
+    except Exception:
+        fc = {"available": False, "reason": "unavailable"}
 
     return {
+        "status":       "success",
         "company_id":   company_id,
         "company_name": company.name,
         "lang":         safe_lang,
-        "period":       (all_stmts[-1].get("period", "") if all_stmts else ""),
-        **result,
-        "recommendations": raw_dec.get("recommendations", []),
+        "data_source":  "branch_consolidation" if consolidate else "direct_uploads",
+        "meta":         {"scope": resolved_scope, "window": window},
+        "data": {
+            "decisions":       raw_dec.get("decisions", []),
+            "decisions_summary": raw_dec.get("summary", {}),
+            "recommendations": raw_dec.get("recommendations", []),
+            "causal_items":    raw_dec.get("causal_items", []),
+            "forecast":        fc,
+        },
     }
 
 # NOTE: Canonical GET /{company_id}/cfo-decisions is implemented above.
@@ -3885,39 +3896,22 @@ def get_alerts(
     year_scope:  str = Query(default="", alias="year"),
     from_period: str = Query(default=""),
     to_period:   str = Query(default=""),
+    consolidate: bool = Query(default=False, description="Same as GET /executive — branch consolidation"),
     db: Session = Depends(get_db),
 ):
     safe_lang = lang if lang in ("en", "ar", "tr") else "en"
 
-    company = db.query(Company).filter(Company.id == company_id).first()
-    if not company:
-        raise HTTPException(404, "Company not found.")
-
-    uploads = (
-        db.query(TrialBalanceUpload)
-        .filter(TrialBalanceUpload.company_id == company_id,
-                TrialBalanceUpload.status == "ok",
-                TrialBalanceUpload.branch_id.is_(None))
-        .order_by(TrialBalanceUpload.uploaded_at.asc())
-        .all()
+    company, _all_stmts, windowed, resolved_scope, _scope22 = _product_windowed_statements(
+        db,
+        company_id,
+        consolidate=consolidate,
+        window=window,
+        basis_type=basis_type,
+        period=period,
+        year_scope=year_scope,
+        from_period=from_period,
+        to_period=to_period,
     )
-    if not uploads:
-        raise HTTPException(422, "No financial data uploaded yet. Upload a Trial Balance first.")
-
-    all_stmts = _build_period_statements(company_id, uploads)
-    if not all_stmts:
-        raise HTTPException(422, "Could not build statements.")
-
-    # Resolve scope (Phase 22)
-    scope22 = None
-    if (basis_type or "").lower() not in ("all", ""):
-        scope22 = scope_from_params(basis_type, period or None, year_scope or None,
-                                     from_period or None, to_period or None, all_stmts)
-        if scope22.get("error"):
-            raise HTTPException(400, scope22["error"])
-        windowed = filter_by_scope(all_stmts, scope22)
-    else:
-        windowed = filter_periods(all_stmts, window.upper() if window.upper() in VALID_WINDOWS else "ALL")
 
     analysis = run_analysis(windowed)
     annual   = build_annual_layer(windowed)
@@ -3936,7 +3930,7 @@ def get_alerts(
         "company_name": company.name,
         "data": alerts_data,
         "meta": {
-            "scope":        scope22,
+            "scope":        resolved_scope,
             "period_count": analysis.get("period_count", 0),
             "periods":      analysis.get("periods", []),
             "currency":     company.currency or "",
@@ -3960,58 +3954,26 @@ def get_cfo_decisions_v2(
     year_scope:  str = Query(default="", alias="year"),
     from_period: str = Query(default=""),
     to_period:   str = Query(default=""),
+    consolidate: bool = Query(default=False, description="Same as GET /executive — branch consolidation"),
     db: Session = Depends(get_db),
 ):
     """
-    Phase 25 CFO Decision Engine.
+    Phase 25 CFO Decision Engine — Phase 3: identical statement scope + alert path as GET /executive.
     Returns top 3 prioritized CFO-level decisions based on financial intelligence.
-    Supports Phase 22 universal scope.
     """
     safe_lang = lang if lang in ("en", "ar", "tr") else "en"
 
-    company = db.query(Company).filter(Company.id == company_id).first()
-    if not company:
-        raise HTTPException(404, "Company not found.")
-
-    uploads = (
-        db.query(TrialBalanceUpload)
-        .filter(TrialBalanceUpload.company_id == company_id,
-                TrialBalanceUpload.status == "ok",
-                TrialBalanceUpload.branch_id.is_(None))
-        .order_by(TrialBalanceUpload.uploaded_at.asc())
-        .all()
+    company, _all_stmts, windowed, resolved_scope, _scope22 = _product_windowed_statements(
+        db,
+        company_id,
+        consolidate=consolidate,
+        window=window,
+        basis_type=basis_type,
+        period=period,
+        year_scope=year_scope,
+        from_period=from_period,
+        to_period=to_period,
     )
-    if not uploads:
-        raise HTTPException(422, "No financial data uploaded yet. Upload a Trial Balance first.")
-
-    all_stmts = _build_period_statements(company_id, uploads)
-    if not all_stmts:
-        raise HTTPException(422, "Could not build statements.")
-
-    # Phase 22: scope resolution
-    scope22 = None
-    if (basis_type or "").lower() not in ("all", ""):
-        scope22 = scope_from_params(basis_type, period or None, year_scope or None,
-                                     from_period or None, to_period or None, all_stmts)
-        if scope22.get("error"):
-            raise HTTPException(400, scope22["error"])
-        windowed = filter_by_scope(all_stmts, scope22)
-    else:
-        windowed = filter_periods(all_stmts,
-                                  window.upper() if window.upper() in VALID_WINDOWS else "ALL")
-
-    # Build normalized scope — never null in response
-    available = sorted(s.get("period","") for s in windowed if s.get("period"))
-    resolved_scope = scope22 if scope22 else {
-        "basis_type":  "all",
-        "label":       f"{available[0]} → {available[-1]}" if len(available) > 1
-                        else (available[0] if available else "all"),
-        "months":      available,
-        "year":        None,
-        "from_period": available[0]  if available else None,
-        "to_period":   available[-1] if available else None,
-        "error":       None,
-    }
 
     try:
         analysis     = run_analysis(windowed)
@@ -4021,7 +3983,7 @@ def get_cfo_decisions_v2(
             annual_layer = annual,
             currency     = company.currency or "",
         )
-        alerts_data  = _build_alerts_for_decisions(intelligence, lang=safe_lang)
+        alerts_data  = build_alerts(intelligence, lang=safe_lang)
         alerts_list  = alerts_data.get("alerts", [])
         result = build_cfo_decisions(
             intelligence=intelligence,
@@ -4078,55 +4040,29 @@ def get_root_causes(
     year_scope:  str = Query(default="", alias="year"),
     from_period: str = Query(default=""),
     to_period:   str = Query(default=""),
+    consolidate: bool = Query(default=False, description="Same as GET /executive — branch consolidation"),
     db: Session = Depends(get_db),
 ):
     safe_lang = lang if lang in ("en", "ar", "tr") else "en"
 
-    company = db.query(Company).filter(Company.id == company_id).first()
-    if not company:
-        raise HTTPException(404, "Company not found.")
-
-    uploads = (
-        db.query(TrialBalanceUpload)
-        .filter(TrialBalanceUpload.company_id == company_id,
-                TrialBalanceUpload.status == "ok",
-                TrialBalanceUpload.branch_id.is_(None))
-        .order_by(TrialBalanceUpload.uploaded_at.asc())
-        .all()
+    company, _all_stmts, windowed, resolved_scope, _scope22 = _product_windowed_statements(
+        db,
+        company_id,
+        consolidate=consolidate,
+        window=window,
+        basis_type=basis_type,
+        period=period,
+        year_scope=year_scope,
+        from_period=from_period,
+        to_period=to_period,
     )
-    if not uploads:
-        raise HTTPException(422, "No financial data uploaded yet. Upload a Trial Balance first.")
-
-    all_stmts = _build_period_statements(company_id, uploads)
-    if not all_stmts:
-        raise HTTPException(422, "Could not build statements.")
-
-    scope22 = None
-    if (basis_type or "").lower() not in ("all", ""):
-        scope22 = scope_from_params(basis_type, period or None, year_scope or None,
-                                     from_period or None, to_period or None, all_stmts)
-        if scope22.get("error"):
-            raise HTTPException(400, scope22["error"])
-        windowed = filter_by_scope(all_stmts, scope22)
-    else:
-        windowed = filter_periods(all_stmts,
-                                  window.upper() if window.upper() in VALID_WINDOWS else "ALL")
-
-    available = sorted(s.get("period", "") for s in windowed if s.get("period"))
-    resolved_scope = scope22 if scope22 else {
-        "basis_type": "all", "label": f"{available[0]} → {available[-1]}" if len(available) > 1 else (available[0] if available else "all"),
-        "months": available, "year": None,
-        "from_period": available[0] if available else None,
-        "to_period": available[-1] if available else None,
-        "error": None,
-    }
 
     analysis     = run_analysis(windowed)
     annual       = build_annual_layer(windowed)
     intelligence = build_intelligence(analysis=analysis, annual_layer=annual,
                                       currency=company.currency or "")
 
-    alerts_data = _build_alerts_for_decisions(intelligence, lang=safe_lang)
+    alerts_data = build_alerts(intelligence, lang=safe_lang)
     dec_result = build_cfo_decisions(
         intelligence=intelligence,
         alerts=alerts_data.get("alerts", []),
@@ -4167,7 +4103,12 @@ def get_root_causes(
 
 from app.services.forecast_engine import build_forecast as _build_forecast
 from app.services.impact_engine import build_decision_impacts as _build_impacts
-from app.services.statement_engine import build_statement_bundle as _build_statements
+from app.services.statement_engine import (
+    build_statement_bundle as _build_statements,
+    extract_structured_financial_overlay,
+    strip_structured_keys_for_nested_statements,
+)
+from app.services.intel_surface_scores import build_intel_surface_scores, build_intel_tile_hints
 from app.services.advanced_metrics  import compute_advanced_metrics as _compute_adv
 
 
@@ -4272,54 +4213,17 @@ def get_executive(
     """
     safe_lang = lang if lang in ("en", "ar", "tr") else "en"
 
-    company = db.query(Company).filter(Company.id == company_id).first()
-    if not company:
-        raise HTTPException(404, "Company not found.")
-
-    # ── Statements: direct uploads OR branch consolidation ────────────────────
-    if consolidate:
-        all_stmts = _build_consolidated_statements(company_id, db)
-        if not all_stmts:
-            raise HTTPException(422, "No financial data uploaded yet (branch consolidation).")
-    else:
-        uploads = (
-            db.query(TrialBalanceUpload)
-            .filter(TrialBalanceUpload.company_id == company_id,
-                    TrialBalanceUpload.status == "ok",
-                    TrialBalanceUpload.branch_id.is_(None))
-            .order_by(TrialBalanceUpload.uploaded_at.asc())
-            .all()
-        )
-        if not uploads:
-            raise HTTPException(422, "No financial data uploaded yet. Upload a Trial Balance first.")
-
-        all_stmts = _build_period_statements(company_id, uploads)
-        if not all_stmts:
-            raise HTTPException(422, "Could not build statements.")
-
-    # ── Scope resolution (Phase 22) ───────────────────────────────────────────
-    scope22 = None
-    if (basis_type or "").lower() not in ("all", ""):
-        scope22 = scope_from_params(basis_type, period or None, year_scope or None,
-                                     from_period or None, to_period or None, all_stmts)
-        if scope22.get("error"):
-            raise HTTPException(400, scope22["error"])
-        windowed = filter_by_scope(all_stmts, scope22)
-    else:
-        windowed = filter_periods(all_stmts,
-                                  window.upper() if window.upper() in VALID_WINDOWS else "ALL")
-
-    available = sorted(s.get("period", "") for s in windowed if s.get("period"))
-    resolved_scope = scope22 if scope22 else {
-        "basis_type": "all",
-        "label":      f"{available[0]} → {available[-1]}" if len(available) > 1
-                      else (available[0] if available else "all"),
-        "months":      available,
-        "year":        None,
-        "from_period": available[0]  if available else None,
-        "to_period":   available[-1] if available else None,
-        "error":       None,
-    }
+    company, all_stmts, windowed, resolved_scope, scope22 = _product_windowed_statements(
+        db,
+        company_id,
+        consolidate=consolidate,
+        window=window,
+        basis_type=basis_type,
+        period=period,
+        year_scope=year_scope,
+        from_period=from_period,
+        to_period=to_period,
+    )
 
     # ── Shared computation (done once, reused below) ──────────────────────────
     analysis     = run_analysis(windowed)
@@ -4381,19 +4285,6 @@ def get_executive(
         logger.warning("exec trend_analysis failed: %s", _ta_exc)
         trend_analysis = {"available": False, "reason": str(_ta_exc)}
 
-    forecast_basic: dict = {}
-    try:
-        from app.services.deep_intelligence import (
-            build_executive_basic_forecast,
-            build_executive_forecast_unavailable,
-        )
-        forecast_basic = build_executive_basic_forecast(windowed, analysis, lang=safe_lang)
-    except Exception as _fc_exc:
-        logger.warning("exec basic forecast failed: %s", _fc_exc)
-        from app.services.deep_intelligence import build_executive_forecast_unavailable
-
-        forecast_basic = build_executive_forecast_unavailable(safe_lang, reason="unavailable")
-
     # ── KPI block — window-consistent ──────────────────────────────────────────
     # When scope is active (month/year): pass windowed+"ALL" so filter is a no-op.
     # When rolling window: pass all_stmts+window so build_kpi_block filters internally.
@@ -4404,6 +4295,19 @@ def get_executive(
     else:
         _win_label = window.upper() if window.upper() in VALID_WINDOWS else "ALL"
         kpi_block  = build_kpi_block(all_stmts, _win_label)
+
+    # ── Forecast (canonical: forecast_engine only; same object as GET /forecast) ─
+    try:
+        forecast_pkg = _build_forecast(analysis, lang=safe_lang)
+    except Exception as _fc_exc:
+        logger.warning("exec forecast_engine failed: %s", _fc_exc)
+        forecast_pkg = {"available": False, "reason": str(_fc_exc)}
+
+    intelligence_out = dict(intelligence)
+    intelligence_out["surface_scores"] = build_intel_surface_scores(
+        intelligence, alerts_data.get("alerts", [])
+    )
+    intel_tile_hints = build_intel_tile_hints(cashflow_raw, kpi_block)
 
     # ── Advanced metrics (EBITDA, risk scores) ─────────────────────────────
     try:
@@ -4419,6 +4323,8 @@ def get_executive(
         intelligence = intelligence,
         lang         = safe_lang,
     )
+    _structured_overlay = extract_structured_financial_overlay(statement_bundle)
+    statements_nested = strip_structured_keys_for_nested_statements(statement_bundle)
 
     # ── Comparative Intelligence (company + branches; no group logic) ─────────
     comparative_intelligence: dict = {
@@ -4563,6 +4469,9 @@ def get_executive(
         exec_validation = {"consistent": None, "warnings": [], "checked": 0,
                            "error": str(_ve)}
 
+    _exec_integrity = _assess_financial_integrity(exec_validation)
+    _gov_block = _exec_integrity.get("suppress_governance_outputs", False)
+
     # ── Expense decisions upgrade (company-level; additive) ───────────────────
     expense_decisions_v2: list = []
     try:
@@ -4619,6 +4528,29 @@ def get_executive(
             }
         decisions_for_api.append(row)
 
+    # ── Phase 2: integrity gate — strip governance outputs when validation errors ─
+    if _gov_block:
+        top_focus = None
+        decisions_for_api = []
+        realized_causal_items = []
+        expense_decisions_v2 = []
+        financial_brain = {"available": False, "reason": "data_integrity_blocking"}
+        deep_intelligence = {"available": False, "reason": "data_integrity_blocking"}
+        profitability_intelligence = {"available": False, "reason": "data_integrity_blocking"}
+        trend_analysis = {"available": False, "reason": "data_integrity_blocking"}
+        decision_impacts = {}
+        intel_tile_hints = {
+            "liquidity_primary": None,
+            "liquidity_ocf": None,
+            "liquidity_wc": None,
+            "efficiency_primary": None,
+            "efficiency_expense_mom": None,
+            "efficiency_net_margin_pct": None,
+        }
+        intelligence_out = {**intelligence_out, "integrity_gated": True, "surface_scores": {}}
+        alerts_data = {"alerts": [], "summary": {}}
+        rc_result = {"causes": [], "summary": {"integrity_blocked": True}}
+
     # ── Canonical response — single source of truth ──────────────────────────
     _all_periods = sorted(s.get("period", "") for s in all_stmts if s.get("period"))
     return {
@@ -4629,17 +4561,15 @@ def get_executive(
         "data_source":  "branch_consolidation" if consolidate else "direct_uploads",
 
         "data": {
-            **build_structured_income_statement_bundle(windowed[-1]),
-            **build_structured_income_statement_variance_bundle_from_window(windowed),
-            **build_structured_profit_bridge_bundle_from_window(windowed),
-            "structured_profit_story": analysis.get("structured_profit_story"),
+            **_structured_overlay,
             # ── Health ────────────────────────────────────────────────────────
-            "health_score_v2":   intelligence.get("health_score_v2"),
-            "status":            intelligence.get("status"),
+            "health_score_v2":   (None if _gov_block else intelligence.get("health_score_v2")),
+            "status":            ("integrity_blocked" if _gov_block else intelligence.get("status")),
             "top_focus":         top_focus,
 
-            # ── Intelligence (ratios, trends, anomalies) ──────────────────────
-            "intelligence":      intelligence,
+            # ── Intelligence (ratios, trends, anomalies, surface_scores) ────
+            "intelligence":      intelligence_out,
+            "intel_tile_hints":  intel_tile_hints,
 
             # ── KPI block (windowed, SUM for flow / LAST for rates) ───────────
             "kpi_block":         kpi_block,
@@ -4651,7 +4581,7 @@ def get_executive(
             "decisions":         decisions_for_api,
             "realized_causal_items": realized_causal_items,
             "decisions_summary": dec_result.get("summary", {}),
-            "recommendations":   dec_result.get("recommendations", []),
+            "recommendations":   [] if _gov_block else dec_result.get("recommendations", []),
 
             # ── Alerts ────────────────────────────────────────────────────────
             "alerts":            alerts_data.get("alerts", [])[:5],
@@ -4670,14 +4600,14 @@ def get_executive(
             # ── Trend analysis (current vs previous, volatility) ──────────────
             "trend_analysis":    trend_analysis,
 
-            # ── Basic next-period forecast (additive) ────────────────────────
-            "forecast":         forecast_basic,
+            # ── Forecast (forecast_engine — identical to GET /forecast) ─────
+            "forecast":         forecast_pkg,
 
             # ── Decision impacts ──────────────────────────────────────────────
             "decision_impacts":  decision_impacts,
 
-            # ── Statement bundle (IS + BS + CF + summary + insights) ──────────
-            "statements":        statement_bundle,
+            # ── Statement bundle (no duplicate structured_* — see root overlay) ─
+            "statements":        statements_nested,
 
             # ── Comparative intelligence (branches within company) ────────────
             "comparative_intelligence": comparative_intelligence,
@@ -4707,6 +4637,20 @@ def get_executive(
             "lang":               safe_lang,
             "currency":           company.currency or "",
             "pipeline_validation": exec_validation,
+            "integrity": {**_exec_integrity, "pipeline_validation": exec_validation},
+            "product_intelligence": {
+                "primary_engine": "fin_intelligence.build_intelligence",
+                "alerts_engine": "alerts_engine.build_alerts",
+                "decision_engine": "cfo_decision_engine.build_cfo_decisions",
+                "interpretation_secondary": [
+                    "deep_intelligence",
+                    "profitability_intelligence",
+                    "trend_analysis",
+                    "financial_brain",
+                ],
+                "legacy_non_product": "intelligence_engine.run_intelligence — GET /{company_id} aggregate only",
+                "scenario_ranker": "POST /{company_id}/decisions — not CFO primary decisions",
+            },
             "metric_semantics": {
                 "kpi_block_flow_is_sum_over_window": True,
                 "kpi_block_rates_are_last_period_in_window": True,

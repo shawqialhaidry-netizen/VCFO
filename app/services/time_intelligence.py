@@ -289,6 +289,16 @@ def build_kpi_block(
     w_nm   = _extract(windowed, IS + ("net_margin_pct",))
     w_om   = _extract(windowed, IS + ("operating_margin_pct",))
 
+    # Working capital — balance sheet point-in-time (latest in window = last period)
+    w_wc: list[Optional[float]] = []
+    for s in windowed:
+        bs = s.get("balance_sheet") or {}
+        v = bs.get("working_capital")
+        try:
+            w_wc.append(float(v) if v is not None else None)
+        except (TypeError, ValueError):
+            w_wc.append(None)
+
     def _mom_series(series: list) -> list[Optional[float]]:
         """MoM % change for each element vs previous."""
         result: list[Optional[float]] = [None]
@@ -327,6 +337,7 @@ def build_kpi_block(
             "net_margin":       enrich_kpi(w_nm,   "net_margin"),
             "operating_margin": enrich_kpi(w_om,   "operating_margin"),
             "operating_profit": enrich_kpi(w_op,   "operating_profit"),
+            "working_capital":  enrich_kpi(w_wc,   "working_capital"),
         },
 
         "series": {

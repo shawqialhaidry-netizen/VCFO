@@ -3,6 +3,10 @@
  * - Fetches companies using the stored Bearer token
  * - Persists selected company to localStorage
  * - Provides analysis cache
+ *
+ * Phase 1.1: `fetchAnalysis` hits LEGACY `GET /analysis/{id}` (non-canonical aggregate).
+ * Product surfaces should use `GET /analysis/{id}/executive` instead. This helper remains
+ * for any stale callers / cache warming — not the single-truth path.
  */
 import { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react'
 import { useAuth } from './AuthContext.jsx'
@@ -95,6 +99,7 @@ export function CompanyProvider({ children }) {
     try {
       let lang = 'en'
       try { lang = localStorage.getItem('vcfo_lang') || 'en' } catch { }
+      // LEGACY: GET /analysis/{id} — pipeline_profile.is_canonical_product_path === false
       const res  = await fetch(`${API}/analysis/${companyId}?lang=${encodeURIComponent(lang)}`, { headers: authHeaders() })
       const json = await res.json()
       if (!res.ok) return { ok: false, error: json.detail || 'Analysis failed' }

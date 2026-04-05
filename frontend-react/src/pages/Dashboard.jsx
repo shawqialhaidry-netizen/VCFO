@@ -35,6 +35,13 @@ import { catmullRomToBezierPath } from '../utils/premiumSvgPath.js'
 
 const API = '/api/v1'
 
+/*
+ * Phase 1.1 — surfaces audit (canonical = GET /analysis/{id}/executive `data`):
+ *   - Main load uses executive + optional duplicate GET /forecast (same as data.forecast) — migrate later.
+ *   - Tabs also call /decisions, /root-causes, /alerts, etc. — auxiliary, not a second forecast/bundle source.
+ *   - POST /decisions (scenario ranker) is quarantined in UI comments where used.
+ */
+
 function getAuthHeaders() {
   try {
     const raw = localStorage.getItem('vcfo_auth')
@@ -2994,7 +3001,7 @@ function ManagementReportPanel({tr, selectedId, lang}) {
 // ══════════════════════════════════════════════════════════════════════════════
 //  Phase 21 — Financial Intelligence Panel
 // ══════════════════════════════════════════════════════════════════════════════
-function FinIntelPanel({tr, selectedId, lang, data}) {
+function FinIntelPanel({tr, selectedId, lang, data, consolidate}) {
   // Same executive payload as other Dashboard tabs: data.data.intelligence from GET /analysis/{id}/executive
   const { toQueryString: intelScopeQS, window: win } = usePeriodScope()
   const [alerts,     setAlerts]     = useState(null)
@@ -3022,7 +3029,7 @@ function FinIntelPanel({tr, selectedId, lang, data}) {
     if (!selectedId) return
     setAlertsLoad(true)
     try {
-      const qs = buildAnalysisQuery(intelScopeQS, { lang, window: win, consolidate: false })
+      const qs = buildAnalysisQuery(intelScopeQS, { lang, window: win, consolidate })
       if (qs === null) return
       const r = await fetch(`/api/v1/analysis/${selectedId}/alerts?${qs}`, { headers: getAuthHeaders() })
       if (!r.ok) return
@@ -3258,7 +3265,7 @@ function FinIntelPanel({tr, selectedId, lang, data}) {
 //  Phase 25 — Decisions Panel V2 (CFO Decision Engine)
 // ══════════════════════════════════════════════════════════════════════════════
 // GET /analysis/{id}/decisions — CFO engine + causal_realized parity with executive (Repair Step 3).
-function DecisionsPanelV2({tr, selectedId, lang}) {
+function DecisionsPanelV2({tr, selectedId, lang, consolidate}) {
   const { toQueryString: decQS, window: win } = usePeriodScope()
   const [result,  setResult]  = useState(null)
   const [loading, setLoading] = useState(false)
@@ -3273,7 +3280,7 @@ function DecisionsPanelV2({tr, selectedId, lang}) {
 
   async function run() {
     if (!selectedId) return
-    const qs = buildAnalysisQuery(decQS, { lang, window: win, consolidate: false })
+    const qs = buildAnalysisQuery(decQS, { lang, window: win, consolidate })
     if (qs === null) { setErr(tr('fc_custom_scope_hint')); return }
     setLoading(true); setErr(null)
     try {
@@ -3480,7 +3487,7 @@ function DecisionsPanelV2({tr, selectedId, lang}) {
 // ══════════════════════════════════════════════════════════════════════════════
 //  Phase 26 — Root Causes Panel
 // ══════════════════════════════════════════════════════════════════════════════
-function RootCausesPanel({tr, selectedId, lang}) {
+function RootCausesPanel({tr, selectedId, lang, consolidate}) {
   const { toQueryString: rcQS, window: win } = usePeriodScope()
   const [result,  setResult]  = useState(null)
   const [loading, setLoading] = useState(false)
@@ -3495,7 +3502,7 @@ function RootCausesPanel({tr, selectedId, lang}) {
 
   async function run() {
     if (!selectedId) return
-    const qs = buildAnalysisQuery(rcQS, { lang, window: win, consolidate: false })
+    const qs = buildAnalysisQuery(rcQS, { lang, window: win, consolidate })
     if (qs === null) { setErr(tr('fc_custom_scope_hint')); return }
     setLoading(true); setErr(null)
     try {
@@ -4496,9 +4503,9 @@ export default function Dashboard() {
           {tab==='whatif'        && <WhatIfPanel      data={data} tr={tr} selectedId={selectedId}/>}
           {tab==='narrative'     && <NarrativePanel   tr={tr} selectedId={selectedId} lang={lang}/>}
           {tab==='report'        && <ManagementReportPanel tr={tr} selectedId={selectedId} lang={lang}/>}
-          {tab==='intelligence'  && <FinIntelPanel         tr={tr} selectedId={selectedId} lang={lang} data={data}/>}
-          {tab==='decisions_v2'  && <DecisionsPanelV2     tr={tr} selectedId={selectedId} lang={lang}/>}
-          {tab==='root_causes'   && <RootCausesPanel      tr={tr} selectedId={selectedId} lang={lang}/>}
+          {tab==='intelligence'  && <FinIntelPanel         tr={tr} selectedId={selectedId} lang={lang} data={data} consolidate={consolidate}/>}
+          {tab==='decisions_v2'  && <DecisionsPanelV2     tr={tr} selectedId={selectedId} lang={lang} consolidate={consolidate}/>}
+          {tab==='root_causes'   && <RootCausesPanel      tr={tr} selectedId={selectedId} lang={lang} consolidate={consolidate}/>}
           {tab==='forecast'      && <ForecastPanel        tr={tr} selectedId={selectedId} lang={lang} consolidate={consolidate}/>}
           {tab==='portfolio'     && <PortfolioPanel       tr={tr} lang={lang} companyId={selectedId}/>}
         </>

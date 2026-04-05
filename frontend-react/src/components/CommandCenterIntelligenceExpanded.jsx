@@ -20,11 +20,7 @@ import { strictT as st, strictTParams as stp } from '../utils/strictI18n.js'
 import { buildDrillIntelligence } from '../utils/buildDrillIntelligence.js'
 import { ExecutiveKpiTrendChart, ExecutiveProfitBridgeChart } from './ExecutiveChartBlocks.jsx'
 import CommandCenterProfitPathBridge from './CommandCenterProfitPathBridge.jsx'
-import {
-  riskScoreFromIntel,
-  scoreFromCategory,
-  domainStatusFromScore,
-} from '../utils/commandCenterIntelScores.js'
+import { domainStatusFromScore } from '../utils/commandCenterIntelScores.js'
 import {
   formatCompactForLang,
   formatCompactSignedForLang,
@@ -870,8 +866,9 @@ export default function CommandCenterIntelligenceExpanded({
     }
 
     if (tileId === 'risk') {
-      const s = riskScoreFromIntel(intel, list)
-      const levS = scoreFromCategory(ratiosRoot, 'leverage')
+      const ss = intel?.surface_scores || {}
+      const s = Number.isFinite(Number(ss.risk_composite)) ? Number(ss.risk_composite) : 50
+      const levS = Number.isFinite(Number(ss.leverage)) ? Number(ss.leverage) : 50
       const drill = buildDrillIntelligence({
         panelType: 'domain',
         payload: { domain: 'leverage', score: s, status: domainStatusFromScore(s), ratios: ratiosRoot.leverage || {} },
@@ -889,7 +886,8 @@ export default function CommandCenterIntelligenceExpanded({
     }
 
     if (tileId === 'liquidity') {
-      const s = scoreFromCategory(ratiosRoot, 'liquidity')
+      const ssL = intel?.surface_scores || {}
+      const s = Number.isFinite(Number(ssL.liquidity)) ? Number(ssL.liquidity) : 50
       const drill = buildDrillIntelligence({
         panelType: 'analysis_tab',
         payload: { tab: 'liquidity' },
@@ -923,7 +921,8 @@ export default function CommandCenterIntelligenceExpanded({
     }
 
     if (tileId === 'efficiency') {
-      const s = scoreFromCategory(ratiosRoot, 'efficiency')
+      const ssE = intel?.surface_scores || {}
+      const s = Number.isFinite(Number(ssE.efficiency)) ? Number(ssE.efficiency) : 50
       const drill = buildDrillIntelligence({
         panelType: 'analysis_tab',
         payload: { tab: 'efficiency' },

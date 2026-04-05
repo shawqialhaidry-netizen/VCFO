@@ -2,6 +2,9 @@
  * Branches.jsx — Branch Management Page
  * Full CRUD: list, create, edit, soft-delete
  * Company-isolated, auth-protected, i18n-ready (EN/AR/TR)
+ *
+ * Phase 1.1: branch drill modal uses GET /branches/{id}/analysis (branch-scoped pipeline),
+ * not company GET /executive — intentional; listed as non-canonical company surface for Phase 2.
  */
 import { useState, useEffect, useCallback } from 'react'
 import { useLocation } from 'react-router-dom'

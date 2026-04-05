@@ -5,7 +5,6 @@ Supports Phase 22 universal scope.
 """
 import logging
 
-import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
@@ -15,7 +14,7 @@ from app.models.company import Company
 from app.models.trial_balance import TrialBalanceUpload
 from app.models.user import User
 from app.models.membership import Membership
-from app.services.financial_statements import build_statements, statements_to_dict
+from app.services.canonical_period_statements import build_period_statements_from_uploads
 from app.services.analysis_engine import run_analysis
 from app.services.time_intelligence import filter_periods
 from app.services.time_scope import scope_from_params, filter_by_scope
@@ -28,39 +27,6 @@ logger = logging.getLogger("vcfo.portfolio")
 router = APIRouter(prefix="/portfolio", tags=["portfolio"])
 
 VALID_WINDOWS = {"3M", "6M", "12M", "YTD", "ALL"}
-
-
-def _load_df(record: TrialBalanceUpload):
-    if not record.normalized_path:
-        return None
-    try:
-        df = pd.read_csv(record.normalized_path)
-    except Exception:
-        return None
-    required = {"account_code", "account_name", "debit", "credit", "mapped_type"}
-    return df if required.issubset(set(df.columns)) else None
-
-
-def _build_period_statements(company_id: str, uploads: list) -> list[dict]:
-    period_dfs: dict[str, pd.DataFrame] = {}
-    for record in uploads:
-        df = _load_df(record)
-        if df is None or df.empty:
-            continue
-        if "period" in df.columns:
-            for period, grp in df.groupby("period"):
-                period_dfs[str(period)] = grp.copy()
-        elif record.period:
-            period_dfs[record.period] = df.copy()
-    if not period_dfs:
-        return []
-    stmts = []
-    for period in sorted(period_dfs.keys()):
-        fs = build_statements(period_dfs[period], company_id=company_id, period=period)
-        d  = statements_to_dict(fs)
-        d["period"] = period
-        stmts.append(d)
-    return stmts
 
 
 def _build_company_intelligence(
@@ -81,7 +47,7 @@ def _build_company_intelligence(
     if not uploads:
         return None
 
-    all_stmts = _build_period_statements(company.id, uploads)
+    all_stmts = build_period_statements_from_uploads(company.id, uploads)
     if not all_stmts:
         return None
 

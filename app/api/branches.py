@@ -525,17 +525,12 @@ def get_branch_analysis(
 
     branch_forecast: dict = {}
     try:
-        from app.services.deep_intelligence import (
-            build_executive_basic_forecast,
-            build_executive_forecast_unavailable,
-        )
+        from app.services.forecast_engine import build_forecast as _branch_fc_main
 
-        branch_forecast = build_executive_basic_forecast(stmts, analysis, lang=safe_lang)
+        branch_forecast = _branch_fc_main(analysis, lang=safe_lang)
     except Exception as _bfc_exc:
         logger.warning("branch analysis forecast failed: %s", _bfc_exc)
-        from app.services.deep_intelligence import build_executive_forecast_unavailable
-
-        branch_forecast = build_executive_forecast_unavailable(safe_lang, reason="unavailable")
+        branch_forecast = {"available": False, "reason": str(_bfc_exc)}
 
     # ── Metric Resolver shadow-mode comparisons (log-only) ────────────────────
     try:
@@ -1002,20 +997,16 @@ def get_branch_drill_down(
     branch_decisions = _build_branch_decisions(branch_profile, lang=safe_lang)
 
     period_count = len(stmts)
-    from app.services.deep_intelligence import (
-        build_executive_basic_forecast,
-        build_executive_forecast_unavailable,
-    )
     try:
-        forecast_block = build_executive_basic_forecast(stmts, analysis, lang=safe_lang)
+        forecast_block = build_forecast(analysis, lang=safe_lang)
     except Exception as _cfe:
-        logger.warning("branch drill-down canonical forecast failed: %s", _cfe)
-        forecast_block = build_executive_forecast_unavailable(safe_lang, reason="unavailable")
+        logger.warning("branch drill-down forecast_engine failed: %s", _cfe)
+        forecast_block = {"available": False, "reason": str(_cfe)}
 
     forecast_scenarios = None
+    raw_fc = forecast_block
     if period_count >= 3:
         try:
-            raw_fc = build_forecast(analysis, lang=safe_lang)
             if raw_fc.get("available"):
                 _SCENARIO_KEY_MAP = {"base":"base","optimistic":"aggressive","risk":"conservative"}
                 _SCENARIO_ASSUMPTIONS = {

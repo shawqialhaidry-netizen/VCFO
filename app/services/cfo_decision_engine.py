@@ -1844,6 +1844,7 @@ def build_cfo_decisions(
             "top_focus_domain": top_domain,
             "health_score":     health,
             "total":            len(decisions),
+            "insufficient_evidence": len(decisions) == 0,
             "financial_paradox": fin_paradox_summary,
             "repeat_control": {
                 "skipped_stale_repeats": skipped_stale,

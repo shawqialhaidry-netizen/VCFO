@@ -154,30 +154,40 @@ export default function CommandCenterIntelligenceGrid({
   )
 }
 
-/** Build one-line liquidity hint from executive cashflow + KPIs (compact, not a second narrative). */
-export function liquidityHintLine(cashflow, kpis, tr, lang) {
-  const ocf = cashflow?.operating_cashflow
-  if (ocf != null && Number.isFinite(Number(ocf))) {
-    return stp(tr, lang, 'cmd_intel_tile_liquidity_ocf', { v: formatCompactForLang(Number(ocf), lang) })
+/** Server-authored tile hints (GET /executive intel_tile_hints) — no client metric selection. */
+export function liquidityHintLine(hints, tr, lang) {
+  if (!hints) return null
+  if (
+    hints.liquidity_primary === 'ocf' &&
+    hints.liquidity_ocf != null &&
+    Number.isFinite(Number(hints.liquidity_ocf))
+  ) {
+    return stp(tr, lang, 'cmd_intel_tile_liquidity_ocf', {
+      v: formatCompactForLang(Number(hints.liquidity_ocf), lang),
+    })
   }
-  const wc = kpis?.working_capital?.value
-  if (wc != null && Number.isFinite(Number(wc))) {
-    return stp(tr, lang, 'cmd_intel_tile_liquidity_wc', { v: formatCompactForLang(Number(wc), lang) })
+  if (
+    hints.liquidity_primary === 'wc' &&
+    hints.liquidity_wc != null &&
+    Number.isFinite(Number(hints.liquidity_wc))
+  ) {
+    return stp(tr, lang, 'cmd_intel_tile_liquidity_wc', {
+      v: formatCompactForLang(Number(hints.liquidity_wc), lang),
+    })
   }
   return null
 }
 
-/** One-line efficiency hint from expense / margin momentum when available. */
-export function efficiencyHintLine(kpis, tr, lang) {
-  const expMom = kpis?.expenses?.mom_pct
-  if (expMom != null && Number.isFinite(Number(expMom))) {
+export function efficiencyHintLine(hints, tr, lang) {
+  if (hints?.efficiency_primary === 'exp_mom' && hints.efficiency_expense_mom != null) {
     return stp(tr, lang, 'cmd_intel_tile_efficiency_exp_mom', {
-      pct: formatSignedPctForLang(Number(expMom), 1, lang),
+      pct: formatSignedPctForLang(Number(hints.efficiency_expense_mom), 1, lang),
     })
   }
-  const nm = kpis?.net_margin?.value
-  if (nm != null && Number.isFinite(Number(nm))) {
-    return stp(tr, lang, 'cmd_intel_tile_efficiency_nm', { pct: formatPctForLang(Number(nm), 1, lang) })
+  if (hints?.efficiency_primary === 'net_margin' && hints.efficiency_net_margin_pct != null) {
+    return stp(tr, lang, 'cmd_intel_tile_efficiency_nm', {
+      pct: formatPctForLang(Number(hints.efficiency_net_margin_pct), 1, lang),
+    })
   }
   return null
 }

@@ -15,6 +15,10 @@ Primary outputs:
   "profitability_intelligence": {...},  # interpretation.causal_items when available
 }
 Executive profitability adds interpretation.causal_items (deep + exec rules merged).
+
+Phase 3 — INTERPRETATION SECONDARY: payloads here do not override
+``fin_intelligence.build_intelligence`` or ``build_cfo_decisions``; see
+``meta.product_intelligence`` on GET /executive.
 """
 from __future__ import annotations
 
@@ -903,6 +907,8 @@ def _fc_confidence_score(
 
 def _fc_project_series(tail: list[float]) -> tuple[float | None, str]:
     """
+    Internal helper for LEGACY ``build_executive_basic_forecast`` only — not used by product APIs.
+
     One-step ahead from the last n levels.
     Returns (point_forecast, method_tag).
     - 2+ points: linear trend — mean of the last one or two period-on-period deltas, applied to last level.
@@ -928,9 +934,14 @@ def build_executive_basic_forecast(
     n: int = 3,
 ) -> dict:
     """
-    Phase 5 — mandatory executive forecast block (deterministic).
+    LEGACY — NOT USED BY PRODUCT API (Phase 1+).
 
-    Output keys (fixed contract):
+    Canonical forecast for all product surfaces is ``forecast_engine.build_forecast``
+    (embedded in GET /executive as ``data.forecast`` and exposed at GET /forecast).
+
+    Retained only for potential tests or ad-hoc scripts; do not wire new routes to this.
+
+    Output keys (historical contract):
       next_revenue, next_profit, method_used, confidence_level, insight
     """
     if lang not in ("en", "ar", "tr"):
