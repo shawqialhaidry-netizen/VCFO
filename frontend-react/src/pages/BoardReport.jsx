@@ -20,7 +20,10 @@ import {
 import CmdServerText from '../components/CmdServerText.jsx'
 import DecisionCausalBlock from '../components/DecisionCausalBlock.jsx'
 import StructuredFinancialLayers from '../components/StructuredFinancialLayers.jsx'
+import CommandCenterMiniPnlFlow from '../components/CommandCenterMiniPnlFlow.jsx'
 import { decisionStableKey, hasAnyCausal } from '../utils/decisionCausal.js'
+import '../styles/commandCenterMagic.css'
+import '../styles/boardReportExecutive.css'
 
 const API = '/api/v1'
 function auth() {
@@ -59,6 +62,7 @@ const PCSS = `
   .trend-box{border:1px solid #c8d4cc!important;box-shadow:none!important}
   .pfooter{display:flex!important;position:fixed!important;bottom:0!important;left:0!important;right:0!important;padding:5pt 20mm!important;border-top:1px solid #c8d4cc!important;font-size:8pt!important;color:#6b7a70!important;background:#fff!important}
   .sfooter{display:none!important}
+  .board-exec-grid{grid-template-columns:1fr!important;gap:10pt!important}
   @page{margin:18mm 20mm 26mm;size:A4 portrait}
   @page:first{margin:0}
 }
@@ -161,7 +165,7 @@ function WindowPill({label, active, onClick}){
 function SDiv({n,title,accent=T.accent}){
   return(
     <div className="sdiv" style={{margin:'36px 0 18px',display:'flex',alignItems:'center',gap:12}}>
-      <div style={{width:28,height:28,borderRadius:7,flexShrink:0,background:`${accent}15`,border:`1px solid ${accent}35`,display:'flex',alignItems:'center',justifyContent:'center',fontSize:10,fontWeight:900,color:accent,fontFamily:'monospace'}}>§{n}</div>
+      <div className="board-sdiv__idx" style={{width:28,height:28,borderRadius:7,flexShrink:0,background:`${accent}15`,border:`1px solid ${accent}35`,display:'flex',alignItems:'center',justifyContent:'center',fontSize:10,fontWeight:900,color:accent,fontFamily:'monospace'}}>{n}</div>
       <div style={{flex:1,height:1,background:`${accent}18`}}/>
       <div style={{fontSize:11,fontWeight:800,color:T.text2,textTransform:'uppercase',letterSpacing:'.1em',flexShrink:0}}>{title}</div>
       <div style={{flex:1,height:1,background:`${accent}18`}}/>
@@ -315,6 +319,35 @@ function boardCausalSectionRows(data) {
   return { variant: 'none', rows: [], anyFallback: false }
 }
 
+/** Phase 4 — first structured CFO decision / causal row for board executive column. */
+function BoardExecutivePrimaryCard({ causalPack, tr, lang }) {
+  if (!causalPack?.rows?.length) return null
+  const it = causalPack.rows[0]
+  return (
+    <div className="board-exec-primary">
+      <div className="board-exec-primary__eyebrow">{tr('cmd_primary_decision_label')}</div>
+      {it.mode === 'fallback' ? (
+        <p className="board-exec-primary__fallback">
+          <CmdServerText lang={lang} tr={tr} style={{ color: 'inherit' }}>
+            {it.fallbackText}
+          </CmdServerText>
+        </p>
+      ) : (
+        <DecisionCausalBlock
+          causal_realized={it.causal_realized}
+          impact={it.impact}
+          lang={lang}
+          tr={tr}
+          changeProps={{ fontSize: 13, fontWeight: 700, color: '#f0f4f1', lineHeight: 1.45 }}
+          causeProps={{ fontSize: 12, color: '#c5d4ca', lineHeight: 1.6 }}
+          actionProps={{ fontSize: 12, color: '#c5d4ca', lineHeight: 1.6 }}
+          impactProps={{ fontSize: 11, color: '#9db3a4', fontWeight: 600, marginTop: 8 }}
+        />
+      )}
+    </div>
+  )
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 export default function BoardReport(){
   const {tr,lang}=useLang()
@@ -386,6 +419,18 @@ export default function BoardReport(){
   const expAnoms=expDeep?.anomalies||[]
   const boardCausal = boardCausalSectionRows(data)
 
+  const hasStoryBridge =
+    Boolean(data.analysis?.structured_profit_story?.what_changed_key) ||
+    (data.analysis?.structured_profit_bridge &&
+      typeof data.analysis.structured_profit_bridge === 'object' &&
+      Object.keys(data.analysis.structured_profit_bridge).length > 0)
+  const hasStructuredIs =
+    data.analysis?.structured_income_statement &&
+    typeof data.analysis.structured_income_statement === 'object' &&
+    Object.keys(data.analysis.structured_income_statement).length > 0
+  const showExecGrid = hasStoryBridge || boardCausal.variant !== 'none' || hasStructuredIs
+  const showExecZone = Boolean(summary) || showExecGrid
+
   // Period-windowed averages (display only — no recalc)
   const revAvg = periodAvg(revSeries)
   const npAvg  = periodAvg(npSeries)
@@ -440,39 +485,48 @@ export default function BoardReport(){
           </div>
         )}
 
-        {/* §1 Executive Summary */}
-        {(summary || data.analysis?.structured_profit_story?.what_changed_key) && (
+        {/* §1 Executive zone — summary lead + story/bridge + primary decision + mini P&L flow */}
+        {showExecZone ? (
           <>
             <SDiv n={1} title={tr('board_summary')} accent={T.accent} />
-            <Sec accent={T.accent}>
+            <div className="board-exec-zone">
               {summary ? (
-                <p style={{ fontSize: 14, color: T.text2, lineHeight: 1.8, margin: 0 }}>{summary}</p>
-              ) : null}
-              {data.analysis?.structured_profit_story?.what_changed_key ? (
-                <div style={{ marginTop: summary ? 18 : 0 }}>
-                  <div
-                    style={{
-                      fontSize: 10,
-                      fontWeight: 800,
-                      color: T.accent,
-                      textTransform: 'uppercase',
-                      letterSpacing: '.08em',
-                      marginBottom: 10,
-                    }}
-                  >
-                    {tr('board_profit_story_heading')}
-                  </div>
-                  <StructuredFinancialLayers
-                    data={data.analysis}
-                    tr={tr}
-                    lang={lang}
-                    variant="board"
-                  />
+                <div className="board-exec-lead">
+                  <p className="board-exec-lead__text">{summary}</p>
                 </div>
               ) : null}
-            </Sec>
+              {showExecGrid ? (
+                <div
+                  className={
+                    hasStoryBridge ? 'board-exec-grid' : 'board-exec-grid board-exec-grid--single'
+                  }
+                >
+                  {hasStoryBridge ? (
+                    <div className="board-exec-grid__story">
+                      <StructuredFinancialLayers
+                        data={data.analysis}
+                        tr={tr}
+                        lang={lang}
+                        variant="board_executive"
+                      />
+                    </div>
+                  ) : null}
+                  <div className="board-exec-grid__aside">
+                    <BoardExecutivePrimaryCard causalPack={boardCausal} tr={tr} lang={lang} />
+                    <div className="board-exec-flow-wrap">
+                      <CommandCenterMiniPnlFlow
+                        data={data.analysis}
+                        tr={tr}
+                        lang={lang}
+                        titleKey="analysis_spine_flow_caption"
+                      />
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+            </div>
           </>
-        )}
+        ) : null}
 
         {/* §2 Financial Snapshot */}
         <SDiv n={2} title={tr('board_snapshot')} accent={T.violet}/>

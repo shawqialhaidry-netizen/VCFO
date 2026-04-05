@@ -1,0 +1,190 @@
+/**
+ * Board Report — Phase 4 executive presentation layer (screen + print hints).
+ * Scoped under .board-root; works with existing report tokens.
+ */
+
+/* ── Section index (replaces § marker) ───────────────────────────── */
+.board-root .board-sdiv__idx {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── §1 Executive zone ──────────────────────────────────────────── */
+.board-root .board-exec-zone {
+  margin-bottom: 8px;
+}
+
+.board-root .board-exec-lead {
+  background: #0f1a14;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-left: 3px solid #00d4aa;
+  border-radius: 14px;
+  padding: 20px 24px;
+  margin-bottom: 16px;
+}
+
+.board-root .board-exec-lead__text {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 500;
+  color: #c5d4ca;
+  line-height: 1.65;
+  max-width: 85ch;
+}
+
+.board-root .board-exec-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.12fr) minmax(280px, 0.88fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.board-root .board-exec-grid.board-exec-grid--single {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.board-root .board-exec-grid__aside {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+/* Structured story + bridge */
+.board-root .board-exec-sfl {
+  background: #141f18;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-left: 3px solid #00d4aa;
+  border-radius: 14px;
+  padding: 18px 20px;
+  min-width: 0;
+}
+
+.board-root .board-exec-sfl__heading {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: #00d4aa;
+  margin-bottom: 10px;
+}
+
+.board-root .board-exec-sfl__heading--bridge {
+  color: #a78bfa;
+  margin-top: 0;
+}
+
+.board-root .board-exec-sfl__block--bridge {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.board-root .board-exec-sfl .cmd-magic-story-body {
+  margin-top: 0;
+}
+
+.board-root .board-exec-sfl .cmd-magic-story-block {
+  background: rgba(0, 0, 0, 0.22);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.board-root .board-exec-sfl .cmd-magic-story-block__t {
+  color: #c5d4ca !important;
+  line-height: 1.62 !important;
+}
+
+.board-root .board-exec-sfl .cmd-magic-summary-badge {
+  margin-bottom: 10px;
+}
+
+.board-root .board-exec-sfl ul li {
+  border-bottom-color: rgba(255, 255, 255, 0.07) !important;
+}
+
+/* Primary decision callout */
+.board-root .board-exec-primary {
+  background: #141f18;
+  border: 1px solid rgba(0, 212, 170, 0.22);
+  border-radius: 14px;
+  padding: 16px 18px;
+  box-shadow: 0 4px 22px rgba(0, 0, 0, 0.28);
+}
+
+.board-root .board-exec-primary__eyebrow {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #00d4aa;
+  margin-bottom: 10px;
+}
+
+.board-root .board-exec-primary p {
+  margin: 0 0 8px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #c5d4ca;
+}
+
+.board-root .board-exec-primary p:last-child {
+  margin-bottom: 0;
+}
+
+.board-root .board-exec-primary__fallback {
+  margin: 0 !important;
+  font-size: 13px !important;
+  line-height: 1.62 !important;
+}
+
+/* Mini PnL flow — align with board chrome */
+.board-root .board-exec-flow-wrap .cmd-magic-flow-card {
+  background: #141f18;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-left: 3px solid #3b9eff;
+  border-radius: 14px;
+  padding: 14px 16px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.26);
+}
+
+.board-root .board-exec-flow-wrap .cmd-magic-flow-title {
+  color: #9db3a4;
+  font-size: 9px;
+  letter-spacing: 0.1em;
+}
+
+.board-root .board-exec-flow-wrap .cmd-magic-flow-node__label {
+  color: #6b8a72;
+  font-size: 8px;
+}
+
+.board-root .board-exec-flow-wrap .cmd-magic-flow-node__val {
+  color: #f0f4f1;
+}
+
+.board-root .board-exec-flow-wrap .cmd-magic-flow-node--terminal .cmd-magic-flow-node__val {
+  color: #10d98a;
+}
+
+/* Section rhythm — tighter hierarchy for board read */
+.board-root .report-section {
+  padding: 18px 22px;
+}
+
+.board-root .sdiv {
+  margin: 32px 0 14px;
+}
+
+@media print {
+  .board-root .board-exec-grid {
+    grid-template-columns: 1fr !important;
+    gap: 10pt !important;
+  }
+
+  .board-root .board-exec-lead,
+  .board-root .board-exec-sfl,
+  .board-root .board-exec-primary,
+  .board-root .board-exec-flow-wrap .cmd-magic-flow-card {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+}

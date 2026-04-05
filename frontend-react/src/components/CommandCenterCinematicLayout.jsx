@@ -1,45 +1,49 @@
 /**
- * Command Center layout — Phase 3 executive band + intelligence deck + tile strip.
+ * Command Center — reference-grade cinematic layout (desktop).
+ * KPI strip → main chart column + right intelligence rail → bridge → dock → footer.
  */
-export default function CommandCenterPhase1Layout({
+export default function CommandCenterCinematicLayout({
   contextRail,
-  executiveBand,
-  intelligenceDeck,
+  kpiStrip,
+  mainCharts,
+  rightRail,
+  bridge,
   tileStrip,
   collapsed,
   footerSecondary,
 }) {
   return (
     <div
-      className="cmd-os cmd-magic-root cmd-phase1-layout cmd-p3-root"
-      style={{ display: 'flex', flexDirection: 'column', gap: 20, minWidth: 0 }}
+      className="cmd-os cmd-cine-root cmd-magic-root cmd-phase1-layout cmd-p3-root"
+      style={{ display: 'flex', flexDirection: 'column', gap: 18, minWidth: 0 }}
     >
-      {contextRail}
+      <div className="cmd-cine-context">{contextRail}</div>
 
-      {/* A) Executive band — desktop: financial health | profit story | primary decision */}
-      <div className="cmd-p3-executive-band">{executiveBand}</div>
+      {kpiStrip ? <div className="cmd-cine-kpi-zone">{kpiStrip}</div> : null}
 
-      {/* Charts + profit path bridge */}
-      {intelligenceDeck}
+      <div className="cmd-cine-body-grid">
+        <div className="cmd-cine-body-main">{mainCharts}</div>
+        <aside className="cmd-cine-body-rail">{rightRail}</aside>
+      </div>
 
-      {/* Icon tiles → expand detail */}
+      {bridge}
+
       {tileStrip}
 
-      {/* Lower collapsed (lighter) */}
       <div className="cmd-phase1-collapsed" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         {collapsed}
       </div>
 
       {footerSecondary ? (
         <div
-          className="cmd-phase1-footer"
+          className="cmd-phase1-footer cmd-cine-footer"
           style={{
             paddingTop: 20,
             borderTop: '1px solid rgba(148,163,184,0.12)',
             display: 'flex',
             flexDirection: 'column',
             gap: 14,
-            opacity: 0.88,
+            opacity: 0.92,
           }}
         >
           {footerSecondary}

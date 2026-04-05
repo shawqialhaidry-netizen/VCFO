@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test:cc-smoke": "node scripts/command-center-smoke.mjs"
+    "test:cc-smoke": "node scripts/command-center-smoke.mjs",
+    "screenshot:cc-ar": "npm run build && node scripts/cc-screenshot-ar.mjs"
   },
   "dependencies": {
     "react": "^18.3.1",

@@ -1,14 +1,15 @@
 /**
  * Executive charts — Recharts, data from executive payload only.
  */
-import { useMemo, useState } from 'react'
+import { useId, useMemo, useState } from 'react'
 import {
+  Area,
   Bar,
   BarChart,
   CartesianGrid,
   Cell,
+  ComposedChart,
   Line,
-  LineChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -60,7 +61,8 @@ function trendLineVisuals(kpiType) {
   return { stroke: G.accent, cursor: G.accent }
 }
 
-export function ExecutiveKpiTrendChart({ kpiBlock, cashflow, kpiType, tr, lang }) {
+export function ExecutiveKpiTrendChart({ kpiBlock, cashflow, kpiType, tr, lang, cinematic = false }) {
+  const chartUid = useId().replace(/:/g, '')
   const data = useMemo(
     () => extractKpiTrendPoints(kpiBlock, cashflow, kpiType),
     [kpiBlock, cashflow, kpiType],
@@ -89,8 +91,12 @@ export function ExecutiveKpiTrendChart({ kpiBlock, cashflow, kpiType, tr, lang }
       ? formatPctForLang(v, 0, lang)
       : formatCompactForLang(v, lang)
 
+  const h = cinematic ? 240 : 200
   return (
-    <div className="cmd-chart-enter" style={{ marginTop: 18, marginBottom: 8 }}>
+    <div
+      className={`cmd-chart-enter${cinematic ? ' cmd-cine-margin-chart' : ''}`.trim()}
+      style={{ marginTop: cinematic ? 0 : 18, marginBottom: cinematic ? 0 : 8 }}
+    >
       <div
         style={{
           fontSize: 9,
@@ -103,11 +109,35 @@ export function ExecutiveKpiTrendChart({ kpiBlock, cashflow, kpiType, tr, lang }
       >
         {title}
       </div>
-      <div style={{ width: '100%', height: 200 }}>
+      <div style={{ width: '100%', height: h }}>
         <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={data} margin={{ top: 4, right: 8, left: 0, bottom: 4 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke={G.grid} vertical={false} />
-            <XAxis dataKey="period" tick={{ fill: G.text, fontSize: 9 }} axisLine={{ stroke: G.grid }} tickLine={false} />
+          <ComposedChart data={data} margin={{ top: 4, right: 8, left: 0, bottom: 4 }}>
+            <defs>
+              <linearGradient id={`${chartUid}-area`} x1="0" y1="0" x2="0" y2="1" gradientUnits="objectBoundingBox">
+                <stop offset="0%" stopColor={stroke} stopOpacity="0.38" />
+                <stop offset="72%" stopColor={stroke} stopOpacity="0.06" />
+                <stop offset="100%" stopColor={stroke} stopOpacity="0" />
+              </linearGradient>
+              <linearGradient id={`${chartUid}-line`} x1="0" y1="0" x2="1" y2="0" gradientUnits="objectBoundingBox">
+                <stop offset="0%" stopColor={stroke} stopOpacity="0.42" />
+                <stop offset="55%" stopColor={stroke} stopOpacity="0.92" />
+                <stop offset="100%" stopColor={stroke} stopOpacity="1" />
+              </linearGradient>
+              <filter id={`${chartUid}-glow`} x="-45%" y="-45%" width="190%" height="190%">
+                <feGaussianBlur stdDeviation="2.4" result="blur" />
+                <feMerge>
+                  <feMergeNode in="blur" />
+                  <feMergeNode in="SourceGraphic" />
+                </feMerge>
+              </filter>
+            </defs>
+            <CartesianGrid strokeDasharray="3 5" stroke={G.grid} vertical={false} strokeLinecap="round" />
+            <XAxis
+              dataKey="period"
+              tick={{ fill: G.text, fontSize: 9 }}
+              axisLine={{ stroke: G.grid }}
+              tickLine={false}
+            />
             <YAxis
               tick={{ fill: G.text, fontSize: 9 }}
               axisLine={{ stroke: G.grid }}
@@ -117,19 +147,33 @@ export function ExecutiveKpiTrendChart({ kpiBlock, cashflow, kpiType, tr, lang }
             />
             <Tooltip
               content={(props) => <ExecTooltip {...props} formatter={tooltipFmt} />}
-              cursor={{ stroke: cursor, strokeWidth: 1, strokeDasharray: '4 4' }}
+              cursor={{ stroke: cursor, strokeWidth: 1, strokeDasharray: '4 4', strokeLinecap: 'round' }}
+            />
+            <Area
+              type="monotone"
+              dataKey="value"
+              stroke="none"
+              fill={`url(#${chartUid}-area)`}
+              isAnimationActive
+              animationDuration={980}
+              animationEasing="ease-out"
+              dot={false}
             />
             <Line
               type="monotone"
               dataKey="value"
-              stroke={stroke}
-              strokeWidth={2}
-              dot={{ r: 3, fill: stroke, strokeWidth: 0 }}
-              activeDot={{ r: 5, fill: stroke }}
-              animationDuration={420}
+              stroke={`url(#${chartUid}-line)`}
+              strokeWidth={2.5}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              dot={false}
+              activeDot={{ r: 5.5, fill: stroke, stroke: 'rgba(255,255,255,0.35)', strokeWidth: 2 }}
+              isAnimationActive
+              animationDuration={1100}
               animationEasing="ease-out"
+              style={{ filter: `url(#${chartUid}-glow)` }}
             />
-          </LineChart>
+          </ComposedChart>
         </ResponsiveContainer>
       </div>
     </div>
@@ -137,6 +181,7 @@ export function ExecutiveKpiTrendChart({ kpiBlock, cashflow, kpiType, tr, lang }
 }
 
 export function ExecutiveProfitBridgeChart({ kpiBlock, tr, lang }) {
+  const bridgeUid = useId().replace(/:/g, '')
   const model = useMemo(() => extractProfitBridge(kpiBlock), [kpiBlock])
   if (!model?.steps?.length) return null
 
@@ -184,7 +229,17 @@ export function ExecutiveProfitBridgeChart({ kpiBlock, tr, lang }) {
       <div style={{ width: '100%', height: 220 }}>
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 4 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke={G.grid} vertical={false} />
+            <defs>
+              <linearGradient id={`${bridgeUid}-bar-pos`} x1="0" y1="0" x2="0" y2="1" gradientUnits="objectBoundingBox">
+                <stop offset="0%" stopColor={G.green} stopOpacity="1" />
+                <stop offset="100%" stopColor={G.green} stopOpacity="0.52" />
+              </linearGradient>
+              <linearGradient id={`${bridgeUid}-bar-neg`} x1="0" y1="0" x2="0" y2="1" gradientUnits="objectBoundingBox">
+                <stop offset="0%" stopColor={G.red} stopOpacity="1" />
+                <stop offset="100%" stopColor={G.red} stopOpacity="0.52" />
+              </linearGradient>
+            </defs>
+            <CartesianGrid strokeDasharray="3 5" stroke={G.grid} vertical={false} strokeLinecap="round" />
             <XAxis
               dataKey="name"
               tick={{ fill: G.text, fontSize: 8 }}
@@ -204,10 +259,19 @@ export function ExecutiveProfitBridgeChart({ kpiBlock, tr, lang }) {
               content={(props) => <ExecTooltip {...props} formatter={(v) => formatCompactForLang(v, lang)} />}
               cursor={{ fill: 'rgba(255,255,255,0.04)' }}
             />
-            <Bar dataKey="value" radius={[4, 4, 0, 0]} animationDuration={400} animationEasing="ease-out">
-              {data.map((entry, i) => (
-                <Cell key={i} fill={fillFor(entry)} />
-              ))}
+            <Bar
+              dataKey="value"
+              radius={[7, 7, 0, 0]}
+              animationDuration={720}
+              animationEasing="ease-out"
+              style={{ filter: 'drop-shadow(0 4px 14px rgba(0,0,0,0.35))' }}
+            >
+              {data.map((entry, i) => {
+                const solid = fillFor(entry)
+                const grad =
+                  solid === G.green ? `url(#${bridgeUid}-bar-pos)` : `url(#${bridgeUid}-bar-neg)`
+                return <Cell key={i} fill={grad} />
+              })}
             </Bar>
           </BarChart>
         </ResponsiveContainer>
@@ -220,6 +284,7 @@ export function ExecutiveProfitBridgeChart({ kpiBlock, tr, lang }) {
 }
 
 export function ExecutiveBranchCompareChart({ comparativeIntelligence, tr, lang }) {
+  const branchUid = useId().replace(/:/g, '')
   const [metric, setMetric] = useState('ratio')
   const data = useMemo(
     () => extractBranchCompareRows(comparativeIntelligence, metric === 'revenue' ? 'revenue' : 'ratio'),
@@ -267,7 +332,14 @@ export function ExecutiveBranchCompareChart({ comparativeIntelligence, tr, lang 
       <div style={{ width: '100%', height: Math.min(360, 40 + data.length * 28) }}>
         <ResponsiveContainer width="100%" height="100%">
           <BarChart layout="vertical" data={data} margin={{ top: 4, right: 16, left: 4, bottom: 4 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke={G.grid} horizontal={false} />
+            <defs>
+              <linearGradient id={`${branchUid}-bar`} x1="0" y1="0" x2="1" y2="0" gradientUnits="objectBoundingBox">
+                <stop offset="0%" stopColor={G.violet} stopOpacity="0.45" />
+                <stop offset="55%" stopColor={G.violet} stopOpacity="0.92" />
+                <stop offset="100%" stopColor={G.violet} stopOpacity="1" />
+              </linearGradient>
+            </defs>
+            <CartesianGrid strokeDasharray="3 5" stroke={G.grid} horizontal={false} strokeLinecap="round" />
             <XAxis
               type="number"
               tick={{ fill: G.text, fontSize: 9 }}
@@ -289,10 +361,11 @@ export function ExecutiveBranchCompareChart({ comparativeIntelligence, tr, lang 
             />
             <Bar
               dataKey="value"
-              fill={G.violet}
-              radius={[0, 4, 4, 0]}
-              animationDuration={400}
+              fill={`url(#${branchUid}-bar)`}
+              radius={[0, 7, 7, 0]}
+              animationDuration={720}
               animationEasing="ease-out"
+              style={{ filter: 'drop-shadow(0 0 10px rgba(124,92,252,0.18))' }}
             />
           </BarChart>
         </ResponsiveContainer>

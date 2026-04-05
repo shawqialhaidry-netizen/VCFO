@@ -49,6 +49,8 @@ export default function CommandCenterContextRail({
   scopeActiveLabel,
   allPeriods,
   validation,
+  /** Optional slot next to company (e.g. compact search) — keeps grouping in `.cc-context-right`. */
+  rightSlot = null,
 }) {
   return (
     <div
@@ -64,23 +66,8 @@ export default function CommandCenterContextRail({
         marginBottom: 2,
       }}
     >
-      <div
-        style={{
-          display: 'flex',
-          flexWrap: 'wrap',
-          alignItems: 'center',
-          gap: '8px 14px',
-          justifyContent: 'space-between',
-        }}
-      >
-        <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 9, fontWeight: 800, letterSpacing: '.14em', color: T.text3, textTransform: 'uppercase' }}>
-            {strictT(tr, lang, pageTitleKey)}
-          </div>
-          <div style={{ fontSize: 14, fontWeight: 800, color: T.text1, marginTop: 2 }}>{companyName || '—'}</div>
-        </div>
-        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
-          <PeriodSelector window={window} setWindow={setWindow} disabled={loading} />
+      <div className="cc-context-rail-row">
+        <div className="cc-context-left">
           <div
             style={{
               display: 'flex',
@@ -124,6 +111,7 @@ export default function CommandCenterContextRail({
             activeLabel={scopeActiveLabel}
             allPeriods={allPeriods || []}
           />
+          <PeriodSelector window={window} setWindow={setWindow} disabled={loading} />
           {loading ? (
             <div
               style={{
@@ -136,6 +124,15 @@ export default function CommandCenterContextRail({
               }}
             />
           ) : null}
+        </div>
+        <div className="cc-context-right">
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 9, fontWeight: 800, letterSpacing: '.14em', color: T.text3, textTransform: 'uppercase' }}>
+              {strictT(tr, lang, pageTitleKey)}
+            </div>
+            <div style={{ fontSize: 14, fontWeight: 800, color: T.text1, marginTop: 2 }}>{companyName || '—'}</div>
+          </div>
+          {rightSlot}
         </div>
       </div>
       {validation ? (

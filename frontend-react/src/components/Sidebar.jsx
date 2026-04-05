@@ -19,7 +19,10 @@ export default function Sidebar({ open, onClose }) {
   const loc = useLocation()
 
   return (
-    <aside style={{...s.aside, transform: open ? 'translateX(0)' : 'translateX(-100%)'}}>
+    <aside
+      className="app-sidebar"
+      style={{...s.aside, transform: open ? 'translateX(0)' : 'translateX(-100%)'}}
+    >
       <div style={s.topLine} />
       {/* Close button */}
       <button

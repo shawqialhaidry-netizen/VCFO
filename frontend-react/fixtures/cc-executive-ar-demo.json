@@ -1,0 +1,117 @@
+{
+  "data": {
+    "health_score_v2": 82,
+    "kpi_block": {
+      "periods": ["2024-01", "2024-02", "2024-03", "2024-04", "2024-05", "2024-06"],
+      "series": {
+        "revenue": [2100000, 2150000, 2200000, 2250000, 2350000, 2480000],
+        "expenses": [1600000, 1620000, 1650000, 1680000, 1720000, 1780000],
+        "net_profit": [320000, 310000, 340000, 350000, 380000, 420000],
+        "net_margin": [0.152, 0.144, 0.155, 0.156, 0.162, 0.169]
+      },
+      "kpis": {
+        "revenue": { "value": 2480000, "mom_pct": 0.055, "yoy_pct": 0.12 },
+        "expenses": { "value": 1780000, "mom_pct": 0.035, "yoy_pct": 0.08 },
+        "net_profit": { "value": 420000, "mom_pct": 0.105, "yoy_pct": 0.18 },
+        "net_margin": { "value": 0.169, "mom_pct": 0.004 },
+        "working_capital": { "value": 890000 }
+      }
+    },
+    "cashflow": {
+      "operating_cashflow": 510000,
+      "operating_cashflow_mom": 0.021,
+      "reliability": "high",
+      "series": {
+        "periods": ["2024-01", "2024-02", "2024-03", "2024-04", "2024-05", "2024-06"],
+        "operating_cashflow": [400000, 420000, 435000, 460000, 490000, 510000]
+      }
+    },
+    "intelligence": {
+      "latest_period": "2024-06",
+      "status": "good",
+      "ratios": {
+        "profitability": {
+          "gross_margin": { "status": "good" },
+          "net_margin": { "status": "good" }
+        },
+        "liquidity": { "current_ratio": { "status": "neutral" } },
+        "efficiency": { "asset_turnover": { "status": "warning" } }
+      },
+      "anomaly_count": 1,
+      "anomalies": [{ "id": "demo-anom-1" }]
+    },
+    "comparative_intelligence": {
+      "efficiency_ranking": {
+        "by_expense_pct_of_revenue_desc": [
+          {
+            "branch_name": "الرياض — المركز",
+            "revenue": 920000,
+            "total_expense": 618000,
+            "expense_pct_of_revenue": 67.2
+          },
+          {
+            "branch_name": "جدة",
+            "revenue": 780000,
+            "total_expense": 545000,
+            "expense_pct_of_revenue": 69.9
+          },
+          {
+            "branch_name": "الدمام",
+            "revenue": 610000,
+            "total_expense": 398000,
+            "expense_pct_of_revenue": 65.2
+          },
+          {
+            "branch_name": "مكة",
+            "revenue": 540000,
+            "total_expense": 362000,
+            "expense_pct_of_revenue": 67.0
+          },
+          {
+            "branch_name": "الخبر",
+            "revenue": 480000,
+            "total_expense": 318000,
+            "expense_pct_of_revenue": 66.2
+          }
+        ]
+      }
+    },
+    "structured_profit_bridge": {
+      "latest_period": "2024-06",
+      "previous_period": "2024-05",
+      "revenue_change": { "delta": 130000, "delta_pct": 0.055 },
+      "cogs_change": { "delta": -22000, "delta_pct": -0.028 },
+      "opex_change": { "delta": 35000, "delta_pct": 0.022 },
+      "operating_profit_change": { "delta": 98000, "delta_pct": 0.062 },
+      "net_profit_change": { "delta": 40000, "delta_pct": 0.105 }
+    },
+    "structured_profit_story": {
+      "summary_type": "healthy_growth",
+      "what_changed_key": "profit_story.healthy_growth.what_changed",
+      "what_changed_params": {
+        "delta_np_fmt": "+400,000",
+        "delta_rev_fmt": "+130,000",
+        "previous_period": "2024-05",
+        "latest_period": "2024-06",
+        "nm_pct": "16.9"
+      },
+      "why_key": "profit_story.healthy_growth.why",
+      "why_params": { "nm_pct": "16.9" },
+      "action_key": "profit_story.healthy_growth.action",
+      "action_params": { "nm_pct": "16.9" }
+    },
+    "decisions": [],
+    "alerts": [],
+    "decision_impacts": [],
+    "expense_decisions_v2": [],
+    "expense_intelligence": null,
+    "realized_causal_items": [],
+    "financial_brain": null
+  },
+  "meta": {
+    "periods": ["2024-01", "2024-02", "2024-03", "2024-04", "2024-05", "2024-06"],
+    "scope": { "label": "آخر ستة أشهر", "months": ["2024-01", "2024-02", "2024-03", "2024-04", "2024-05", "2024-06"] },
+    "all_periods": ["2024-01", "2024-02", "2024-03", "2024-04", "2024-05", "2024-06"],
+    "pipeline_validation": null
+  }
+}

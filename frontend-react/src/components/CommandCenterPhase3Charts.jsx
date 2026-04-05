@@ -1,7 +1,7 @@
 /**
  * Phase 3 Command Center charts — Recharts only; data from existing executive payload.
  */
-import { useMemo } from 'react'
+import { useId, useMemo } from 'react'
 import {
   Bar,
   BarChart,
@@ -27,34 +27,21 @@ const G = {
   profitBar: '#a78bfa',
 }
 
+/** Slightly dim mid-ranked branches; emphasize first + last row (presentation-only). */
+function osBranchBarShape(props) {
+  const { fill, x, y, width, height, payload } = props
+  if (width == null || width <= 0 || height == null) return null
+  const alpha = payload?._osEmph ? 1 : 0.78
+  return <rect x={x} y={y} width={width} height={height} fill={fill} fillOpacity={alpha} rx={5} ry={5} />
+}
+
 function P3Tooltip({ active, payload, label, lang }) {
   if (!active || !payload?.length) return null
   return (
-    <div
-      style={{
-        background: 'rgba(15, 23, 42, 0.96)',
-        border: '1px solid rgba(148, 163, 184, 0.2)',
-        borderRadius: 10,
-        padding: '10px 12px',
-        boxShadow: '0 12px 40px rgba(0,0,0,0.55)',
-        minWidth: 140,
-      }}
-    >
-      <div style={{ fontSize: 10, color: G.text, marginBottom: 8, fontWeight: 800, letterSpacing: '.06em' }}>
-        {label}
-      </div>
+    <div className="cmd-os-chart-tooltip">
+      <div className="cmd-os-chart-tooltip__label">{label}</div>
       {payload.map((p) => (
-        <div
-          key={p.dataKey}
-          style={{
-            fontSize: 12,
-            fontWeight: 700,
-            fontFamily: 'var(--font-mono, ui-monospace, monospace)',
-            color: '#f1f5f9',
-            marginTop: 4,
-            direction: 'ltr',
-          }}
-        >
+        <div key={p.dataKey} className="cmd-os-chart-tooltip__row">
           <span style={{ color: p.color }}>{p.name}: </span>
           {p.value != null && Number.isFinite(Number(p.value)) ? formatCompactForLang(p.value, lang) : '—'}
         </div>
@@ -63,7 +50,8 @@ function P3Tooltip({ active, payload, label, lang }) {
   )
 }
 
-export function CommandCenterTripleTrendChart({ kpiBlock, tr, lang }) {
+export function CommandCenterTripleTrendChart({ kpiBlock, tr, lang, cinematic = false }) {
+  const trendUid = useId().replace(/:/g, '')
   const data = useMemo(() => extractTripleTrendRows(kpiBlock), [kpiBlock])
   if (!data?.length) return null
 
@@ -71,10 +59,38 @@ export function CommandCenterTripleTrendChart({ kpiBlock, tr, lang }) {
   const lr = st(tr, lang, 'cmd_chart_trend_revenue').replace(/\s*\(.*\)\s*$/, '')
   const le = st(tr, lang, 'cmd_chart_trend_expenses').replace(/\s*\(.*\)\s*$/, '')
   const ln = st(tr, lang, 'cmd_chart_trend_net_profit').replace(/\s*\(.*\)\s*$/, '')
+  const spanFrom = data[0]?.period
+  const spanTo = data[data.length - 1]?.period
+  const spanLabel =
+    spanFrom && spanTo && spanFrom !== spanTo ? `${spanFrom} → ${spanTo}` : spanTo || spanFrom || ''
+  const lastIdx = data.length - 1
+  const lastDot =
+    (fill) =>
+    (props) => {
+      const { cx, cy, index } = props
+      if (index !== lastIdx || cx == null || cy == null) return null
+      return (
+        <circle
+          cx={cx}
+          cy={cy}
+          r={5}
+          fill={fill}
+          stroke="rgba(255,255,255,0.3)"
+          strokeWidth={1.5}
+        />
+      )
+    }
 
   return (
-    <div className="cmd-p3-chart-shell cmd-p3-chart-shell--primary">
+    <div
+      className={`cmd-p3-chart-shell cmd-p3-chart-shell--primary${cinematic ? ' cmd-cine-primary-chart' : ''}`.trim()}
+    >
       <div className="cmd-p3-chart-title">{title}</div>
+      {spanLabel ? (
+        <p className="cmd-p3-chart-subtitle" dir="ltr">
+          {spanLabel}
+        </p>
+      ) : null}
       <div className="cmd-p3-chart-legend" aria-hidden>
         <span className="cmd-p3-chart-legend__i">
           <span className="cmd-p3-chart-legend__dot" style={{ color: G.rev, background: G.rev }} />
@@ -89,33 +105,47 @@ export function CommandCenterTripleTrendChart({ kpiBlock, tr, lang }) {
           {ln}
         </span>
       </div>
-      <div style={{ width: '100%', height: 268 }}>
+      <div className={cinematic ? 'cmd-p3-chart-inner' : undefined} style={{ width: '100%', height: cinematic ? undefined : 320 }}>
         <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={data} margin={{ top: 8, right: 12, left: 0, bottom: 4 }}>
+          <LineChart data={data} margin={{ top: 10, right: 14, left: 2, bottom: 6 }}>
             <defs>
-              <filter id="cmdP3GlowRev" x="-40%" y="-40%" width="180%" height="180%">
+              <linearGradient id={`${trendUid}-st-rev`} x1="0" y1="0" x2="1" y2="0" gradientUnits="objectBoundingBox">
+                <stop offset="0%" stopColor={G.rev} stopOpacity="0.4" />
+                <stop offset="50%" stopColor={G.rev} stopOpacity="0.95" />
+                <stop offset="100%" stopColor={G.rev} stopOpacity="1" />
+              </linearGradient>
+              <linearGradient id={`${trendUid}-st-exp`} x1="0" y1="0" x2="1" y2="0" gradientUnits="objectBoundingBox">
+                <stop offset="0%" stopColor={G.exp} stopOpacity="0.38" />
+                <stop offset="100%" stopColor={G.exp} stopOpacity="1" />
+              </linearGradient>
+              <linearGradient id={`${trendUid}-st-np`} x1="0" y1="0" x2="1" y2="0" gradientUnits="objectBoundingBox">
+                <stop offset="0%" stopColor={G.np} stopOpacity="0.42" />
+                <stop offset="55%" stopColor={G.np} stopOpacity="0.95" />
+                <stop offset="100%" stopColor={G.np} stopOpacity="1" />
+              </linearGradient>
+              <filter id={`${trendUid}-glow-rev`} x="-45%" y="-45%" width="190%" height="190%">
+                <feGaussianBlur stdDeviation="2.2" result="b" />
+                <feMerge>
+                  <feMergeNode in="b" />
+                  <feMergeNode in="SourceGraphic" />
+                </feMerge>
+              </filter>
+              <filter id={`${trendUid}-glow-exp`} x="-45%" y="-45%" width="190%" height="190%">
                 <feGaussianBlur stdDeviation="2" result="b" />
                 <feMerge>
                   <feMergeNode in="b" />
                   <feMergeNode in="SourceGraphic" />
                 </feMerge>
               </filter>
-              <filter id="cmdP3GlowExp" x="-40%" y="-40%" width="180%" height="180%">
-                <feGaussianBlur stdDeviation="2" result="b" />
-                <feMerge>
-                  <feMergeNode in="b" />
-                  <feMergeNode in="SourceGraphic" />
-                </feMerge>
-              </filter>
-              <filter id="cmdP3GlowNp" x="-40%" y="-40%" width="180%" height="180%">
-                <feGaussianBlur stdDeviation="2.5" result="b" />
+              <filter id={`${trendUid}-glow-np`} x="-45%" y="-45%" width="190%" height="190%">
+                <feGaussianBlur stdDeviation="2.6" result="b" />
                 <feMerge>
                   <feMergeNode in="b" />
                   <feMergeNode in="SourceGraphic" />
                 </feMerge>
               </filter>
             </defs>
-            <CartesianGrid strokeDasharray="4 6" stroke={G.grid} vertical={false} />
+            <CartesianGrid strokeDasharray="4 6" stroke={G.grid} vertical={false} strokeLinecap="round" />
             <XAxis
               dataKey="period"
               tick={{ fill: G.text, fontSize: 9 }}
@@ -137,38 +167,47 @@ export function CommandCenterTripleTrendChart({ kpiBlock, tr, lang }) {
               type="monotone"
               name={lr}
               dataKey="revenue"
-              stroke={G.rev}
-              strokeWidth={2.4}
-              dot={false}
-              activeDot={{ r: 5, strokeWidth: 0 }}
+              stroke={`url(#${trendUid}-st-rev)`}
+              strokeWidth={2.55}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              dot={lastDot(G.rev)}
+              activeDot={{ r: 5.5, strokeWidth: 0, stroke: 'rgba(255,255,255,0.25)', fill: G.rev }}
               connectNulls
-              style={{ filter: 'url(#cmdP3GlowRev)' }}
-              animationDuration={520}
+              style={{ filter: `url(#${trendUid}-glow-rev)` }}
+              animationDuration={1100}
+              animationEasing="ease-out"
             />
             <Line
               type="monotone"
               name={le}
               dataKey="expenses"
-              stroke={G.exp}
-              strokeWidth={2.2}
-              strokeDasharray="6 4"
-              dot={false}
-              activeDot={{ r: 5, strokeWidth: 0 }}
+              stroke={`url(#${trendUid}-st-exp)`}
+              strokeWidth={2.35}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeDasharray="7 5"
+              dot={lastDot(G.exp)}
+              activeDot={{ r: 5.5, strokeWidth: 0, stroke: 'rgba(255,255,255,0.2)', fill: G.exp }}
               connectNulls
-              style={{ filter: 'url(#cmdP3GlowExp)' }}
-              animationDuration={520}
+              style={{ filter: `url(#${trendUid}-glow-exp)` }}
+              animationDuration={1050}
+              animationEasing="ease-out"
             />
             <Line
               type="monotone"
               name={ln}
               dataKey="net_profit"
-              stroke={G.np}
-              strokeWidth={2.6}
-              dot={false}
-              activeDot={{ r: 6, strokeWidth: 0 }}
+              stroke={`url(#${trendUid}-st-np)`}
+              strokeWidth={2.75}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              dot={lastDot(G.np)}
+              activeDot={{ r: 6.5, strokeWidth: 0, stroke: 'rgba(255,255,255,0.28)', fill: G.np }}
               connectNulls
-              style={{ filter: 'url(#cmdP3GlowNp)' }}
-              animationDuration={520}
+              style={{ filter: `url(#${trendUid}-glow-np)` }}
+              animationDuration={1150}
+              animationEasing="ease-out"
             />
           </LineChart>
         </ResponsiveContainer>
@@ -177,11 +216,25 @@ export function CommandCenterTripleTrendChart({ kpiBlock, tr, lang }) {
   )
 }
 
-export function CommandCenterBranchGroupedChart({ comparativeIntelligence, tr, lang, onOpenBranches }) {
-  const data = useMemo(() => extractBranchGroupedCompareRows(comparativeIntelligence, 8), [comparativeIntelligence])
+export function CommandCenterBranchGroupedChart({
+  comparativeIntelligence,
+  tr,
+  lang,
+  onOpenBranches,
+  cinematic = false,
+}) {
+  const branchUid = useId().replace(/:/g, '')
+  const data = useMemo(() => {
+    const raw = extractBranchGroupedCompareRows(comparativeIntelligence, 8)
+    if (!raw?.length) return raw
+    const last = raw.length - 1
+    return raw.map((row, i) => ({ ...row, _osEmph: i === 0 || i === last }))
+  }, [comparativeIntelligence])
   if (!data?.length) {
     return (
-      <div className="cmd-p3-chart-shell cmd-p3-chart-shell--branch">
+      <div
+        className={`cmd-p3-chart-shell cmd-p3-chart-shell--branch${cinematic ? ' cmd-cine-branch-chart-shell' : ''}`.trim()}
+      >
         <div className="cmd-p3-chart-title">{st(tr, lang, 'cmd_p3_branch_chart_title')}</div>
         <div style={{ fontSize: 12, color: G.text, padding: '24px 8px' }}>{st(tr, lang, 'cmd_chart_branch_empty')}</div>
       </div>
@@ -194,12 +247,28 @@ export function CommandCenterBranchGroupedChart({ comparativeIntelligence, tr, l
   const lp = st(tr, lang, 'cmd_p3_branch_bar_profit')
 
   return (
-    <div className="cmd-p3-chart-shell cmd-p3-chart-shell--branch">
+    <div
+      className={`cmd-p3-chart-shell cmd-p3-chart-shell--branch${cinematic ? ' cmd-cine-branch-chart-shell' : ''}`.trim()}
+    >
       <div className="cmd-p3-chart-title">{st(tr, lang, 'cmd_p3_branch_chart_title')}</div>
-      <div style={{ width: '100%', height: h }}>
+      <div className={cinematic ? 'cmd-p3-chart-inner' : undefined} style={{ width: '100%', height: h }}>
         <ResponsiveContainer width="100%" height="100%">
           <BarChart layout="vertical" data={data} margin={{ top: 4, right: 8, left: 4, bottom: 4 }}>
-            <CartesianGrid strokeDasharray="4 6" stroke={G.grid} vertical={false} />
+            <defs>
+              <linearGradient id={`${branchUid}-rev`} x1="0" y1="0" x2="1" y2="0" gradientUnits="objectBoundingBox">
+                <stop offset="0%" stopColor={G.rev} stopOpacity="0.5" />
+                <stop offset="100%" stopColor={G.rev} stopOpacity="1" />
+              </linearGradient>
+              <linearGradient id={`${branchUid}-exp`} x1="0" y1="0" x2="1" y2="0" gradientUnits="objectBoundingBox">
+                <stop offset="0%" stopColor={G.exp} stopOpacity="0.45" />
+                <stop offset="100%" stopColor={G.exp} stopOpacity="1" />
+              </linearGradient>
+              <linearGradient id={`${branchUid}-profit`} x1="0" y1="0" x2="1" y2="0" gradientUnits="objectBoundingBox">
+                <stop offset="0%" stopColor={G.profitBar} stopOpacity="0.48" />
+                <stop offset="100%" stopColor={G.profitBar} stopOpacity="1" />
+              </linearGradient>
+            </defs>
+            <CartesianGrid strokeDasharray="4 6" stroke={G.grid} vertical={false} strokeLinecap="round" />
             <XAxis
               type="number"
               tick={{ fill: G.text, fontSize: 9 }}
@@ -226,9 +295,39 @@ export function CommandCenterBranchGroupedChart({ comparativeIntelligence, tr, l
               wrapperStyle={{ fontSize: 10, paddingTop: 8 }}
               formatter={(value) => <span style={{ color: '#cbd5e1', fontWeight: 700 }}>{value}</span>}
             />
-            <Bar dataKey="revenue" name={lr} fill={G.rev} radius={[0, 4, 4, 0]} maxBarSize={14} animationDuration={480} />
-            <Bar dataKey="expenses" name={le} fill={G.exp} radius={[0, 4, 4, 0]} maxBarSize={14} animationDuration={480} />
-            <Bar dataKey="profit" name={lp} fill={G.profitBar} radius={[0, 4, 4, 0]} maxBarSize={14} animationDuration={480} />
+            <Bar
+              dataKey="revenue"
+              name={lr}
+              fill={`url(#${branchUid}-rev)`}
+              radius={[0, 6, 6, 0]}
+              maxBarSize={14}
+              shape={osBranchBarShape}
+              animationDuration={750}
+              animationEasing="ease-out"
+              style={{ filter: 'drop-shadow(0 0 8px rgba(59,158,255,0.12))' }}
+            />
+            <Bar
+              dataKey="expenses"
+              name={le}
+              fill={`url(#${branchUid}-exp)`}
+              radius={[0, 6, 6, 0]}
+              maxBarSize={14}
+              shape={osBranchBarShape}
+              animationDuration={750}
+              animationEasing="ease-out"
+              style={{ filter: 'drop-shadow(0 0 8px rgba(248,113,113,0.1))' }}
+            />
+            <Bar
+              dataKey="profit"
+              name={lp}
+              fill={`url(#${branchUid}-profit)`}
+              radius={[0, 6, 6, 0]}
+              maxBarSize={14}
+              shape={osBranchBarShape}
+              animationDuration={750}
+              animationEasing="ease-out"
+              style={{ filter: 'drop-shadow(0 0 8px rgba(167,139,250,0.12))' }}
+            />
           </BarChart>
         </ResponsiveContainer>
       </div>

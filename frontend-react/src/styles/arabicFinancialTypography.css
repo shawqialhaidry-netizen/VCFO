@@ -1,0 +1,187 @@
+/**
+ * Arabic (html[lang="ar"]) — financial narrative readability: hierarchy, scan, spacing.
+ * Loaded globally; selectors are scoped so EN/TR are unchanged.
+ */
+
+html[lang='ar'] body,
+html[lang='ar'] #root {
+  line-height: 1.62;
+}
+
+/* ── Command Center — primary decision + hero narrative ───────────── */
+html[lang='ar'] .cmd-magic-root .cmd-magic-decision-headline {
+  font-weight: 800;
+  letter-spacing: 0.015em;
+  line-height: 1.55;
+  color: #ffffff;
+}
+
+html[lang='ar'] .cmd-magic-root .cmd-magic-hero-k,
+html[lang='ar'] .cmd-magic-root .cmd-magic-impact-label {
+  letter-spacing: 0.06em;
+  line-height: 1.32;
+  color: #8b9cb0;
+}
+
+html[lang='ar'] .cmd-magic-root .cmd-magic-hero-cause p,
+html[lang='ar'] .cmd-magic-root .cmd-magic-hero-action p {
+  font-weight: 400;
+  line-height: 1.62;
+  color: #aab8c9;
+  max-width: 48ch;
+}
+
+html[lang='ar'] .cmd-magic-root .cmd-magic-impact-num {
+  color: #f8fafc;
+  font-weight: 800;
+}
+
+/* Phase 3 shell — same hierarchy inside .cmd-p3-root */
+html[lang='ar'] .cmd-p3-root .cmd-primary-decision-headline {
+  letter-spacing: 0.01em !important;
+  line-height: 1.43 !important;
+  color: #f1f5f9 !important;
+}
+
+html[lang='ar'] .cmd-page--cinematic .cmd-cine-rail-card .cmd-primary-decision-headline {
+  line-height: 1.45 !important;
+  letter-spacing: 0.01em !important;
+}
+
+html[lang='ar'] .cmd-p3-root .cmd-magic-hero-k {
+  letter-spacing: 0.06em !important;
+  line-height: 1.32 !important;
+  color: #8b9cb0 !important;
+}
+
+html[lang='ar'] .cmd-p3-root .cmd-magic-hero-cause p,
+html[lang='ar'] .cmd-p3-root .cmd-magic-hero-action p {
+  line-height: 1.62 !important;
+  max-width: 48ch !important;
+  font-weight: 400 !important;
+  color: #aab8c9 !important;
+}
+
+html[lang='ar'] .cmd-p3-root .cmd-magic-impact-num {
+  color: #f8fafc;
+}
+
+/* ── Structured profit story (Command Center + Board) ─────────────── */
+html[lang='ar'] .cmd-magic-story-shell .cmd-magic-story-h2 {
+  letter-spacing: 0.08em;
+  margin-bottom: 14px;
+}
+
+html[lang='ar'] .cmd-magic-summary-badge {
+  margin-bottom: 14px;
+  letter-spacing: 0.06em;
+}
+
+html[lang='ar'] .cmd-magic-story-block {
+  margin-bottom: 14px;
+  padding: 14px 16px;
+}
+
+html[lang='ar'] .cmd-magic-story-block__k {
+  letter-spacing: 0.05em;
+  line-height: 1.35;
+  margin-bottom: 8px;
+  color: #8ec5bc;
+}
+
+html[lang='ar'] .cmd-magic-story-block__t {
+  font-weight: 400;
+  line-height: 1.62;
+  color: #b4c2d4;
+  max-width: 48ch;
+}
+
+html[lang='ar'] .cmd-magic-story-block__t.ar-fin-story-body {
+  max-width: 48ch;
+}
+
+html[lang='ar'] .ar-fin-story-metric {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: #f1f5f9;
+  white-space: nowrap;
+}
+
+/* Non–visual-blocks story paragraphs (Analysis / full SFL) */
+html[lang='ar'] .ar-fin-story-plain {
+  font-weight: 400 !important;
+  line-height: 1.62 !important;
+  color: #b4c2d4 !important;
+  max-width: 48ch;
+}
+
+/* ── Mono figures in structured layers (variance, bridge, IS tables) ─ */
+html[lang='ar'] .sfl-mono {
+  font-weight: 700;
+  color: #e8eef4;
+  font-variant-numeric: tabular-nums;
+}
+
+html[lang='ar'] .sfl-mono.sfl-mono--soft {
+  font-weight: 600;
+  color: #cbd5e1;
+}
+
+html[lang='ar'] .sfl-row-label {
+  font-weight: 500;
+  line-height: 1.38;
+  color: #94a3b8;
+}
+
+html[lang='ar'] .sfl-var-list > li,
+html[lang='ar'] .sfl-bridge-list > li {
+  padding: 10px 0;
+  align-items: flex-start;
+}
+
+html[lang='ar'] .sfl-margin-strip-label {
+  letter-spacing: 0.04em;
+  line-height: 1.3;
+}
+
+html[lang='ar'] .analysis-financial-spine > p {
+  line-height: 1.5;
+  margin-bottom: 14px !important;
+}
+
+/* ── Board Report executive zone ───────────────────────────────────── */
+html[lang='ar'] .board-root .board-exec-lead__text {
+  font-weight: 400;
+  line-height: 1.62;
+  color: #b4c4bb;
+  max-width: 48ch;
+}
+
+html[lang='ar'] .board-root .board-exec-sfl__heading {
+  letter-spacing: 0.06em;
+  line-height: 1.35;
+  margin-bottom: 12px;
+}
+
+html[lang='ar'] .board-root .board-exec-sfl .cmd-magic-story-block__t {
+  font-weight: 400;
+  line-height: 1.62 !important;
+  color: #b4c2d4 !important;
+  max-width: 48ch;
+}
+
+html[lang='ar'] .board-root .board-exec-primary p {
+  line-height: 1.62;
+  font-weight: 400;
+  color: #b4c4bb;
+}
+
+html[lang='ar'] .board-root .board-exec-primary__fallback {
+  line-height: 1.62 !important;
+}
+
+html[lang='ar'] .board-root .board-exec-sfl__block--bridge {
+  margin-top: 18px;
+  padding-top: 18px;
+}

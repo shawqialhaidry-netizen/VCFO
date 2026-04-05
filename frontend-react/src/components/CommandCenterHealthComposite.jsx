@@ -2,6 +2,7 @@
  * Health score panel + domain signals (+ Phase 3 executive band layout).
  */
 import { strictT } from '../utils/strictI18n.js'
+import { isArabicUiLang } from '../utils/arabicBackendCopy.js'
 
 const T = {
   card: 'var(--bg-panel)',
@@ -97,8 +98,11 @@ export default function CommandCenterHealthComposite({
   const ac = intelligence?.anomaly_count
   const anomalies = intelligence?.anomalies
   const count = typeof ac === 'number' ? ac : Array.isArray(anomalies) ? anomalies.length : 0
+  const arUi = isArabicUiLang(lang)
   const preview =
-    Array.isArray(anomalies) && anomalies[0]?.detail ? String(anomalies[0].detail).slice(0, 120) : null
+    !arUi && Array.isArray(anomalies) && anomalies[0]?.detail
+      ? String(anomalies[0].detail).slice(0, 72)
+      : null
 
   const anomalyBlock =
     count > 0 ? (
@@ -106,7 +110,11 @@ export default function CommandCenterHealthComposite({
         <div className="cmd-p3-anomaly-slot__k">{strictT(tr, lang, 'cmd_p3_anomaly_head')}</div>
         <div className="cmd-p3-anomaly-slot__v">
           {strictT(tr, lang, 'intel_anomalies')}: {count}
-          {preview ? ` — ${preview}${preview.length >= 120 ? '…' : ''}` : null}
+          {arUi
+            ? ` — ${strictT(tr, lang, 'cmd_ar_anomaly_summary_hint')}`
+            : preview
+              ? ` — ${preview}${preview.length >= 72 ? '…' : ''}`
+              : null}
         </div>
       </div>
     ) : null

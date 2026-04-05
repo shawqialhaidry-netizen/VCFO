@@ -50,6 +50,7 @@ export function analysisDrillTarget({ type, domain } = {}) {
 export function analysisPathFromPanelType(pType, pLoad) {
   if (pType === 'alert') return { path: '/alerts', focus: 'alerts' }
   if (pType === 'expense_v2') return { path: '/decisions', focus: 'decisions' }
+  if (pType === 'profit_bridge_segment') return { path: '/profitability', focus: 'profitability' }
   if (pType === 'kpi') return analysisDrillTarget({ type: pLoad?.type, domain: pLoad?.domain })
   if (pType === 'decision') return analysisDrillTarget({ type: 'decision', domain: pLoad?.domain })
   if (pType === 'domain') return analysisDrillTarget({ domain: pLoad?.domain })

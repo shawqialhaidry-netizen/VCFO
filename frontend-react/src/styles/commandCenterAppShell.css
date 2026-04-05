@@ -1,0 +1,77 @@
+/**
+ * Command Center route — full-viewport premium shell (header + main canvas).
+ * Active when .app-shell--command-center is on the root app shell.
+ */
+
+/* Cinematic depth: deep base, soft radials, vignette, micro-noise — avoid harsh patches */
+.app-shell--command-center.app-shell__root {
+  background-color: #05070b;
+  background-image:
+    radial-gradient(circle at 50% 50%, transparent 60%, rgba(0, 0, 0, 0.6) 100%),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.78' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.055'/%3E%3C/svg%3E"),
+    radial-gradient(ellipse 110% 75% at 50% 42%, rgba(55, 95, 185, 0.045), transparent 68%),
+    radial-gradient(900px circle at 85% 15%, rgba(120, 80, 255, 0.08), transparent 60%),
+    radial-gradient(800px circle at 20% 10%, rgba(0, 255, 200, 0.08), transparent 60%);
+  background-repeat: no-repeat, repeat, no-repeat, no-repeat, no-repeat;
+  background-size: auto, 160px 160px, auto, auto, auto;
+}
+
+.app-shell--command-center .app-shell__body {
+  background: transparent;
+}
+
+/* Main scroll region — hairline grid only (must stay subliminal) */
+.app-shell--command-center main.grid-bg {
+  background-color: transparent;
+  background-image:
+    linear-gradient(rgba(148, 163, 184, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(148, 163, 184, 0.035) 1px, transparent 1px);
+  background-size: 48px 48px;
+}
+
+/* Header — glass strip */
+.header-bar--cc {
+  height: 62px;
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.94) 0%, rgba(3, 7, 18, 0.9) 100%) !important;
+  border-bottom: 1px solid rgba(34, 211, 238, 0.16) !important;
+  box-shadow:
+    0 12px 40px rgba(0, 0, 0, 0.4),
+    0 1px 0 rgba(255, 255, 255, 0.04) inset !important;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+.header-bar--cc input[type='search'],
+.header-bar--cc input:not([type]) {
+  background: rgba(15, 23, 42, 0.75) !important;
+  border-color: rgba(34, 211, 238, 0.12) !important;
+}
+
+.header-bar--cc input:focus {
+  border-color: rgba(34, 211, 238, 0.35) !important;
+  outline: none;
+  box-shadow: 0 0 0 1px rgba(34, 211, 238, 0.15);
+}
+
+.header-bar__badge-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  margin-inline-end: 6px;
+  vertical-align: middle;
+  opacity: 0.85;
+  flex-shrink: 0;
+}
+
+.header-bar__badge-dot--risk {
+  background: var(--red);
+  opacity: 1;
+}
+
+.app-shell--command-center .app-sidebar {
+  background: linear-gradient(195deg, rgba(10, 14, 22, 0.98) 0%, rgba(3, 7, 18, 0.99) 100%) !important;
+  border-inline-end: 1px solid rgba(34, 211, 238, 0.12);
+  box-shadow: 12px 0 48px rgba(0, 0, 0, 0.45);
+}

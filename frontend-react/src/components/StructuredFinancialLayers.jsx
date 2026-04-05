@@ -11,6 +11,8 @@ import {
   formatCompactSignedForLang,
 } from '../utils/numberFormat.js'
 import CommandCenterMiniPnlFlow from './CommandCenterMiniPnlFlow.jsx'
+import { storyParagraphContent } from '../utils/arabicFinancialStoryText.jsx'
+import { normalizeUiLang } from '../utils/strictI18n.js'
 
 const CARD_STYLE = {
   background: 'var(--bg-panel)',
@@ -94,6 +96,10 @@ const MARGIN_LABEL_KEYS = {
   net_margin_pct: 'sfl_row_net_margin_pct',
 }
 
+const MONO = 'sfl-mono'
+const MONO_SOFT = 'sfl-mono sfl-mono--soft'
+const ROW_LBL = 'sfl-row-label'
+
 /** Ordered bridge keys (revenue → cogs → opex → operating → net). */
 const BRIDGE_KEYS = [
   { bridgeKey: 'revenue_change', labelKey: 'sfl_bridge_revenue' },
@@ -125,16 +131,16 @@ function VarianceTable({ variance, tr, lang }) {
                 <td style={{ padding: '7px 8px 7px 0', color: 'var(--text-secondary)' }}>
                   {tr(VAR_LABEL_KEYS[k])}
                 </td>
-                <td style={{ padding: '7px 8px', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
+                <td className={MONO} style={{ padding: '7px 8px', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
                   {fmtMoney(row.current, lang)}
                 </td>
-                <td style={{ padding: '7px 8px', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
+                <td className={MONO} style={{ padding: '7px 8px', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
                   {fmtMoney(row.previous, lang)}
                 </td>
-                <td style={{ padding: '7px 8px', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
+                <td className={MONO} style={{ padding: '7px 8px', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
                   {fmtDeltaMoney(row.delta, lang)}
                 </td>
-                <td style={{ padding: '7px 0 7px 8px', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
+                <td className={MONO} style={{ padding: '7px 0 7px 8px', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
                   {row.delta_pct != null && Number.isFinite(Number(row.delta_pct))
                     ? formatSignedPctForLang(Number(row.delta_pct), 1, lang)
                     : '—'}
@@ -170,13 +176,13 @@ function MarginVarianceTable({ marginVar, tr, lang, showTitle = true }) {
                 <td style={{ padding: '7px 8px 7px 0', color: 'var(--text-secondary)' }}>
                   {tr(MARGIN_LABEL_KEYS[k])}
                 </td>
-                <td style={{ padding: '7px 8px', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
+                <td className={MONO} style={{ padding: '7px 8px', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
                   {row.current != null ? formatPctForLang(row.current, 1, lang) : '—'}
                 </td>
-                <td style={{ padding: '7px 8px', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
+                <td className={MONO} style={{ padding: '7px 8px', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
                   {row.previous != null ? formatPctForLang(row.previous, 1, lang) : '—'}
                 </td>
-                <td style={{ padding: '7px 0 7px 8px', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
+                <td className={MONO} style={{ padding: '7px 0 7px 8px', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
                   {row.delta_pp != null && Number.isFinite(Number(row.delta_pp))
                     ? formatPpForLang(Number(row.delta_pp), 1, lang)
                     : '—'}
@@ -193,7 +199,7 @@ function MarginVarianceTable({ marginVar, tr, lang, showTitle = true }) {
 function VarianceSummaryList({ variance, tr, lang }) {
   if (!variance || typeof variance !== 'object') return null
   return (
-    <ul style={{ listStyle: 'none', padding: 0, margin: 0, fontSize: 12, lineHeight: 1.55 }}>
+    <ul className="sfl-var-list" style={{ listStyle: 'none', padding: 0, margin: 0, fontSize: 12, lineHeight: 1.55 }}>
       {VAR_LINE_KEYS.map((k) => {
         const row = variance[k] || {}
         const d = row.delta
@@ -209,11 +215,13 @@ function VarianceSummaryList({ variance, tr, lang }) {
               borderBottom: '1px solid var(--border)',
             }}
           >
-            <span style={{ color: 'var(--text-secondary)', fontWeight: 600 }}>{tr(VAR_LABEL_KEYS[k])}</span>
-            <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, textAlign: 'right' }}>
+            <span className={ROW_LBL} style={{ color: 'var(--text-secondary)', fontWeight: 600 }}>
+              {tr(VAR_LABEL_KEYS[k])}
+            </span>
+            <span className={MONO} style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, textAlign: 'right' }}>
               {fmtDeltaMoney(d, lang)}
               {dp != null && Number.isFinite(Number(dp)) ? (
-                <span style={{ color: 'var(--text-muted)', fontWeight: 600, marginLeft: 8 }}>
+                <span className={MONO_SOFT} style={{ color: 'var(--text-muted)', fontWeight: 600, marginLeft: 8 }}>
                   ({formatSignedPctForLang(Number(dp), 1, lang)})
                 </span>
               ) : null}
@@ -243,6 +251,7 @@ function MarginSummaryStrip({ marginVar, tr, lang }) {
             }}
           >
             <div
+              className="sfl-margin-strip-label"
               style={{
                 fontSize: 9,
                 fontWeight: 800,
@@ -254,6 +263,7 @@ function MarginSummaryStrip({ marginVar, tr, lang }) {
               {tr(MARGIN_LABEL_KEYS[k])}
             </div>
             <div
+              className={MONO}
               style={{
                 fontFamily: 'var(--font-mono)',
                 fontSize: 14,
@@ -266,6 +276,7 @@ function MarginSummaryStrip({ marginVar, tr, lang }) {
             </div>
             {row.delta_pp != null && Number.isFinite(Number(row.delta_pp)) ? (
               <div
+                className={MONO}
                 style={{
                   fontSize: 10,
                   color: Number(row.delta_pp) >= 0 ? 'var(--green)' : 'var(--red)',
@@ -286,7 +297,7 @@ function MarginSummaryStrip({ marginVar, tr, lang }) {
 function BridgeBlock({ bridge, tr, lang }) {
   if (!bridge || typeof bridge !== 'object') return null
   return (
-    <ul style={{ listStyle: 'none', padding: 0, margin: 0, fontSize: 12, lineHeight: 1.55 }}>
+    <ul className="sfl-bridge-list" style={{ listStyle: 'none', padding: 0, margin: 0, fontSize: 12, lineHeight: 1.55 }}>
       {BRIDGE_KEYS.map(({ bridgeKey, labelKey }) => {
         const blk = bridge[bridgeKey] || {}
         const d = blk.delta
@@ -302,11 +313,13 @@ function BridgeBlock({ bridge, tr, lang }) {
               borderBottom: '1px solid var(--border)',
             }}
           >
-            <span style={{ color: 'var(--text-secondary)', fontWeight: 600 }}>{tr(labelKey)}</span>
-            <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, textAlign: 'right' }}>
+            <span className={ROW_LBL} style={{ color: 'var(--text-secondary)', fontWeight: 600 }}>
+              {tr(labelKey)}
+            </span>
+            <span className={MONO} style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, textAlign: 'right' }}>
               {fmtDeltaMoney(d, lang)}
               {dp != null && Number.isFinite(Number(dp)) ? (
-                <span style={{ color: 'var(--text-muted)', fontWeight: 600, marginLeft: 8 }}>
+                <span className={MONO_SOFT} style={{ color: 'var(--text-muted)', fontWeight: 600, marginLeft: 8 }}>
                   ({formatSignedPctForLang(Number(dp), 1, lang)})
                 </span>
               ) : null}
@@ -324,6 +337,7 @@ function ProfitStoryBlock({ story, tr, lang, compact, visualBlocks }) {
   const what = storyLine(tr, story.what_changed_key, story.what_changed_params)
   const why = storyLine(tr, story.why_key, story.why_params)
   const act = storyLine(tr, story.action_key, story.action_params)
+  const isAr = normalizeUiLang(lang) === 'ar'
   const labelStyle = {
     fontSize: compact ? 9 : 10,
     fontWeight: 800,
@@ -331,29 +345,37 @@ function ProfitStoryBlock({ story, tr, lang, compact, visualBlocks }) {
     textTransform: 'uppercase',
     letterSpacing: '.06em',
     marginBottom: 4,
-    marginTop: compact ? 8 : 10,
+    marginTop: compact ? (isAr ? 12 : 8) : isAr ? 14 : 10,
   }
   const textStyle = {
     fontSize: compact ? 12 : 13,
     color: 'var(--text-secondary)',
-    lineHeight: 1.55,
+    lineHeight: isAr ? 1.62 : 1.55,
     margin: 0,
+    fontWeight: isAr ? 400 : 500,
   }
+  const storyP = (line) => (
+    <p
+      className={isAr ? 'cmd-magic-story-block__t ar-fin-story-body' : 'cmd-magic-story-block__t'}
+    >
+      {storyParagraphContent(line, lang)}
+    </p>
+  )
   if (visualBlocks) {
     return (
       <div className="cmd-magic-story-body">
         {st ? <div className="cmd-magic-summary-badge">{tr(`sfl_summary_${st}`)}</div> : null}
         <div className="cmd-magic-story-block">
           <div className="cmd-magic-story-block__k">{tr('sfl_story_what')}</div>
-          <p className="cmd-magic-story-block__t">{what}</p>
+          {storyP(what)}
         </div>
         <div className="cmd-magic-story-block">
           <div className="cmd-magic-story-block__k">{tr('sfl_story_why')}</div>
-          <p className="cmd-magic-story-block__t">{why}</p>
+          {storyP(why)}
         </div>
         <div className="cmd-magic-story-block">
           <div className="cmd-magic-story-block__k">{tr('sfl_story_action')}</div>
-          <p className="cmd-magic-story-block__t">{act}</p>
+          {storyP(act)}
         </div>
       </div>
     )
@@ -366,24 +388,30 @@ function ProfitStoryBlock({ story, tr, lang, compact, visualBlocks }) {
             display: 'inline-block',
             fontSize: 10,
             fontWeight: 800,
-            letterSpacing: '.06em',
+            letterSpacing: isAr ? '0.05em' : '.06em',
             textTransform: 'uppercase',
             padding: '4px 10px',
             borderRadius: 8,
             background: 'rgba(0,212,170,0.12)',
             color: 'var(--accent)',
-            marginBottom: 10,
+            marginBottom: isAr ? 12 : 10,
           }}
         >
           {tr(`sfl_summary_${st}`)}
         </div>
       ) : null}
       <div style={labelStyle}>{tr('sfl_story_what')}</div>
-      <p style={{ ...textStyle, marginTop: 0 }}>{what}</p>
+      <p style={{ ...textStyle, marginTop: 0 }} className={isAr ? 'ar-fin-story-plain' : undefined}>
+        {storyParagraphContent(what, lang)}
+      </p>
       <div style={labelStyle}>{tr('sfl_story_why')}</div>
-      <p style={textStyle}>{why}</p>
+      <p style={textStyle} className={isAr ? 'ar-fin-story-plain' : undefined}>
+        {storyParagraphContent(why, lang)}
+      </p>
       <div style={labelStyle}>{tr('sfl_story_action')}</div>
-      <p style={textStyle}>{act}</p>
+      <p style={textStyle} className={isAr ? 'ar-fin-story-plain' : undefined}>
+        {storyParagraphContent(act, lang)}
+      </p>
     </div>
   )
 }
@@ -393,7 +421,7 @@ function ProfitStoryBlock({ story, tr, lang, compact, visualBlocks }) {
  * @param {Record<string, unknown>} props.data — executive `data` or analysis dict with structured keys
  * @param {(k: string, p?: object) => string} props.tr
  * @param {string} props.lang
- * @param {'full' | 'command' | 'story_only' | 'board' | 'analysis_spine' | 'statements_formal_variance' | 'statements_interpretation' | 'statements_margin_section'} props.variant
+ * @param {'full' | 'command' | 'story_only' | 'board' | 'board_executive' | 'analysis_spine' | 'statements_formal_variance' | 'statements_interpretation' | 'statements_margin_section'} props.variant
  */
 export default function StructuredFinancialLayers({ data, tr, lang, variant = 'full' }) {
   if (!data || typeof data !== 'object') return null
@@ -453,10 +481,11 @@ export default function StructuredFinancialLayers({ data, tr, lang, variant = 'f
                     const v = sis[field]
                     return (
                       <tr key={field} style={{ borderTop: '1px solid var(--border)' }}>
-                        <td style={{ padding: '7px 8px 7px 0', color: 'var(--text-secondary)' }}>
+                        <td className={ROW_LBL} style={{ padding: '7px 8px 7px 0', color: 'var(--text-secondary)' }}>
                           {tr(labelKey)}
                         </td>
                         <td
+                          className={MONO}
                           style={{
                             padding: '7px 0',
                             fontFamily: 'var(--font-mono)',
@@ -571,9 +600,35 @@ export default function StructuredFinancialLayers({ data, tr, lang, variant = 'f
   if (variant === 'command') {
     if (!story?.what_changed_key) return null
     return (
-      <div className="cmd-financial-story-lead cmd-magic-story-shell" style={{ ...CARD_STYLE, borderTop: '2px solid rgba(0,212,170,0.35)' }}>
+      <div
+        className="cmd-financial-story-lead cmd-magic-story-shell cmd-os-story"
+        style={{ ...CARD_STYLE, borderTop: '2px solid rgba(0,212,170,0.35)' }}
+      >
         <div className="cmd-magic-story-h2">{tr('sfl_title_story')}</div>
         <ProfitStoryBlock story={story} tr={tr} lang={lang} compact visualBlocks />
+      </div>
+    )
+  }
+
+  /** Board Report — story + profit bridge only; presentation scan order (narrative → mechanics). */
+  if (variant === 'board_executive') {
+    const hasStory = Boolean(story?.what_changed_key)
+    const hasBridge = bridge && typeof bridge === 'object' && Object.keys(bridge).length > 0
+    if (!hasStory && !hasBridge) return null
+    return (
+      <div className="board-exec-sfl">
+        {hasStory ? (
+          <div className="board-exec-sfl__block">
+            <div className="board-exec-sfl__heading">{tr('sfl_title_story')}</div>
+            <ProfitStoryBlock story={story} tr={tr} lang={lang} compact visualBlocks />
+          </div>
+        ) : null}
+        {hasBridge ? (
+          <div className={`board-exec-sfl__block${hasStory ? ' board-exec-sfl__block--bridge' : ''}`.trim()}>
+            <div className="board-exec-sfl__heading board-exec-sfl__heading--bridge">{tr('sfl_title_bridge')}</div>
+            <BridgeBlock bridge={bridge} tr={tr} lang={lang} />
+          </div>
+        ) : null}
       </div>
     )
   }
@@ -671,10 +726,11 @@ export default function StructuredFinancialLayers({ data, tr, lang, variant = 'f
                 const v = sis[field]
                 return (
                   <tr key={field} style={{ borderTop: '1px solid var(--border)' }}>
-                    <td style={{ padding: '7px 8px 7px 0', color: 'var(--text-secondary)' }}>
+                    <td className={ROW_LBL} style={{ padding: '7px 8px 7px 0', color: 'var(--text-secondary)' }}>
                       {tr(labelKey)}
                     </td>
                     <td
+                      className={MONO}
                       style={{
                         padding: '7px 0',
                         fontFamily: 'var(--font-mono)',

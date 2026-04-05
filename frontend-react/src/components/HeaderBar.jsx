@@ -35,6 +35,7 @@ export default function HeaderBar({ onOpenSidebar, onOpenCfo }) {
   const { companies, selectedId, setSelectedId, isTrial, isTrialExpired, trialDaysLeft } = useCompany()
 
   const titleKey = titleKeyForPath(loc.pathname)
+  const isCommandCenter = loc.pathname === '/' || loc.pathname === '/executive'
 
   // Locale-aware date
   const localeCode = lang === 'ar' ? 'ar-SA' : lang === 'tr' ? 'tr-TR' : 'en-US'
@@ -43,11 +44,12 @@ export default function HeaderBar({ onOpenSidebar, onOpenCfo }) {
   })
 
   return (
-    <header style={s.bar}>
+    <header style={s.bar} className={isCommandCenter ? 'header-bar--cc' : undefined}>
       {/* ── Hamburger menu button ── */}
       <button
         onClick={onOpenSidebar}
-        title="Menu"
+        title={tr('nav_menu_aria')}
+        aria-label={tr('nav_menu_aria')}
         style={{
           width:36, height:36, borderRadius:9, flexShrink:0,
           background:'var(--bg-elevated)', border:'1px solid var(--border)',
@@ -91,7 +93,7 @@ export default function HeaderBar({ onOpenSidebar, onOpenCfo }) {
           style={s.search}
           placeholder={tr('search_placeholder')}
         />
-        <kbd style={s.kbd}>⌘K</kbd>
+        {lang === 'en' || lang === 'tr' ? <kbd style={s.kbd}>{tr('search_kbd_hint')}</kbd> : null}
       </div>
 
       {/* Right actions */}
@@ -108,20 +110,23 @@ export default function HeaderBar({ onOpenSidebar, onOpenCfo }) {
             color: trialDaysLeft <= 3 ? 'var(--red)' : trialDaysLeft <= 7 ? '#fbbf24' : 'var(--accent)',
             whiteSpace: 'nowrap', flexShrink: 0,
           }}>
-            ⏱ {tr('trial_days_left_badge', { n: trialDaysLeft })}
+            <span className="header-bar__badge-dot" aria-hidden />
+            {tr('trial_days_left_badge', { n: trialDaysLeft })}
           </div>
         )}
         {isTrialExpired && (
           <div style={{
+            display: 'flex', alignItems: 'center', gap: 6,
             padding: '5px 12px', borderRadius: 8, fontSize: 11, fontWeight: 700,
             background: 'rgba(248,113,113,.12)', border: '1px solid rgba(248,113,113,.3)',
             color: 'var(--red)', whiteSpace: 'nowrap', flexShrink: 0,
           }}>
-            ⛔ {tr('trial_expired_badge')}
+            <span className="header-bar__badge-dot header-bar__badge-dot--risk" aria-hidden />
+            {tr('trial_expired_badge')}
           </div>
         )}
 
-        <button style={s.iconBtn}>
+        <button type="button" style={s.iconBtn} title={tr('header_notifications_aria')} aria-label={tr('header_notifications_aria')}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
             <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
             <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
@@ -131,8 +136,10 @@ export default function HeaderBar({ onOpenSidebar, onOpenCfo }) {
 
         {/* AI CFO button */}
         <button
+          type="button"
           onClick={onOpenCfo}
-          title="AI CFO"
+          title={tr('header_ai_cfo_open')}
+          aria-label={tr('header_ai_cfo_open')}
           style={{
             display:'flex', alignItems:'center', gap:6,
             padding:'6px 12px', borderRadius:9,
@@ -144,15 +151,31 @@ export default function HeaderBar({ onOpenSidebar, onOpenCfo }) {
           }}
           onMouseEnter={e=>{e.currentTarget.style.background='linear-gradient(135deg,rgba(0,212,170,0.18),rgba(0,102,255,0.14))';e.currentTarget.style.boxShadow='0 0 14px rgba(0,212,170,0.2)'}}
           onMouseLeave={e=>{e.currentTarget.style.background='linear-gradient(135deg,rgba(0,212,170,0.1),rgba(0,102,255,0.08))';e.currentTarget.style.boxShadow='none'}}>
-          <span style={{fontSize:14}}>🧠</span>
-          <span>AI CFO</span>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" aria-hidden>
+            <path d="M12 3a6 6 0 0 1 6 6c0 3.5-3 6-6 9-3-3-6-5.5-6-9a6 6 0 0 1 6-6z" />
+            <circle cx="12" cy="9" r="2" fill="currentColor" stroke="none" />
+          </svg>
+          <span>{tr('nav_cfo_ai')}</span>
         </button>
 
-        <button onClick={logout} title="Logout" style={{
-          padding:'6px 12px', borderRadius:8, border:'1px solid var(--border)',
-          background:'transparent', color:'var(--text-muted)', fontSize:11,
-          cursor:'pointer', fontFamily:'var(--font-display)', fontWeight:600,
-        }}>⏻</button>
+        <button
+          type="button"
+          onClick={logout}
+          title={tr('header_logout')}
+          aria-label={tr('header_logout')}
+          style={{
+            padding:'6px 10px', borderRadius:8, border:'1px solid var(--border)',
+            background:'transparent', color:'var(--text-muted)', fontSize:11,
+            cursor:'pointer', fontFamily:'var(--font-display)', fontWeight:600,
+            display:'flex', alignItems:'center', justifyContent:'center',
+          }}
+        >
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.85" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+            <polyline points="16 17 21 12 16 7" />
+            <line x1="21" y1="12" x2="9" y2="12" />
+          </svg>
+        </button>
         <div style={s.avatar} title={auth?.user?.email||''}>
           <span style={s.avatarText}>{(auth?.user?.full_name||auth?.user?.email||'U')[0].toUpperCase()}</span>
         </div>

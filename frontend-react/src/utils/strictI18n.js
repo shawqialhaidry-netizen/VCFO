@@ -66,14 +66,20 @@ export function readTranslation(translations, lang, key) {
   return s
 }
 
+/** After param substitution, remove any leftover `{token}` so raw placeholders never reach UI. */
+export function stripUnresolvedI18nPlaceholders(s) {
+  if (typeof s !== 'string') return s
+  return s.replace(/\{[a-zA-Z_][a-zA-Z0-9_.]*\}/g, '—')
+}
+
 export function applyTranslationParams(s, lang, params) {
-  if (!params || typeof params !== 'object') return s
+  if (!params || typeof params !== 'object') return stripUnresolvedI18nPlaceholders(s)
   const miss = localizedMissingPlaceholder(lang)
   let out = s
   for (const [k, v] of Object.entries(params)) {
     out = out.replaceAll(`{${k}}`, v != null ? String(v) : miss)
   }
-  return out
+  return stripUnresolvedI18nPlaceholders(out)
 }
 
 /**
@@ -107,5 +113,5 @@ export function strictTParams(tr, lang, key, params) {
   for (const [k, val] of Object.entries(params || {})) {
     s = s.replaceAll(`{${k}}`, val != null ? String(val) : missing)
   }
-  return s
+  return stripUnresolvedI18nPlaceholders(s)
 }

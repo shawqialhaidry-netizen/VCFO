@@ -16,7 +16,8 @@
 }
 
 .cmd-page {
-  --cmd-max-width: 1536px;
+  /* Widescreen command center — desktop-first canvas */
+  --cmd-max-width: 1720px;
   --cmd-pad-x: 20px;
   --cmd-gap-section: 24px;
   --cmd-gap-inner: 16px;
@@ -132,7 +133,100 @@
 /* Primary decision: readable measure inside full-width card */
 .cmd-primary-hero-inner {
   max-width: min(72ch, 100%);
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
   text-align: left;
+}
+
+/* Primary decision headline — capped size, max 2 lines, never breaks flex/grid */
+.cmd-primary-hero > button {
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+/* Executive decision title — section scale, not display / poster */
+.cmd-primary-decision-headline {
+  font-family: inherit !important;
+  font-size: 16px !important;
+  font-weight: 700 !important;
+  line-height: 1.43 !important;
+  letter-spacing: normal !important;
+  margin-bottom: 8px !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  width: 100%;
+  box-sizing: border-box;
+  display: -webkit-box !important;
+  -webkit-line-clamp: 2 !important;
+  -webkit-box-orient: vertical !important;
+  overflow: hidden !important;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  color: #f1f5f9;
+  text-align: start;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* CmdServerText wrapper + tokens: match card body family/size; no italic from Latin-dim hint */
+.cmd-primary-decision-headline > span {
+  font: inherit !important;
+  font-style: normal !important;
+  letter-spacing: inherit !important;
+}
+
+/* Primary decision — KPI / % lines under headline (split from change_text) */
+.cmd-primary-decision-metrics {
+  list-style: none;
+  margin: 0 0 10px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  width: 100%;
+}
+
+.cmd-primary-decision-metrics li {
+  margin: 0;
+  padding: 0;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.45;
+  color: var(--cmd-text-body);
+  font-variant-numeric: tabular-nums;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.cmd-primary-decision-headline + .cmd-magic-hero-cause,
+.cmd-primary-decision-headline + .cmd-primary-decision-why,
+.cmd-primary-decision-metrics + .cmd-magic-hero-cause,
+.cmd-primary-decision-metrics + .cmd-primary-decision-why {
+  margin-top: 4px;
+}
+
+/* Context line between label and decision title (CFO path) */
+.cmd-primary-decision-domain {
+  font-size: 10px !important;
+  font-weight: 700 !important;
+  margin-top: 4px !important;
+  letter-spacing: 0.04em !important;
+  line-height: 1.35 !important;
+}
+
+.cmd-hero-eyebrow-wrap + .cmd-primary-decision-headline {
+  margin-top: 8px !important;
+}
+
+.cmd-primary-decision-domain + .cmd-primary-decision-headline {
+  margin-top: 4px !important;
+}
+
+/* Latin tokens embedded in Arabic server copy */
+.cmd-server-ltr-token {
+  unicode-bidi: isolate;
 }
 
 /* Desktop body: main + sidebar (~68% / 32%) */
@@ -164,18 +258,6 @@
   gap: var(--cmd-gap-inner);
   align-items: stretch;
   min-width: 0;
-}
-
-@media (max-width: 1180px) {
-  .cmd-desktop-split {
-    grid-template-columns: 1fr;
-  }
-}
-
-@media (max-width: 880px) {
-  .cmd-desktop-insights-grid {
-    grid-template-columns: 1fr;
-  }
 }
 
 /* Toolbar: grouped controls, desktop spacing */
@@ -704,13 +786,7 @@
   min-width: 0;
 }
 
-@media (max-width: 980px) {
-  .cmd-top-health-hero {
-    grid-template-columns: 1fr;
-  }
-}
-
-.cmd-top-hero-col .cmd-hero-title {
+.cmd-top-hero-col .cmd-hero-title:not(.cmd-primary-decision-headline) {
   font-size: var(--cmd-fs-hero-title);
   font-weight: 800;
   letter-spacing: -0.03em;

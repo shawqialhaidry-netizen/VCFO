@@ -1,0 +1,63 @@
+/* Premium financial chart motion — Bloomberg / Stripe–grade */
+
+@keyframes premium-stroke-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes premium-fill-reveal {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes premium-line-soft-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.premium-svg-stroke-draw {
+  animation: premium-stroke-draw 1.05s cubic-bezier(0.33, 1, 0.68, 1) forwards;
+}
+
+.premium-svg-fill-reveal {
+  animation: premium-fill-reveal 0.85s cubic-bezier(0.33, 1, 0.68, 1) 0.12s both;
+}
+
+.premium-svg-spark-draw {
+  animation: premium-stroke-draw 0.75s cubic-bezier(0.33, 1, 0.68, 1) forwards;
+}
+
+.premium-svg-line-fade-in {
+  animation: premium-line-soft-in 0.8s cubic-bezier(0.33, 1, 0.68, 1) 0.18s both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .premium-svg-stroke-draw,
+  .premium-svg-fill-reveal,
+  .premium-svg-spark-draw {
+    animation: none;
+  }
+
+  .premium-svg-stroke-draw,
+  .premium-svg-spark-draw {
+    stroke-dashoffset: 0 !important;
+  }
+
+  .premium-svg-fill-reveal {
+    opacity: 1 !important;
+  }
+
+  .premium-svg-line-fade-in {
+    animation: none;
+    opacity: 1 !important;
+  }
+}

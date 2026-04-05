@@ -285,6 +285,36 @@ export function buildDrillIntelligence({ panelType, payload = {}, extra = {}, t,
     return { what: merged.what, why: merged.why, do: merged.do }
   }
 
+  if (panelType === 'profit_bridge_segment') {
+    const pl = payload || {}
+    const vk = String(pl.varianceLineKey || '')
+    const interp = pl.bridgeInterpretation || {}
+    const w0 = []
+    const y0 = []
+    const d0 = []
+    if (vk === 'revenue' && interp.revenue_effect) {
+      w0.push({ text: t(`cmd_bridge_expl_revenue_${interp.revenue_effect}`) })
+    } else if (vk === 'cogs' && interp.cogs_effect) {
+      w0.push({ text: t(`cmd_bridge_expl_cogs_${interp.cogs_effect}`) })
+    } else if (vk === 'opex' && interp.opex_effect) {
+      w0.push({ text: t(`cmd_bridge_expl_opex_${interp.opex_effect}`) })
+    } else if (vk === 'operating_profit' || vk === 'net_profit') {
+      const nr = String(interp.net_result || '')
+      if (nr === 'profit_up' || nr === 'profit_down' || nr === 'flat') {
+        w0.push({ text: t(`cmd_bridge_expl_net_${nr}`) })
+      }
+    }
+    const pd = String(interp.primary_driver || '')
+    if (pd && vk && pd === vk) {
+      y0.push({ text: t('cmd_bridge_expl_primary_driver_match') })
+    }
+    if (interp.paradox_flags && interp.paradox_flags.revenue_up_profit_down) {
+      y0.push({ text: t('cmd_bridge_expl_paradox_growth_loss') })
+    }
+    const merged = dedupeAcrossSections(dedupeCap(w0, MAX), dedupeCap(y0, MAX), dedupeCap(d0, MAX), MAX)
+    return { what: merged.what, why: merged.why, do: merged.do }
+  }
+
   const bundle = extra?.drillIntelBundle || {}
   const kpis = resolveKpis(bundle, extra)
   const primaryResolution = bundle.primaryResolution

@@ -75,6 +75,15 @@ def test_healthy_growth_high_nm():
     assert s["summary_type"] == "healthy_growth"
 
 
+def test_nm_pct_in_all_story_param_bags_for_templates():
+    """healthy_growth.why (and similar) reference {nm_pct}; all param bags must include it."""
+    al = _analysis_like(net_result="profit_up", primary="revenue", nm=15.0)
+    s = build_structured_profit_story_from_analysis(al)
+    assert s["what_changed_params"].get("nm_pct") == "15.0"
+    assert s["why_params"].get("nm_pct") == "15.0"
+    assert s["action_params"].get("nm_pct") == "15.0"
+
+
 def test_profit_recovery_low_nm():
     al = _analysis_like(net_result="profit_up", primary="revenue", nm=5.0)
     s = build_structured_profit_story_from_analysis(al)

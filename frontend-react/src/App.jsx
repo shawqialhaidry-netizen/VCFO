@@ -1,4 +1,5 @@
-import { Routes, Route, Navigate } from 'react-router-dom'
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
+import './styles/commandCenterAppShell.css'
 import { useState } from 'react'
 import { useAuth } from './context/AuthContext.jsx'
 import { useCompany } from './context/CompanyContext.jsx'
@@ -52,10 +53,13 @@ function TrialExpiredWall({ logout }) {
 }
 
 export default function App() {
+  const loc = useLocation()
   const { auth, sessionExpired, logout } = useAuth()
   const { isTrialExpired, isOwner }      = useCompany()
   const [sidebarOpen,  setSidebarOpen]  = useState(false)
   const [cfoPanelOpen, setCfoPanelOpen] = useState(false)
+  const commandCenterShell =
+    loc.pathname === '/' || loc.pathname === '/executive'
 
   // Not logged in → go directly to Login (no landing/onboarding)
   if (!auth) return <Login />
@@ -66,8 +70,8 @@ export default function App() {
   if (isTrialExpired && !isOwner) return <TrialExpiredWall logout={logout} />
 
   if (isTrialExpired && isOwner) return (
-    <div style={s.shell}>
-      <div style={s.body}>
+    <div style={s.shell} className="app-shell__root">
+      <div style={s.body} className="app-shell__body">
         <HeaderBar onOpenSidebar={() => {}} onOpenCfo={() => {}} />
         <main style={s.main}>
           <Routes>
@@ -82,7 +86,10 @@ export default function App() {
   )
 
   return (
-    <div style={s.shell}>
+    <div
+      style={s.shell}
+      className={`app-shell__root${commandCenterShell ? ' app-shell--command-center' : ''}`.trim()}
+    >
       <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
 
       {sidebarOpen && (
@@ -91,7 +98,7 @@ export default function App() {
 
       <CfoPanel open={cfoPanelOpen} onClose={() => setCfoPanelOpen(false)} />
 
-      <div style={s.body}>
+      <div style={s.body} className="app-shell__body">
         <HeaderBar
           onOpenSidebar={() => setSidebarOpen(true)}
           onOpenCfo={() => setCfoPanelOpen(true)}

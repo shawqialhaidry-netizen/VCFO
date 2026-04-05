@@ -146,21 +146,20 @@ def build_structured_profit_story_from_analysis(analysis: dict) -> dict[str, Any
         why_key = "profit_story.mixed.why"
         action_key = "profit_story.mixed.action"
 
+    # nm_pct appears in what/why/action copy for some arcs (e.g. healthy_growth.why, profit_recovery.what_changed).
     nm_disp = f"{nm_f:.1f}" if nm_f is not None else "n/a"
-    params_w = {**base_params, "nm_pct": nm_disp}
-    params_y = {**base_params}
-    params_a = {**base_params}
+    story_params = {**base_params, "nm_pct": nm_disp}
 
     return {
         "latest_period": bridge.get("latest_period"),
         "previous_period": bridge.get("previous_period"),
         "summary_type": summary_type,
         "what_changed_key": what_key,
-        "what_changed_params": params_w,
+        "what_changed_params": story_params,
         "why_key": why_key,
-        "why_params": params_y,
+        "why_params": story_params,
         "action_key": action_key,
-        "action_params": params_a,
+        "action_params": story_params,
     }
 
 

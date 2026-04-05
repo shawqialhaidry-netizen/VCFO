@@ -10,7 +10,7 @@
  *  6. KPI drill-down modal — click any KPI for full history
  *  7. RTL-safe layout preserved
  */
-import { useEffect, useState, useRef, useCallback } from 'react'
+import { useEffect, useState, useRef, useCallback, useId, useLayoutEffect } from 'react'
 import { useLang } from '../context/LangContext.jsx'
 import { strictT, strictTParams } from '../utils/strictI18n.js'
 import CmdServerText from '../components/CmdServerText.jsx'
@@ -31,6 +31,7 @@ import {
   formatSignedPctForLang,
   formatDays,
 } from '../utils/numberFormat.js'
+import { catmullRomToBezierPath } from '../utils/premiumSvgPath.js'
 
 const API = '/api/v1'
 
@@ -407,160 +408,432 @@ function DrillModal({ kpiType, data, tr, onClose, ctxLabel, lang }) {
 //  Charts — always LTR, numbers always en-US
 // ══════════════════════════════════════════════════════════════════════════════
 function AreaChart({ d1, d2, labels, c1 = C.accent, c2 = C.red, h = 160, n1 = '', n2 = '', showBars = false, lang = 'en' }) {
-  const [tip,setTip]=useState(null); const ref=useRef(null)
-  if (!d1||d1.length<2) return <div style={{height:h,display:'flex',alignItems:'center',justifyContent:'center',color:C.text2,fontSize:11}}>—</div>
-  const all=[...d1.filter(Boolean),...(d2||[]).filter(Boolean)]
-  const mx=Math.max(...all)||1
-  const W=600,H=h,PL=40,PR=12,PT=8,PB=22,wi=W-PL-PR,hi=H-PT-PB
-  const toX=i=>PL+(i/(d1.length-1))*wi
-  const toY=v=>PT+(1-Math.max(0,v)/mx)*hi
-  // Smooth cubic bezier path generator
-  function smoothPath(data) {
-    const pts = data.map((v,i) => [toX(i), toY(v||0)])
-    return pts.reduce((acc,[x,y],i) => {
-      if(i===0) return `M${x.toFixed(1)},${y.toFixed(1)}`
-      const [px,py] = pts[i-1]
-      const cpx = (px + x) / 2
-      return acc + ` C${cpx.toFixed(1)},${py.toFixed(1)} ${cpx.toFixed(1)},${y.toFixed(1)} ${x.toFixed(1)},${y.toFixed(1)}`
-    }, '')
+  const [tip, setTip] = useState(null)
+  const ref = useRef(null)
+  const uid = useId().replace(/:/g, '')
+  const stroke1Ref = useRef(null)
+  const [len1, setLen1] = useState(0)
+
+  if (!d1 || d1.length < 2) {
+    return <div style={{ height: h, display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.text2, fontSize: 11 }}>—</div>
   }
-  const p1 = smoothPath(d1)
-  const a1 = `${p1} L${toX(d1.length-1).toFixed(1)},${(PT+hi).toFixed(1)} L${PL},${(PT+hi).toFixed(1)} Z`
-  const p2 = d2 ? smoothPath(d2) : ''
-  const a2 = d2 ? `${p2} L${toX(d2.length-1).toFixed(1)},${(PT+hi).toFixed(1)} L${PL},${(PT+hi).toFixed(1)} Z` : ''
-  const ticks=[0,mx*.5,mx]
-  const bw=(wi/d1.length)*.35
-  function onMove(e){
-    const r=ref.current?.getBoundingClientRect(); if(!r)return
-    const sx=((e.clientX-r.left)/r.width)*W
-    let bi=0,bd=1e9; d1.forEach((_,i)=>{const dd=Math.abs(toX(i)-sx);if(dd<bd){bd=dd;bi=i}})
-    const items=[{label:n1,value:formatCompactForLang(d1[bi],lang),color:c1}]
-    if(d2) items.push({label:n2,value:formatCompactForLang(d2[bi],lang),color:c2})
-    setTip({x:toX(bi)/W*r.width,y:toY(d1[bi]||0)/H*r.height,cw:r.width,ch:r.height,period:labels?.[bi]||`#${bi+1}`,items,idx:bi})
+  const all = [...d1.filter(Boolean), ...(d2 || []).filter(Boolean)]
+  const mx = Math.max(...all) || 1
+  const W = 600
+  const H = h
+  const PL = 40
+  const PR = 12
+  const PT = 8
+  const PB = 22
+  const wi = W - PL - PR
+  const hi = H - PT - PB
+  const toX = (i) => PL + (i / (d1.length - 1)) * wi
+  const toY = (v) => PT + (1 - Math.max(0, v) / mx) * hi
+
+  const pts1 = d1.map((v, i) => [toX(i), toY(v || 0)])
+  const p1 = catmullRomToBezierPath(pts1)
+  const a1 = `${p1} L${toX(d1.length - 1)},${PT + hi} L${PL},${PT + hi} Z`
+  const pts2 = d2 ? d2.map((v, i) => [toX(i), toY(v || 0)]) : []
+  const p2 = d2 && pts2.length ? catmullRomToBezierPath(pts2) : ''
+  const a2 = p2 ? `${p2} L${toX(d2.length - 1)},${PT + hi} L${PL},${PT + hi} Z` : ''
+
+  useLayoutEffect(() => {
+    const el = stroke1Ref.current
+    if (!el || !p1) return
+    const L = el.getTotalLength()
+    if (L > 0) setLen1(L)
+  }, [p1])
+
+  const ticks = [0, mx * 0.5, mx]
+  const bw = (wi / d1.length) * 0.35
+
+  function onMove(e) {
+    const r = ref.current?.getBoundingClientRect()
+    if (!r) return
+    const sx = ((e.clientX - r.left) / r.width) * W
+    let bi = 0
+    let bd = 1e9
+    d1.forEach((_, i) => {
+      const dd = Math.abs(toX(i) - sx)
+      if (dd < bd) {
+        bd = dd
+        bi = i
+      }
+    })
+    const items = [{ label: n1, value: formatCompactForLang(d1[bi], lang), color: c1 }]
+    if (d2) items.push({ label: n2, value: formatCompactForLang(d2[bi], lang), color: c2 })
+    setTip({
+      x: (toX(bi) / W) * r.width,
+      y: (toY(d1[bi] || 0) / H) * r.height,
+      cw: r.width,
+      ch: r.height,
+      period: labels?.[bi] || `#${bi + 1}`,
+      items,
+      idx: bi,
+    })
   }
+
+  const gid = (s) => `${uid}-${s}`
+
   return (
-    <div ref={ref} style={{position:'relative',direction:'ltr'}} onMouseMove={onMove} onMouseLeave={()=>setTip(null)}>
-      <svg viewBox={`0 0 ${W} ${H}`} style={{width:'100%',height:H,display:'block'}}>
+    <div ref={ref} style={{ position: 'relative', direction: 'ltr' }} onMouseMove={onMove} onMouseLeave={() => setTip(null)}>
+      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: H, display: 'block' }}>
         <defs>
-          <linearGradient id="g1" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={c1} stopOpacity=".22"/><stop offset="100%" stopColor={c1} stopOpacity="0"/></linearGradient>
-          <linearGradient id="g2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={c2} stopOpacity=".14"/><stop offset="100%" stopColor={c2} stopOpacity="0"/></linearGradient>
+          <linearGradient id={gid('fill1')} x1="0" y1="0" x2="0" y2="1" gradientUnits="objectBoundingBox">
+            <stop offset="0%" stopColor={c1} stopOpacity="0.32" />
+            <stop offset="55%" stopColor={c1} stopOpacity="0.08" />
+            <stop offset="100%" stopColor={c1} stopOpacity="0" />
+          </linearGradient>
+          <linearGradient id={gid('fill2')} x1="0" y1="0" x2="0" y2="1" gradientUnits="objectBoundingBox">
+            <stop offset="0%" stopColor={c2} stopOpacity="0.22" />
+            <stop offset="100%" stopColor={c2} stopOpacity="0" />
+          </linearGradient>
+          <linearGradient id={gid('stroke1')} x1="0" y1="0" x2="1" y2="0" gradientUnits="objectBoundingBox">
+            <stop offset="0%" stopColor={c1} stopOpacity="0.45" />
+            <stop offset="45%" stopColor={c1} stopOpacity="0.92" />
+            <stop offset="100%" stopColor={c1} stopOpacity="1" />
+          </linearGradient>
+          <linearGradient id={gid('stroke2')} x1="0" y1="0" x2="1" y2="0" gradientUnits="objectBoundingBox">
+            <stop offset="0%" stopColor={c2} stopOpacity="0.4" />
+            <stop offset="100%" stopColor={c2} stopOpacity="1" />
+          </linearGradient>
+          <filter id={gid('glow1')} x="-35%" y="-35%" width="170%" height="170%">
+            <feGaussianBlur stdDeviation="2.2" result="b" />
+            <feMerge>
+              <feMergeNode in="b" />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
+          <filter id={gid('glow2')} x="-35%" y="-35%" width="170%" height="170%">
+            <feGaussianBlur stdDeviation="1.8" result="b" />
+            <feMerge>
+              <feMergeNode in="b" />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
         </defs>
-        {ticks.map((t,i)=>(
+        {ticks.map((t, i) => (
           <g key={i}>
-            <line x1={PL} y1={toY(t)} x2={W-PR} y2={toY(t)} stroke="rgba(255,255,255,0.04)" strokeWidth="1"/>
-            <text x={PL-5} y={toY(t)+4} textAnchor="end" fontSize="10" fill={C.text2}>{formatCompactForLang(t, lang)}</text>
+            <line x1={PL} y1={toY(t)} x2={W - PR} y2={toY(t)} stroke="rgba(255,255,255,0.04)" strokeWidth="1" strokeLinecap="round" />
+            <text x={PL - 5} y={toY(t) + 4} textAnchor="end" fontSize="10" fill={C.text2}>
+              {formatCompactForLang(t, lang)}
+            </text>
           </g>
         ))}
-        {showBars&&d1.map((v,i)=>{
-          const bh=(v||0)/mx*hi
-          return <rect key={i} x={toX(i)-bw/2} y={PT+hi-bh} width={bw} height={bh} fill={c1} opacity=".18" rx="1"/>
-        })}
-        {a2&&<path d={a2} fill="url(#g2)"/>}
-        <path d={a1} fill="url(#g1)"/>
-        {p2&&<path d={p2} fill="none" stroke={c2} strokeWidth="1.5" strokeLinecap="round" strokeDasharray="4,3"/>}
-        <path d={p1} fill="none" stroke={c1} strokeWidth="2" strokeLinecap="round"/>
-        {tip?.idx!=null&&(()=>{
-          const xi=toX(tip.idx),y1t=toY(d1[tip.idx]||0),y2t=d2?toY(d2[tip.idx]||0):null
-          return <g>
-            <line x1={xi} y1={PT} x2={xi} y2={PT+hi} stroke="rgba(255,255,255,0.07)" strokeWidth="1" strokeDasharray="3,3"/>
-            <circle cx={xi} cy={y1t} r="4" fill={c1} stroke={BG.page} strokeWidth="2"/>
-            {y2t!=null&&<circle cx={xi} cy={y2t} r="3.5" fill={c2} stroke={BG.page} strokeWidth="2"/>}
-          </g>
-        })()}
-        {labels&&d1.map((_,i)=>{
-          if(i%Math.ceil(d1.length/7)!==0&&i!==d1.length-1)return null
-          return <text key={i} x={toX(i)} y={H-5} textAnchor="middle" fontSize="10" fill={C.text2}>{(labels[i]||'').replace(/^\d{4}-/,'')}</text>
-        })}
+        {showBars &&
+          d1.map((v, i) => {
+            const bh = ((v || 0) / mx) * hi
+            return (
+              <rect
+                key={i}
+                x={toX(i) - bw / 2}
+                y={PT + hi - bh}
+                width={bw}
+                height={bh}
+                fill={c1}
+                opacity="0.16"
+                rx="4"
+                ry="4"
+              />
+            )
+          })}
+        {a2 && <path d={a2} fill={`url(#${gid('fill2')})`} className="premium-svg-fill-reveal" style={{ transformOrigin: 'center bottom' }} />}
+        <path d={a1} fill={`url(#${gid('fill1')})`} className="premium-svg-fill-reveal" style={{ transformOrigin: 'center bottom' }} />
+        {p2 && (
+          <path
+            d={p2}
+            fill="none"
+            stroke={`url(#${gid('stroke2')})`}
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeDasharray="6 5"
+            filter={`url(#${gid('glow2')})`}
+            className="premium-svg-line-fade-in"
+          />
+        )}
+        <path
+          ref={stroke1Ref}
+          d={p1}
+          fill="none"
+          stroke={`url(#${gid('stroke1')})`}
+          strokeWidth="2.35"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          filter={`url(#${gid('glow1')})`}
+          className={len1 ? 'premium-svg-stroke-draw' : ''}
+          style={len1 ? { strokeDasharray: len1, strokeDashoffset: len1 } : { opacity: 0 }}
+        />
+        {tip?.idx != null &&
+          (() => {
+            const xi = toX(tip.idx)
+            const y1t = toY(d1[tip.idx] || 0)
+            const y2t = d2 ? toY(d2[tip.idx] || 0) : null
+            return (
+              <g>
+                <line
+                  x1={xi}
+                  y1={PT}
+                  x2={xi}
+                  y2={PT + hi}
+                  stroke="rgba(255,255,255,0.08)"
+                  strokeWidth="1"
+                  strokeDasharray="3 3"
+                  strokeLinecap="round"
+                />
+                <circle cx={xi} cy={y1t} r="4.5" fill={c1} stroke={BG.page} strokeWidth="2" style={{ filter: `drop-shadow(0 0 6px ${c1})` }} />
+                {y2t != null && (
+                  <circle cx={xi} cy={y2t} r="4" fill={c2} stroke={BG.page} strokeWidth="2" style={{ filter: `drop-shadow(0 0 5px ${c2})` }} />
+                )}
+              </g>
+            )
+          })()}
+        {labels &&
+          d1.map((_, i) => {
+            if (i % Math.ceil(d1.length / 7) !== 0 && i !== d1.length - 1) return null
+            return (
+              <text key={i} x={toX(i)} y={H - 5} textAnchor="middle" fontSize="10" fill={C.text2}>
+                {(labels[i] || '').replace(/^\d{4}-/, '')}
+              </text>
+            )
+          })}
       </svg>
-      <Tip tip={tip}/>
+      <Tip tip={tip} />
     </div>
   )
 }
 
 function BarChart({ data, labels, color = C.accent, h = 110, name = '', lang = 'en' }) {
-  const [tip,setTip]=useState(null); const [hov,setHov]=useState(null); const ref=useRef(null)
-  if (!data||data.length<1) return null
-  const W=600,H=h,PL=8,PR=8,PT=8,PB=22,wi=W-PL-PR,hi=H-PT-PB
-  const mx=Math.max(...data.map(Math.abs),.1)
-  const bw=(wi/data.length)*.55, bx=i=>PL+i*(wi/data.length)+(wi/data.length)*.225
-  function onMove(e){
-    const r=ref.current?.getBoundingClientRect(); if(!r)return
-    const sx=((e.clientX-r.left)/r.width)*W
-    const idx=Math.floor((sx-PL)/(wi/data.length))
-    if(idx<0||idx>=data.length){setTip(null);setHov(null);return}
-    const v=data[idx]; if(v==null){setTip(null);setHov(null);return}
+  const [tip, setTip] = useState(null)
+  const [hov, setHov] = useState(null)
+  const ref = useRef(null)
+  const uid = useId().replace(/:/g, '')
+
+  if (!data || data.length < 1) return null
+  const W = 600
+  const H = h
+  const PL = 8
+  const PR = 8
+  const PT = 8
+  const PB = 22
+  const wi = W - PL - PR
+  const hi = H - PT - PB
+  const mx = Math.max(...data.map((v) => Math.abs(v)), 0.1)
+  const bw = (wi / data.length) * 0.55
+  const bx = (i) => PL + i * (wi / data.length) + (wi / data.length) * 0.225
+  const gid = (s) => `${uid}-${s}`
+
+  function onMove(e) {
+    const r = ref.current?.getBoundingClientRect()
+    if (!r) return
+    const sx = ((e.clientX - r.left) / r.width) * W
+    const idx = Math.floor((sx - PL) / (wi / data.length))
+    if (idx < 0 || idx >= data.length) {
+      setTip(null)
+      setHov(null)
+      return
+    }
+    const v = data[idx]
+    if (v == null) {
+      setTip(null)
+      setHov(null)
+      return
+    }
     setHov(idx)
-    setTip({x:(bx(idx)+bw/2)/W*r.width,y:(PT+hi-(Math.abs(v)/mx)*hi)/H*r.height,cw:r.width,ch:r.height,
-      period:labels?.[idx]||`#${idx+1}`,items:[{label:name,value:formatSignedPctForLang(v, 1, lang),color:v>=0?C.green:C.red}]})
+    setTip({
+      x: ((bx(idx) + bw / 2) / W) * r.width,
+      y: ((PT + hi - (Math.abs(v) / mx) * hi) / H) * r.height,
+      cw: r.width,
+      ch: r.height,
+      period: labels?.[idx] || `#${idx + 1}`,
+      items: [{ label: name, value: formatSignedPctForLang(v, 1, lang), color: v >= 0 ? C.green : C.red }],
+    })
   }
+
   return (
-    <div ref={ref} style={{position:'relative',direction:'ltr'}} onMouseMove={onMove} onMouseLeave={()=>{setTip(null);setHov(null)}}>
-      <svg viewBox={`0 0 ${W} ${H}`} style={{width:'100%',height:H,display:'block'}}>
-        <line x1={PL} y1={PT+hi} x2={W-PR} y2={PT+hi} stroke="rgba(255,255,255,0.06)" strokeWidth="1"/>
-        {data.map((v,i)=>{
-          const bh=(Math.abs(v||0)/mx)*hi,y=PT+hi-bh,isH=hov===i
-          const bc=v>=0?C.green:C.red
-          return <g key={i}>
-            <rect x={bx(i)} y={y} width={bw} height={bh} fill={isH?bc:color} opacity={isH?1:.7} rx="2"/>
-            {labels&&<text x={bx(i)+bw/2} y={H-6} textAnchor="middle" fontSize="9" fill={isH?C.text1:C.text2}>{(labels[i]||'').replace(/^\d{4}-/,'')}</text>}
-          </g>
+    <div ref={ref} style={{ position: 'relative', direction: 'ltr' }} onMouseMove={onMove} onMouseLeave={() => { setTip(null); setHov(null) }}>
+      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: H, display: 'block' }}>
+        <defs>
+          <linearGradient id={gid('bar-accent')} x1="0" y1="0" x2="0" y2="1" gradientUnits="objectBoundingBox">
+            <stop offset="0%" stopColor={C.accent} stopOpacity="1" />
+            <stop offset="100%" stopColor={C.accent} stopOpacity="0.52" />
+          </linearGradient>
+          <linearGradient id={gid('bar-green')} x1="0" y1="0" x2="0" y2="1" gradientUnits="objectBoundingBox">
+            <stop offset="0%" stopColor={C.green} stopOpacity="1" />
+            <stop offset="100%" stopColor={C.green} stopOpacity="0.5" />
+          </linearGradient>
+          <linearGradient id={gid('bar-pos')} x1="0" y1="0" x2="0" y2="1" gradientUnits="objectBoundingBox">
+            <stop offset="0%" stopColor={C.green} stopOpacity="0.98" />
+            <stop offset="100%" stopColor={C.green} stopOpacity="0.58" />
+          </linearGradient>
+          <linearGradient id={gid('bar-neg')} x1="0" y1="0" x2="0" y2="1" gradientUnits="objectBoundingBox">
+            <stop offset="0%" stopColor={C.red} stopOpacity="0.98" />
+            <stop offset="100%" stopColor={C.red} stopOpacity="0.58" />
+          </linearGradient>
+          <filter id={gid('bar-glow')} x="-25%" y="-25%" width="150%" height="150%">
+            <feGaussianBlur stdDeviation="2" result="b" />
+            <feMerge>
+              <feMergeNode in="b" />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
+        </defs>
+        <line x1={PL} y1={PT + hi} x2={W - PR} y2={PT + hi} stroke="rgba(255,255,255,0.06)" strokeWidth="1" strokeLinecap="round" />
+        {data.map((v, i) => {
+          const bh = (Math.abs(v || 0) / mx) * hi
+          const y = PT + hi - bh
+          const isH = hov === i
+          const baseGrad = color === C.green ? `url(#${gid('bar-green')})` : `url(#${gid('bar-accent')})`
+          const hoverGrad = v >= 0 ? `url(#${gid('bar-pos')})` : `url(#${gid('bar-neg')})`
+          const fill = isH ? hoverGrad : baseGrad
+          return (
+            <g key={i} className="premium-svg-fill-reveal" style={{ animationDelay: `${Math.min(i, 12) * 0.028}s` }}>
+              <rect
+                x={bx(i)}
+                y={y}
+                width={bw}
+                height={Math.max(bh, 0.5)}
+                fill={fill}
+                opacity={isH ? 1 : 0.78}
+                rx="5"
+                ry="5"
+                filter={isH ? `url(#${gid('bar-glow')})` : undefined}
+                style={{ transition: 'opacity 0.2s cubic-bezier(0.33, 1, 0.68, 1)' }}
+              />
+              {labels && (
+                <text x={bx(i) + bw / 2} y={H - 6} textAnchor="middle" fontSize="9" fill={isH ? C.text1 : C.text2}>
+                  {(labels[i] || '').replace(/^\d{4}-/, '')}
+                </text>
+              )}
+            </g>
+          )
         })}
       </svg>
-      <Tip tip={tip}/>
+      <Tip tip={tip} />
     </div>
   )
 }
 
-function SparkLine({data,color=C.accent,h=32,w=88}) {
-  if (!data||data.filter(Boolean).length<2) return null
-  const vals=data.filter(v=>v!=null)
-  const mn=Math.min(...vals),mx=Math.max(...vals),rng=mx-mn||1
-  const uid=`sg${Math.random().toString(36).slice(2,7)}`
-  // Smooth cubic bezier path
-  const pts=vals.map((v,i)=>[
-    (i/(vals.length-1))*w,
-    h-((v-mn)/rng)*(h*.78)-h*.09
-  ])
-  const path=pts.reduce((acc,[x,y],i)=>{
-    if(i===0) return `M${x.toFixed(1)},${y.toFixed(1)}`
-    const [px,py]=pts[i-1]
-    const cpx1=(px+(x-px)*0.5).toFixed(1), cpy1=py.toFixed(1)
-    const cpx2=(px+(x-px)*0.5).toFixed(1), cpy2=y.toFixed(1)
-    return acc+` C${cpx1},${cpy1} ${cpx2},${cpy2} ${x.toFixed(1)},${y.toFixed(1)}`
-  },'')
-  const areaPath=`${path} L${w},${h} L0,${h} Z`
+function SparkLine({ data, color = C.accent, h = 32, w = 88 }) {
+  if (!data || data.filter(Boolean).length < 2) return null
+  const vals = data.filter((v) => v != null)
+  const mn = Math.min(...vals)
+  const mx = Math.max(...vals)
+  const rng = mx - mn || 1
+  const uid = useId().replace(/:/g, '')
+  const strokeRef = useRef(null)
+  const [len, setLen] = useState(0)
+
+  const pts = vals.map((v, i) => [(i / (vals.length - 1)) * w, h - ((v - mn) / rng) * (h * 0.78) - h * 0.09])
+  const path = catmullRomToBezierPath(pts)
+  const areaPath = `${path} L${w},${h} L0,${h} Z`
+
+  useLayoutEffect(() => {
+    const el = strokeRef.current
+    if (!el || !path) return
+    const L = el.getTotalLength()
+    if (L > 0) setLen(L)
+  }, [path])
+
+  const gid = (s) => `${uid}-${s}`
+
   return (
-    <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} style={{display:'block',direction:'ltr',overflow:'visible'}}>
+    <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} style={{ display: 'block', direction: 'ltr', overflow: 'visible' }}>
       <defs>
-        <linearGradient id={uid} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor={color} stopOpacity="0.25"/>
-          <stop offset="100%" stopColor={color} stopOpacity="0.01"/>
+        <linearGradient id={gid('fill')} x1="0" y1="0" x2="0" y2="1" gradientUnits="objectBoundingBox">
+          <stop offset="0%" stopColor={color} stopOpacity="0.32" />
+          <stop offset="100%" stopColor={color} stopOpacity="0.02" />
         </linearGradient>
+        <linearGradient id={gid('stroke')} x1="0" y1="0" x2="1" y2="0" gradientUnits="objectBoundingBox">
+          <stop offset="0%" stopColor={color} stopOpacity="0.5" />
+          <stop offset="100%" stopColor={color} stopOpacity="1" />
+        </linearGradient>
+        <filter id={gid('glow')} x="-40%" y="-40%" width="180%" height="180%">
+          <feGaussianBlur stdDeviation="1.2" result="b" />
+          <feMerge>
+            <feMergeNode in="b" />
+            <feMergeNode in="SourceGraphic" />
+          </feMerge>
+        </filter>
       </defs>
-      <path d={areaPath} fill={`url(#${uid})`}/>
-      <path d={path} fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-      {/* Last point dot */}
-      <circle cx={pts[pts.length-1][0].toFixed(1)} cy={pts[pts.length-1][1].toFixed(1)}
-        r="2.5" fill={color} style={{filter:`drop-shadow(0 0 4px ${color})`}}/>
+      <path d={areaPath} fill={`url(#${gid('fill')})`} className="premium-svg-fill-reveal" />
+      <path
+        ref={strokeRef}
+        d={path}
+        fill="none"
+        stroke={`url(#${gid('stroke')})`}
+        strokeWidth="1.65"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        filter={`url(#${gid('glow')})`}
+        className={len ? 'premium-svg-spark-draw' : ''}
+        style={len ? { strokeDasharray: len, strokeDashoffset: len } : { opacity: 0 }}
+      />
+      <circle
+        cx={pts[pts.length - 1][0]}
+        cy={pts[pts.length - 1][1]}
+        r="2.75"
+        fill={color}
+        className="premium-svg-line-fade-in"
+        style={{ filter: `drop-shadow(0 0 5px ${color})` }}
+      />
     </svg>
   )
 }
 
-function DonutChart({segments,size=80}) {
-  const total=segments.reduce((s,x)=>s+x.value,0)||1
-  let cum=0; const R=32,cx=size/2,cy=size/2
-  const slices=segments.map(seg=>{
-    const pct=seg.value/total
-    const s=-Math.PI/2+cum*2*Math.PI,e=s+pct*2*Math.PI
-    const x1=cx+R*Math.cos(s),y1=cy+R*Math.sin(s),x2=cx+R*Math.cos(e),y2=cy+R*Math.sin(e)
-    const lg=pct>0.5?1:0
-    const d=pct<0.999?`M${x1.toFixed(2)},${y1.toFixed(2)} A${R},${R} 0 ${lg},1 ${x2.toFixed(2)},${y2.toFixed(2)}`:`M${cx-R},${cy} A${R},${R} 0 1,1 ${cx+R},${cy} A${R},${R} 0 1,1 ${cx-R},${cy}`
-    cum+=pct; return {...seg,d}
+function DonutChart({ segments, size = 80 }) {
+  const total = segments.reduce((s, x) => s + x.value, 0) || 1
+  let cum = 0
+  const R = 32
+  const cx = size / 2
+  const cy = size / 2
+  const strokeW = 10.5
+  const slices = segments.map((seg) => {
+    const pct = seg.value / total
+    const s = -Math.PI / 2 + cum * 2 * Math.PI
+    const e = s + pct * 2 * Math.PI
+    const x1 = cx + R * Math.cos(s)
+    const y1 = cy + R * Math.sin(s)
+    const x2 = cx + R * Math.cos(e)
+    const y2 = cy + R * Math.sin(e)
+    const lg = pct > 0.5 ? 1 : 0
+    const d =
+      pct < 0.999
+        ? `M${x1.toFixed(2)},${y1.toFixed(2)} A${R},${R} 0 ${lg},1 ${x2.toFixed(2)},${y2.toFixed(2)}`
+        : `M${cx - R},${cy} A${R},${R} 0 1,1 ${cx + R},${cy} A${R},${R} 0 1,1 ${cx - R},${cy}`
+    cum += pct
+    return { ...seg, d }
   })
   return (
-    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{direction:'ltr'}}>
-      <circle cx={cx} cy={cy} r={R} fill="none" stroke={BG.border} strokeWidth="10"/>
-      {slices.map((sl,i)=><path key={i} d={sl.d} fill="none" stroke={sl.color} strokeWidth="10" strokeLinecap="butt"/>)}
+    <svg
+      width={size}
+      height={size}
+      viewBox={`0 0 ${size} ${size}`}
+      style={{ direction: 'ltr' }}
+      className="premium-svg-fill-reveal"
+    >
+      <circle
+        cx={cx}
+        cy={cy}
+        r={R}
+        fill="none"
+        stroke={BG.border}
+        strokeWidth={strokeW}
+        strokeLinecap="round"
+        opacity="0.85"
+      />
+      {slices.map((sl, i) => (
+        <path
+          key={i}
+          d={sl.d}
+          fill="none"
+          stroke={sl.color}
+          strokeWidth={strokeW}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          style={{ filter: 'drop-shadow(0 0 4px rgba(0,0,0,0.35))' }}
+        />
+      ))}
     </svg>
   )
 }

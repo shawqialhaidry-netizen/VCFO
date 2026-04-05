@@ -26,6 +26,7 @@ import { buildExecutiveNarrative } from '../utils/buildExecutiveNarrative.js'
 import ExecutiveNarrativeStrip from '../components/ExecutiveNarrativeStrip.jsx'
 import StructuredFinancialLayers from '../components/StructuredFinancialLayers.jsx'
 import { strictT, localizedMissingPlaceholder } from '../utils/strictI18n.js'
+import { splitPrimaryDecisionHeadlineAndMetrics } from '../utils/splitPrimaryDecisionHeadline.js'
 import { CLAMP_FADE_MASK_SHORT } from '../utils/serverTextUi.js'
 import CmdServerText from '../components/CmdServerText.jsx'
 
@@ -158,15 +159,32 @@ function ContextPanel({ type, payload, extra, tr, lang, onClose, onNavigate, imp
   // DECISION — realized causal text only (aligned with Command Center / Analysis)
   const Decision = () => {
     const cr = payload.causal_realized || {}
-    const headline =
-      String(cr.change_text || cr.action_text || '').trim() || strictT(tr, lang, 'cmd_na_short')
+    const rawLine = String(cr.change_text || cr.action_text || '').trim()
+    const { headline: dh, metrics: dm } = splitPrimaryDecisionHeadlineAndMetrics(rawLine)
+    const headline = dh.trim() || rawLine || strictT(tr, lang, 'cmd_na_short')
     const causeBody = String(cr.cause_text || '').trim()
     const actionBody = String(cr.action_text || '').trim()
     return (
     <>
-      <div style={{fontSize:17,fontWeight:800,color:T.text1,lineHeight:1.3,marginBottom:8, ...CLAMP_FADE_MASK_SHORT}}>
-        <CmdServerText lang={lang} tr={tr} as="span">{headline}</CmdServerText>
+      <div className="cmd-primary-decision-headline">
+        <CmdServerText lang={lang} tr={tr} as="span">
+          {headline}
+        </CmdServerText>
       </div>
+      {dm?.length ? (
+        <ul
+          className="cmd-primary-decision-metrics"
+          aria-label={strictT(tr, lang, 'cmd_primary_decision_metrics_aria')}
+        >
+          {dm.map((line, i) => (
+            <li key={`ex-pd-m-${i}`}>
+              <CmdServerText lang={lang} tr={tr} as="span">
+                {line}
+              </CmdServerText>
+            </li>
+          ))}
+        </ul>
+      ) : null}
       <div style={{display:'flex',gap:6,flexWrap:'wrap',marginBottom:22}}>
         <Pill label={strictT(tr, lang, `urgency_${payload.urgency}`)} color={uClr[payload.urgency]||T.text3}/>
         {payload.impact_level && <Pill label={strictT(tr, lang, `impact_${payload.impact_level}`)} color={uClr[payload.impact_level]||T.text3}/>}

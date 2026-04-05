@@ -1,0 +1,7 @@
+/**
+ * Command Center — single legacy chrome entrypoint (layout + component primitives).
+ * commandCenterOS.css loads after this and owns final executive OS tokens.
+ * Do not import commandCenterPhase3.css / commandCenterMagic.css separately from Command Center.
+ */
+@import './commandCenterPhase3.css';
+@import './commandCenterMagic.css';
