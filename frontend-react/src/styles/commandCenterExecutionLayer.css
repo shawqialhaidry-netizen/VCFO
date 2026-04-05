@@ -1,0 +1,448 @@
+/* Command Center bottom — execution layer (cinematic, dense grid) */
+
+.cmd-exec-layer {
+  width: 100%;
+  min-width: 0;
+  padding: 18px 20px 22px;
+  border-radius: 16px;
+  border: 1px solid rgba(71, 85, 105, 0.45);
+  background: linear-gradient(168deg, rgba(15, 23, 42, 0.72) 0%, rgba(8, 12, 22, 0.88) 100%);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35) inset, 0 12px 40px rgba(0, 0, 0, 0.25);
+}
+
+.cmd-exec-layer__head {
+  margin-bottom: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(51, 65, 85, 0.55);
+}
+
+.cmd-exec-layer__title {
+  margin: 0 0 6px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(226, 232, 240, 0.92);
+}
+
+.cmd-exec-layer__sub {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: rgba(148, 163, 184, 0.95);
+  max-width: 52rem;
+}
+
+.cmd-exec-zone-label {
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: rgba(94, 234, 212, 0.78);
+  margin-bottom: 10px;
+}
+
+.cmd-exec-layer__actions {
+  margin-bottom: 12px;
+}
+
+.cmd-exec-actions-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+@media (max-width: 1100px) {
+  .cmd-exec-actions-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.cmd-exec-action {
+  margin: 0;
+  padding: 10px 12px;
+  text-align: start;
+  border-radius: 12px;
+  border: 1px solid rgba(51, 65, 85, 0.55);
+  background: linear-gradient(165deg, rgba(30, 41, 59, 0.55) 0%, rgba(15, 23, 42, 0.75) 100%);
+  color: inherit;
+  font: inherit;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+}
+
+.cmd-exec-action--primary {
+  border-color: rgba(34, 211, 238, 0.38);
+  box-shadow: 0 0 0 1px rgba(34, 211, 238, 0.1) inset;
+}
+
+.cmd-exec-action--secondary {
+  border-color: rgba(51, 65, 85, 0.48);
+}
+
+.cmd-exec-action--interactive {
+  cursor: pointer;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.cmd-exec-action--interactive:hover {
+  border-color: rgba(34, 211, 238, 0.35);
+  box-shadow: 0 0 24px rgba(34, 211, 238, 0.06);
+}
+
+.cmd-exec-action--interactive:focus-visible {
+  outline: 2px solid rgba(34, 211, 238, 0.55);
+  outline-offset: 2px;
+}
+
+.cmd-exec-action__top {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.cmd-exec-pri {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+}
+
+.cmd-exec-pri--high {
+  color: rgba(252, 165, 165, 0.95);
+  background: rgba(248, 113, 113, 0.12);
+  border-color: rgba(248, 113, 113, 0.35);
+}
+
+.cmd-exec-pri--medium {
+  color: rgba(253, 230, 138, 0.95);
+  background: rgba(251, 191, 36, 0.1);
+  border-color: rgba(251, 191, 36, 0.3);
+}
+
+.cmd-exec-pri--low {
+  color: rgba(147, 197, 253, 0.95);
+  background: rgba(59, 130, 246, 0.1);
+  border-color: rgba(59, 130, 246, 0.28);
+}
+
+.cmd-exec-action__title {
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.32;
+  color: rgba(248, 250, 252, 0.96);
+}
+
+.cmd-exec-action__title--primary {
+  font-weight: 700;
+}
+
+.cmd-exec-action__dl {
+  margin: 2px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.cmd-exec-action__row {
+  display: grid;
+  grid-template-columns: minmax(4.8rem, 28%) 1fr;
+  gap: 6px 10px;
+  align-items: start;
+}
+
+html[lang='ar'] .cmd-exec-action__row {
+  grid-template-columns: minmax(3.8rem, 26%) 1fr;
+}
+
+.cmd-exec-action__row dt {
+  margin: 0;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(148, 163, 184, 0.92);
+  line-height: 1.35;
+  padding-top: 1px;
+}
+
+.cmd-exec-action__row dd {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: rgba(226, 232, 240, 0.92);
+  font-variant-numeric: tabular-nums;
+}
+
+.cmd-exec-layer__split {
+  display: grid;
+  grid-template-columns: 1.15fr 1fr;
+  gap: 12px;
+  align-items: start;
+  margin-bottom: 12px;
+}
+
+@media (max-width: 960px) {
+  .cmd-exec-layer__split {
+    grid-template-columns: 1fr;
+  }
+}
+
+.cmd-exec-col {
+  min-width: 0;
+  padding: 10px 12px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(51, 65, 85, 0.5);
+  background: rgba(15, 23, 42, 0.45);
+}
+
+.cmd-exec-pipeline {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.cmd-exec-pipeline__btn {
+  width: 100%;
+  margin: 0;
+  padding: 8px 10px;
+  text-align: start;
+  border-radius: 12px;
+  border: 1px solid rgba(51, 65, 85, 0.45);
+  background: rgba(30, 41, 59, 0.35);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.cmd-exec-pipeline__btn:hover {
+  border-color: rgba(167, 139, 250, 0.35);
+  background: rgba(30, 41, 59, 0.5);
+}
+
+.cmd-exec-pipeline__btn:focus-visible {
+  outline: 2px solid rgba(167, 139, 250, 0.45);
+  outline-offset: 2px;
+}
+
+.cmd-exec-pipeline__title {
+  font-size: 12px;
+  font-weight: 650;
+  color: rgba(248, 250, 252, 0.94);
+  margin-bottom: 4px;
+}
+
+.cmd-exec-pipeline__meta {
+  display: flex;
+  gap: 8px;
+  font-size: 11px;
+  line-height: 1.4;
+  margin-top: 4px;
+}
+
+.cmd-exec-pipeline__k {
+  flex-shrink: 0;
+  color: rgba(100, 116, 139, 0.95);
+  min-width: 4.5rem;
+}
+
+.cmd-exec-pipeline__v {
+  color: rgba(203, 213, 225, 0.92);
+}
+
+.cmd-exec-pipeline__risk {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: rgba(148, 163, 184, 0.88);
+}
+
+.cmd-exec-pipeline__risk-w {
+  text-transform: none;
+  letter-spacing: 0.02em;
+  color: rgba(226, 232, 240, 0.88);
+}
+
+.cmd-exec-risk-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+
+.cmd-exec-risk-dot--high {
+  background: #f87171;
+  box-shadow: 0 0 8px rgba(248, 113, 113, 0.45);
+}
+
+.cmd-exec-risk-dot--medium {
+  background: #fbbf24;
+}
+
+.cmd-exec-risk-dot--low {
+  background: #60a5fa;
+}
+
+.cmd-exec-alerts {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cmd-exec-alert-card__btn {
+  width: 100%;
+  margin: 0;
+  padding: 8px 10px;
+  text-align: start;
+  border-radius: 12px;
+  border: 1px solid rgba(51, 65, 85, 0.45);
+  background: rgba(30, 41, 59, 0.35);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  transition: border-color 0.15s ease;
+}
+
+.cmd-exec-alert-card__btn:hover {
+  border-color: rgba(251, 191, 36, 0.35);
+}
+
+.cmd-exec-alert-card__btn:focus-visible {
+  outline: 2px solid rgba(251, 191, 36, 0.45);
+  outline-offset: 2px;
+}
+
+.cmd-exec-alert-card__what {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 650;
+  color: rgba(248, 250, 252, 0.94);
+  margin-bottom: 5px;
+}
+
+.cmd-exec-sev {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  flex-shrink: 0;
+  margin-top: 4px;
+}
+
+.cmd-exec-sev--high {
+  background: #f87171;
+}
+
+.cmd-exec-sev--medium {
+  background: #fbbf24;
+}
+
+.cmd-exec-sev--low {
+  background: #60a5fa;
+}
+
+.cmd-exec-alert-card__dl {
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.cmd-exec-alert-card__row {
+  display: grid;
+  grid-template-columns: minmax(4.8rem, 30%) 1fr;
+  gap: 6px 8px;
+  align-items: start;
+}
+
+html[lang='ar'] .cmd-exec-alert-card__row {
+  grid-template-columns: minmax(3.6rem, 28%) 1fr;
+}
+
+.cmd-exec-alert-card__row dt {
+  margin: 0;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(94, 234, 212, 0.78);
+  line-height: 1.35;
+}
+
+.cmd-exec-alert-card__row dd {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: rgba(203, 213, 225, 0.92);
+}
+
+.cmd-exec-empty {
+  margin: 0;
+  font-size: 12px;
+  color: rgba(148, 163, 184, 0.9);
+  line-height: 1.5;
+}
+
+.cmd-exec-next {
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px dashed rgba(71, 85, 105, 0.5);
+  background: rgba(15, 23, 42, 0.35);
+}
+
+.cmd-exec-next__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 18px;
+  align-items: flex-start;
+}
+
+.cmd-exec-next__item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  flex: 1 1 200px;
+  min-width: min(100%, 220px);
+  font-size: 12px;
+  line-height: 1.45;
+  color: rgba(226, 232, 240, 0.88);
+}
+
+.cmd-exec-next__idx {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  background: rgba(34, 211, 238, 0.12);
+  color: rgba(34, 211, 238, 0.92);
+  border: 1px solid rgba(34, 211, 238, 0.25);
+}
+
+.cmd-exec-next__text {
+  padding-top: 2px;
+}

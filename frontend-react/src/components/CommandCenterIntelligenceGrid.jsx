@@ -39,6 +39,8 @@ function domainSignalLine(tr, lang, domain, score) {
  * @param {string | null} [p.efficiencyHint]
  * @param {number | null} [p.riskScore]
  * @param {number} [p.highAlertCount]
+ * @param {boolean} [p.omitForecast] — forecast lives in mosaic column; hide tile
+ * @param {{ alerts?: string, risk?: string, scenarios?: string } | null} [p.tileDigestSubs] — data-sharp one-liners (optional)
  * @param {(k: string, o?: object) => string} p.tr
  * @param {string} p.lang
  */
@@ -56,28 +58,33 @@ export default function CommandCenterIntelligenceGrid({
   highAlertCount = 0,
   tr,
   lang,
+  omitForecast = false,
+  tileDigestSubs = null,
 }) {
+  const forecastTile = {
+    id: 'forecast',
+    titleKey: 'cmd_intel_tile_forecast',
+    sub: forecastPrimaryMetric
+      ? stp(tr, lang, 'cmd_intel_tile_forecast_value_line', { v: forecastPrimaryMetric })
+      : st(tr, lang, forecastReady ? 'cmd_intel_tile_forecast_sub_ready' : 'cmd_intel_tile_forecast_sub'),
+    kpi: forecastPrimaryMetric,
+    kpiSuffix100: false,
+  }
   const tiles = [
-    {
-      id: 'forecast',
-      titleKey: 'cmd_intel_tile_forecast',
-      sub: forecastPrimaryMetric
-        ? stp(tr, lang, 'cmd_intel_tile_forecast_value_line', { v: forecastPrimaryMetric })
-        : st(tr, lang, forecastReady ? 'cmd_intel_tile_forecast_sub_ready' : 'cmd_intel_tile_forecast_sub'),
-      kpi: forecastPrimaryMetric,
-      kpiSuffix100: false,
-    },
+    ...(!omitForecast ? [forecastTile] : []),
     {
       id: 'alerts',
       titleKey: 'cmd_intel_tile_alerts',
-      sub: stp(tr, lang, 'cmd_intel_tile_alerts_sub', { n: String(alertCount) }),
+      sub:
+        tileDigestSubs?.alerts ||
+        stp(tr, lang, 'cmd_intel_tile_alerts_sub', { n: String(alertCount) }),
       kpi: alertCount > 0 ? String(alertCount) : null,
       kpiSuffix100: false,
     },
     {
       id: 'scenarios',
       titleKey: 'cmd_intel_tile_scenarios',
-      sub: st(tr, lang, 'cmd_intel_tile_scenarios_sub'),
+      sub: tileDigestSubs?.scenarios || st(tr, lang, 'cmd_intel_tile_scenarios_sub'),
       kpi: null,
       kpiSuffix100: false,
     },
@@ -85,12 +92,13 @@ export default function CommandCenterIntelligenceGrid({
       id: 'risk',
       titleKey: 'cmd_intel_tile_risk',
       sub:
-        riskScore != null && Number.isFinite(Number(riskScore))
+        tileDigestSubs?.risk ||
+        (riskScore != null && Number.isFinite(Number(riskScore))
           ? stp(tr, lang, 'cmd_intel_tile_risk_sub', {
               score: String(Math.round(Number(riskScore))),
               hi: String(highAlertCount),
             })
-          : st(tr, lang, 'cmd_intel_tile_risk_sub_na'),
+          : st(tr, lang, 'cmd_intel_tile_risk_sub_na')),
       kpi: riskScore != null && Number.isFinite(Number(riskScore)) ? String(Math.round(Number(riskScore))) : null,
       kpiSuffix100: true,
     },

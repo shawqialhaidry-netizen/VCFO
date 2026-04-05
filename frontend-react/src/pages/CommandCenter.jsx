@@ -56,29 +56,22 @@ function PrimaryDecisionMetricsList({ lines, tr, lang }) {
 }
 import { CLAMP_FADE_MASK_SHORT } from '../utils/serverTextUi.js'
 import CmdServerText from '../components/CmdServerText.jsx'
-import ExecutiveNarrativeStrip from '../components/ExecutiveNarrativeStrip.jsx'
 import StructuredFinancialLayers from '../components/StructuredFinancialLayers.jsx'
-import {
-  KeySignalsSection,
-  BranchIntelligenceSection,
-  DecisionsSection,
-} from '../components/CommandCenterUnifiedSections.jsx'
-import ExpenseInsightsSection from '../components/ExpenseInsightsSection.jsx'
 import CommandCenterCinematicLayout from '../components/CommandCenterCinematicLayout.jsx'
+import CommandCenterExecutionLayer from '../components/CommandCenterExecutionLayer.jsx'
 import CommandCenterContextRail from '../components/CommandCenterContextRail.jsx'
 import CommandCenterHealthComposite from '../components/CommandCenterHealthComposite.jsx'
-import CommandCenterProfitPathBridge from '../components/CommandCenterProfitPathBridge.jsx'
 import CommandCenterIntelligenceGrid, {
   liquidityHintLine,
   efficiencyHintLine,
 } from '../components/CommandCenterIntelligenceGrid.jsx'
+import CommandCenterIntelligenceMosaic from '../components/CommandCenterIntelligenceMosaic.jsx'
 import CommandCenterIntelligenceExpanded from '../components/CommandCenterIntelligenceExpanded.jsx'
 import { riskScoreFromIntel, scoreFromCategory } from '../utils/commandCenterIntelScores.js'
 import {
   CommandCenterBranchGroupedChart,
   CommandCenterTripleTrendChart,
 } from '../components/CommandCenterPhase3Charts.jsx'
-import CommandCenterSecondaryTiles from '../components/CommandCenterSecondaryTiles.jsx'
 import AiCfoPanel from '../components/AiCfoPanel.jsx'
 import DrillIntelligenceBlock from '../components/DrillIntelligenceBlock.jsx'
 import { buildDrillIntelligence } from '../utils/buildDrillIntelligence.js'
@@ -2157,458 +2150,6 @@ function ExecutiveKpiRow({
   )
 }
 
-function DomainGrid({ intelligence, tr, lang, onSelect, rootCauses, decisions, alerts, secondary = false }) {
-  const ratios  = intelligence?.ratios  || {}
-  const trends  = intelligence?.trends  || {}
-  const scoreFromCategory = (cat) => {
-    if (!cat) return 50
-    const s2  = {good:100,neutral:60,warning:35,risk:10}
-    const vs  = Object.values(cat).map(v=>s2[v?.status]||50).filter(v=>Number.isFinite(v))
-    if (!vs.length) return 50
-    return Math.round(vs.reduce((a,b)=>a+b,0)/vs.length)
-  }
-  const score = d => scoreFromCategory(ratios[d])
-  const riskScore = () => {
-    // Risk = leverage posture + alert pressure (no new backend fields)
-    const lev = score('leverage')
-    const hi  = (alerts||[]).filter(a=>a.severity==='high').length
-    const med = (alerts||[]).filter(a=>a.severity==='medium').length
-    const penalty = Math.min(30, hi*12 + med*5)
-    return Math.max(0, Math.min(100, Math.round(lev - penalty)))
-  }
-  const pickLbl = (_a, b) => strictT(tr, lang, b)
-  const blocks = [
-    { id:'profitability', label: pickLbl('profitability', 'domain_profitability_simple'), color: dClr.profitability, score: score('profitability'), ratiosKey:'profitability', navigateDomain:'profitability' },
-    { id:'liquidity',     label: pickLbl('liquidity', 'domain_liquidity_simple'),     color: dClr.liquidity,     score: score('liquidity'),     ratiosKey:'liquidity',     navigateDomain:'liquidity' },
-    { id:'efficiency',    label: pickLbl('efficiency', 'domain_efficiency_simple'),    color: dClr.efficiency,    score: score('efficiency'),    ratiosKey:'efficiency',    navigateDomain:'efficiency' },
-    { id:'risk',          label: pickLbl('risk_level', 'domain_leverage_simple'),      color: T.red,              score: riskScore(),            ratiosKey:'leverage',      navigateDomain:'leverage' },
-  ]
-  const ratioMap = key => ratios[key] || {}
-  return (
-    <div style={secondary ? { opacity: 0.88 } : undefined}>
-      <div className="cmd-card-title" style={{ marginBottom: secondary ? 8 : 12 }}>
-        {strictT(tr, lang, 'exec_domain_title')}
-      </div>
-      <div style={{display:'grid',gridTemplateColumns:'repeat(12,1fr)',gap:secondary?12:16}}>
-        {blocks.map((b, idx) => {
-          const s   = b.score
-          const dc  = b.color || T.accent
-          const st  = s>=70?'good':s>=45?'warning':'risk'
-          const sc  = stC[st]
-          const sig = b.id==='risk'
-            ? (s>=70?strictT(tr, lang, 'risk_level_low'):s>=45?strictT(tr, lang, 'risk_level_medium'):strictT(tr, lang, 'risk_level_high'))
-            : (s>=70 ? strictT(tr, lang, `domain_signal_${b.navigateDomain}_good`)
-                     : s>=45 ? strictT(tr, lang, `domain_signal_${b.navigateDomain}_warn`)
-                             : strictT(tr, lang, `domain_signal_${b.navigateDomain}_risk`))
-          return (
-            <div key={b.id}
-              className="cmd-secondary-card"
-              onClick={()=>onSelect('domain',{domain:b.navigateDomain,score:s,status:st,ratios:ratioMap(b.ratiosKey)},{causes:rootCauses,decisions})}
-              title={
-                b.id === 'risk'
-                  ? strictT(tr, lang, 'alerts_title')
-                  : strictT(tr, lang, `domain_${b.navigateDomain}_exp`)
-              }
-              style={{
-                gridColumn: idx===0 ? 'span 4' : 'span 4',
-                background: `linear-gradient(135deg,${T.card},${dc}0a)`,
-                borderWidth:'1px',borderStyle:'solid',borderColor:`${dc}28`,
-                borderTopWidth:secondary?3:4,borderTopColor:dc,
-                cursor:'pointer',
-                transition:'transform .15s ease,box-shadow .15s ease'}}
-              {...lift()}>
-              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:8,marginBottom:secondary?8:12}}>
-                <div style={{display:'flex',alignItems:'center',gap:10,minWidth:0}}>
-                  <span
-                    className={`cmd-domain-glyph-wrap${secondary ? ' cmd-domain-glyph-wrap--compact' : ''}`.trim()}
-                    aria-hidden
-                  >
-                    <DomainGlyph domain={b.id === 'risk' ? 'risk' : b.navigateDomain} color={dc} />
-                  </span>
-                  <div style={{minWidth:0}}>
-                    <div className="cmd-card-title" style={{ fontSize: 14, fontWeight: 700, color: dc, marginBottom: 4, textTransform: 'none', letterSpacing: '0.02em' }}>
-                      {b.label}
-                    </div>
-                    <div className="cmd-health-label" style={{ marginTop: 2, whiteSpace:'nowrap',overflow:'hidden',textOverflow:'clip' }}>
-                      {sig || strictT(tr, lang, `status_${st}_simple`)}
-                    </div>
-                  </div>
-                </div>
-                <div style={{textAlign:'right',flexShrink:0}}>
-                  <div className="cmd-health-value" style={{ color: dc }}>{s}</div>
-                  <div className="cmd-health-label">/100</div>
-                </div>
-              </div>
-              <CmdSparkline mom={b.id === 'risk' ? null : s >= 70 ? 1 : s >= 45 ? 0 : -1} />
-              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:secondary?8:12,marginTop:10}}>
-                {Object.entries(ratioMap(b.ratiosKey)).slice(0,4).map(([k,r]) => {
-                  const rc = {good:T.green,warning:T.amber,risk:T.red,neutral:T.text2}[r?.status]||T.text2
-                  return (
-                    <div key={k} style={{background:`${dc}08`,borderRadius:secondary?8:10,padding:secondary?'6px 7px':'10px 10px',
-                      borderWidth:'1px 1px 1px 2px',borderStyle:'solid',borderColor:`${T.border} ${T.border} ${T.border} ${rc}`}}>
-                      <div className="cmd-health-label" style={{ textTransform:'uppercase',letterSpacing:'.08em',marginBottom:4 }}>
-                        {strictT(tr, lang, `ratio_${k}`)}
-                      </div>
-                      <div style={{fontFamily:'monospace',fontSize:secondary?12:14,fontWeight:800,color:rc,direction:'ltr'}}>
-                        {r?.value!=null?r.value:'—'}
-                        <span className="cmd-muted-foreign" style={{ marginLeft:4 }}>{r?.unit||''}</span>
-                      </div>
-                    </div>
-                  )
-                })}
-                {b.id==='risk' && (
-                  <div style={{gridColumn:'1 / -1',background:`${T.red}08`,border:`1px solid ${T.red}20`,borderRadius:secondary?8:10,padding:secondary?'6px 8px':'10px 12px'}}>
-                    <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:8}}>
-                      <div className="cmd-health-label" style={{ fontWeight:800,color:T.red,textTransform:'uppercase',letterSpacing:'.08em' }}>
-                        {strictT(tr, lang, 'alerts_title')}
-                      </div>
-                      <div style={{fontFamily:'monospace',fontSize:secondary?12:14,fontWeight:900,color:T.red,direction:'ltr'}}>
-                        {(alerts||[]).length ?? 0}
-                      </div>
-                    </div>
-                    <div style={{marginTop:secondary?4:6,display:'flex',gap:5,flexWrap:'wrap'}}>
-                      {['high','medium','low'].map(sev => {
-                        const n = (alerts||[]).filter(a=>a.severity===sev).length
-                        if (!n) return null
-                        return <Pill key={sev} label={`${n} ${strictT(tr, lang, `urgency_${sev}`)}`} critical={sev === 'high'} />
-                      })}
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-          )
-        })}
-      </div>
-    </div>
-  )
-}
-
-function AlertsBar({ alerts, tr, lang, onSelect, secondary = false }) {
-  if (!alerts?.length) return null
-  return (
-    <div
-      className="cmd-alerts-bar"
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 8,
-        background: T.surface,
-        border: `1px solid ${T.border}`,
-        borderRadius: 11,
-        padding: secondary ? '8px 14px' : '10px 16px',
-        flexWrap: 'wrap',
-        opacity: secondary ? 0.9 : 1,
-      }}
-    >
-      <span className="cmd-alerts-bar__label" style={{ fontSize: 12, fontWeight: 700, color: T.amber, flexShrink: 0 }}>
-        {alerts.length} {strictT(tr, lang, 'alerts_title')}
-      </span>
-      <div style={{display:'flex',gap:6,flexWrap:'wrap',flex:1}}>
-        {alerts.slice(0,4).map((a,i) => (
-          <button key={i} onClick={()=>onSelect('alert',a,{})} title={a.message}
-            style={{padding:'3px 10px',borderRadius:20,cursor:'pointer',fontSize:12,fontWeight:600,
-              border:`1px solid ${uClr[a.severity]||T.text3}35`,
-              background:`${uClr[a.severity]||T.text3}12`,
-              color:uClr[a.severity]||T.text3,transition:'all .15s ease',
-              maxWidth: 'min(220px, 100%)', overflow: 'hidden', textOverflow: 'clip'}}
-            onMouseEnter={e=>e.currentTarget.style.background=`${uClr[a.severity]||T.text3}25`}
-            onMouseLeave={e=>e.currentTarget.style.background=`${uClr[a.severity]||T.text3}12`}>
-            <CmdServerText lang={lang} tr={tr} as="span" style={{ display: 'block', overflow: 'hidden', textOverflow: 'clip', whiteSpace: 'nowrap' }}>
-              {a.title}
-            </CmdServerText>
-          </button>
-        ))}
-      </div>
-    </div>
-  )
-}
-
-function ForecastNow({ fcData, tr, lang, secondary = false }) {
-  if (!fcData?.available) return null
-  const bRev = fcData?.scenarios?.base?.revenue?.[0]
-  const bNp  = fcData?.scenarios?.base?.net_profit?.[0]
-  const risk = fcData?.summary?.risk_level
-  if (!bRev?.point && !bNp?.point) return null
-  const riskClr = risk==='high'?T.red:risk==='medium'?T.amber:risk?T.green:T.text3
-  const rk = risk != null ? String(risk).toLowerCase() : ''
-  const riskWord =
-    rk === 'high'
-      ? strictT(tr, lang, 'urgency_high')
-      : rk === 'medium'
-        ? strictT(tr, lang, 'urgency_medium')
-        : rk === 'low'
-          ? strictT(tr, lang, 'urgency_low')
-          : null
-  return (
-    <div
-      className={secondary ? 'cmd-cine-fc-now' : undefined}
-      style={{
-        background: T.surface,
-        border: `1px solid ${T.border}`,
-        borderRadius: 10,
-        padding: secondary ? '8px 10px' : '10px 12px',
-        opacity: secondary ? 0.88 : 1,
-      }}
-    >
-      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:8,marginBottom:secondary?6:8}}>
-        <div style={{fontSize:9,fontWeight:800,color:T.text3,textTransform:'uppercase',letterSpacing:'.08em'}}>
-          {strictT(tr, lang, 'forecast_next_period')}
-        </div>
-        {risk ? (
-          riskWord ? (
-            <Pill label={`${strictT(tr, lang, 'forecast_risk')}: ${riskWord}`} critical={risk === 'high'} />
-          ) : (
-            <span
-              style={{
-                fontSize: 9,
-                fontWeight: 800,
-                padding: '2px 9px',
-                borderRadius: 20,
-                background: `${riskClr}18`,
-                color: riskClr,
-                border: `1px solid ${riskClr}30`,
-                textTransform: 'uppercase',
-                letterSpacing: '.05em',
-                flexShrink: 0,
-                whiteSpace: 'nowrap',
-                maxWidth: '46%',
-                overflow: 'hidden',
-                textOverflow: 'clip',
-              }}
-            >
-              {strictT(tr, lang, 'forecast_risk')}:{' '}
-              <CmdServerText lang={lang} tr={tr} as="span" style={{ fontWeight: 800 }}>
-                {String(risk)}
-              </CmdServerText>
-            </span>
-          )
-        ) : null}
-      </div>
-      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:secondary?8:10}}>
-        <div style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:8,padding:secondary?'6px 8px':'8px 10px'}}>
-          <div style={{fontSize:8,color:T.text3,textTransform:'uppercase',letterSpacing:'.08em',marginBottom:2}}>{strictT(tr, lang, 'revenue')}</div>
-          <div style={{fontFamily:'monospace',fontSize:secondary?14:15,fontWeight:800,color:T.accent,direction:'ltr'}}>
-            {bRev?.point!=null?formatCompactForLang(bRev.point,lang):'—'}
-          </div>
-          {bRev?.confidence!=null&&Number.isFinite(Number(bRev.confidence))&&(
-            <div style={{fontSize:8,color:T.text3,marginTop:2}}>
-              {strictT(tr, lang, 'fc_confidence')}: {formatPctForLang(Number(bRev.confidence), 0, lang)}
-            </div>
-          )}
-        </div>
-        <div style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:8,padding:secondary?'6px 8px':'8px 10px'}}>
-          <div style={{fontSize:8,color:T.text3,textTransform:'uppercase',letterSpacing:'.08em',marginBottom:2}}>{strictT(tr, lang, 'net_profit')}</div>
-          <div style={{fontFamily:'monospace',fontSize:secondary?14:15,fontWeight:800,color:bNp?.point!=null&&Number(bNp.point)<0?T.red:T.green,direction:'ltr'}}>
-            {bNp?.point!=null?formatCompactForLang(bNp.point,lang):'—'}
-          </div>
-          {bNp?.confidence!=null&&Number.isFinite(Number(bNp.confidence))&&(
-            <div style={{fontSize:8,color:T.text3,marginTop:2}}>
-              {strictT(tr, lang, 'fc_confidence')}: {formatPctForLang(Number(bNp.confidence), 0, lang)}
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  )
-}
-
-/** Compact nav / tile glyphs — 1.5px stroke only (Phase 3.8). */
-function CcGlyphMark({ variant }) {
-  const c = 'rgba(34, 211, 238, 0.88)'
-  const v = 'rgba(167, 139, 250, 0.88)'
-  const a = 'rgba(251, 191, 36, 0.88)'
-  const sw = 1.5
-  const box = { width: 22, height: 22, viewBox: '0 0 24 24', fill: 'none', 'aria-hidden': true }
-  if (variant === 'forecast') {
-    return (
-      <svg {...box}>
-        <path d="M4 17V8l4 2.5 4-3 4 2 4-3.5" stroke={c} strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round" />
-        <path d="M4 19h16" stroke={c} strokeWidth={sw} strokeLinecap="round" opacity="0.35" />
-      </svg>
-    )
-  }
-  if (variant === 'alerts') {
-    return (
-      <svg {...box}>
-        <path d="M12 5l-6 12h12L12 5z" stroke={a} strokeWidth={sw} strokeLinejoin="round" />
-        <path d="M12 10v4" stroke={a} strokeWidth={sw} strokeLinecap="round" />
-        <circle cx="12" cy="17" r="1" stroke={a} strokeWidth={sw} />
-      </svg>
-    )
-  }
-  if (variant === 'domains') {
-    return (
-      <svg {...box}>
-        <rect x="5" y="5" width="6.5" height="6.5" rx="1.2" stroke={v} strokeWidth={sw} />
-        <rect x="12.5" y="5" width="6.5" height="6.5" rx="1.2" stroke={v} strokeWidth={sw} opacity="0.75" />
-        <rect x="5" y="12.5" width="6.5" height="6.5" rx="1.2" stroke={v} strokeWidth={sw} opacity="0.75" />
-        <rect x="12.5" y="12.5" width="6.5" height="6.5" rx="1.2" stroke={v} strokeWidth={sw} opacity="0.5" />
-      </svg>
-    )
-  }
-  if (variant === 'statements') {
-    return (
-      <svg {...box}>
-        <path d="M7 4h10v16H7V4z" stroke={c} strokeWidth={sw} strokeLinejoin="round" />
-        <path d="M9 8h6M9 12h6M9 16h4" stroke={c} strokeWidth={sw} strokeLinecap="round" />
-      </svg>
-    )
-  }
-  if (variant === 'board') {
-    return (
-      <svg {...box}>
-        <rect x="4" y="5" width="16" height="12" rx="1.5" stroke={v} strokeWidth={sw} />
-        <path d="M4 10h16" stroke={v} strokeWidth={sw} opacity="0.45" />
-        <path d="M9 14.5h6" stroke={c} strokeWidth={sw} strokeLinecap="round" />
-      </svg>
-    )
-  }
-  if (variant === 'upload') {
-    return (
-      <svg {...box}>
-        <path d="M12 6v8" stroke={c} strokeWidth={sw} strokeLinecap="round" />
-        <path d="M8 9.5l4-3.5 4 3.5" stroke={c} strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round" />
-        <path d="M5 18.5h14" stroke={v} strokeWidth={sw} strokeLinecap="round" opacity="0.65" />
-      </svg>
-    )
-  }
-  return null
-}
-
-function SecondaryCompactCard({ glyph, title, status, why, onClick }) {
-  return (
-    <button type="button" className="cmd-secondary-compact-card cmd-card-hover" onClick={onClick} {...lift()}>
-      <span style={{ display: 'flex', lineHeight: 1, marginBottom: 4 }} aria-hidden>
-        <CcGlyphMark variant={glyph} />
-      </span>
-      <div className="cmd-secondary-compact-title">{title}</div>
-      <div className="cmd-secondary-compact-metric">{status}</div>
-      <div className="cmd-secondary-compact-why">{why}</div>
-    </button>
-  )
-}
-
-function SecondaryInsightsGrid({ fcData, alerts, tr, lang, navigate, drillAnalysis, onSelect }) {
-  const nAlert = Array.isArray(alerts) ? alerts.length : 0
-  const tileBase = {
-    textAlign: 'start',
-    padding: '16px 18px',
-    borderRadius: 14,
-    border: NEU_BD,
-    background: CARD_BG,
-    boxShadow: '0 2px 16px rgba(0,0,0,0.22)',
-    cursor: 'pointer',
-    transition: 'transform .15s ease, border-color .15s ease',
-  }
-  const fullRow = { width: '100%', display: 'block', boxSizing: 'border-box' }
-  const fcSparkMom =
-    fcData?.scenarios?.base?.revenue?.length > 1
-      ? Number(fcData.scenarios.base.revenue[1]?.point) - Number(fcData.scenarios.base.revenue[0]?.point || 0)
-      : null
-
-  return (
-    <div className="cmd-p3-footer-insights">
-      <button
-        type="button"
-        className="cmd-secondary-full-row cmd-p3-footer-card"
-        onClick={() => drillAnalysis?.('forecast')}
-        style={{ ...tileBase, ...fullRow, opacity: 1, textAlign: 'start' }}
-        {...lift()}
-      >
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
-          <div style={{ minWidth: 0, flex: '1 1 200px' }}>
-            <div style={{ display: 'flex', marginBottom: 6 }}>
-              <CcGlyphMark variant="forecast" />
-            </div>
-            <div className="cmd-card-title" style={{ marginBottom: 6, fontSize: 15 }}>
-              {strictT(tr, lang, 'cmd_secondary_tile_forecast')}
-            </div>
-            <div className="cmd-secondary-why cmd-secondary-why--clamp2">{strictT(tr, lang, 'cmd_secondary_why_forecast')}</div>
-          </div>
-          <div style={{ flex: '1 1 220px', minWidth: 0 }}>
-            {fcData?.available ? (
-              <ForecastNow fcData={fcData} tr={tr} lang={lang} secondary />
-            ) : (
-              <div className="cmd-muted-foreign" style={{ fontSize: 12, lineHeight: 1.45 }}>
-                {strictT(tr, lang, 'cmd_secondary_fc_empty')}
-              </div>
-            )}
-          </div>
-        </div>
-        <CmdSparkline mom={fcSparkMom} />
-      </button>
-
-      <button
-        type="button"
-        className="cmd-secondary-full-row cmd-p3-footer-card"
-        onClick={() => {
-          if (alerts?.[0]) onSelect('alert', alerts[0], {})
-          else drillAnalysis?.('alerts')
-        }}
-        style={{ ...tileBase, ...fullRow }}
-        {...lift()}
-      >
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
-          <div style={{ minWidth: 0, flex: '1 1 180px' }}>
-            <div style={{ display: 'flex', marginBottom: 6 }}>
-              <CcGlyphMark variant="alerts" />
-            </div>
-            <div className="cmd-card-title" style={{ marginBottom: 6, fontSize: 15 }}>
-              {strictT(tr, lang, 'cmd_secondary_tile_alerts')}
-            </div>
-            <div className="cmd-secondary-why cmd-secondary-why--clamp2">{strictT(tr, lang, 'cmd_secondary_why_alerts')}</div>
-          </div>
-          <div style={{ flex: '0 0 auto', minWidth: 0, textAlign: 'right' }}>
-            <div
-              className="cmd-muted-foreign"
-              style={{ fontSize: 15, fontWeight: 800, fontFamily: 'monospace', direction: 'ltr' }}
-            >
-              {nAlert
-                ? strictT(tr, lang, 'cmd_secondary_tile_alerts_count').replace('{n}', String(nAlert))
-                : strictT(tr, lang, 'cmd_secondary_tile_alerts_none')}
-            </div>
-          </div>
-        </div>
-        <CmdSparkline mom={nAlert > 0 ? -1 : 0} />
-      </button>
-
-      <div className="cmd-p3-footer-insights__nav">
-        <div className="cmd-secondary-compact-row" role="group" aria-label={strictT(tr, lang, 'cmd_secondary_section')}>
-        <SecondaryCompactCard
-          glyph="domains"
-          title={strictT(tr, lang, 'cmd_secondary_tile_domains')}
-          status={strictT(tr, lang, 'cmd_secondary_compact_domains_status')}
-          why={strictT(tr, lang, 'cmd_secondary_compact_domains_why')}
-          onClick={() => drillAnalysis?.('overview')}
-        />
-        <SecondaryCompactCard
-          glyph="statements"
-          title={strictT(tr, lang, 'cmd_secondary_tile_statements')}
-          status={strictT(tr, lang, 'cmd_secondary_compact_statements_status')}
-          why={strictT(tr, lang, 'cmd_secondary_compact_statements_why')}
-          onClick={() => navigate('/statements')}
-        />
-        <SecondaryCompactCard
-          glyph="board"
-          title={strictT(tr, lang, 'nav_board_report')}
-          status={strictT(tr, lang, 'cmd_secondary_compact_board_status')}
-          why={strictT(tr, lang, 'cmd_secondary_compact_board_why')}
-          onClick={() => navigate('/board-report')}
-        />
-        <SecondaryCompactCard
-          glyph="upload"
-          title={strictT(tr, lang, 'nav_upload')}
-          status={strictT(tr, lang, 'cmd_secondary_compact_upload_status')}
-          why={strictT(tr, lang, 'cmd_secondary_compact_upload_why')}
-          onClick={() => navigate('/upload')}
-        />
-        </div>
-      </div>
-    </div>
-  )
-}
-
 export default function CommandCenter() {
   const { authFetch } = useAuth()
   const { tr, lang }   = useLang()
@@ -2644,7 +2185,6 @@ export default function CommandCenter() {
   const [pLoad, setPLoad] = useState(null)
   const [pXtra, setPXtra] = useState(null)
   const [bridgeSelKey, setBridgeSelKey] = useState(null)
-  const [detailTile, setDetailTile] = useState(null)
   const [intelActiveTile, setIntelActiveTile] = useState(null)
 
   const drillAnalysis = useCallback(
@@ -2759,6 +2299,44 @@ export default function CommandCenter() {
     const bRev = fcData?.scenarios?.base?.revenue?.[0]
     return bRev?.point != null ? formatCompactForLang(Number(bRev.point), lang) : null
   }, [fcData, lang])
+
+  const intelTileDigestSubs = useMemo(() => {
+    if (!main) return null
+    const subs = {}
+    if (Array.isArray(alerts) && alerts.length > 0) {
+      const hi = intelHighAlertCount
+      const t0 = String(alerts[0]?.title || '').trim().slice(0, 56)
+      const title = t0 || '—'
+      subs.alerts =
+        hi > 0
+          ? strictTParams(tr, lang, 'cmd_intel_digest_alerts_high', {
+              hi: String(hi),
+              n: String(intelAlertCount),
+              title,
+            })
+          : strictTParams(tr, lang, 'cmd_intel_digest_alerts_open', { n: String(intelAlertCount), title })
+    }
+    if (intelRiskScore != null && Number.isFinite(Number(intelRiskScore))) {
+      const em = kpis?.expenses?.mom_pct
+      subs.risk = strictTParams(tr, lang, 'cmd_intel_digest_risk', {
+        score: String(Math.round(Number(intelRiskScore))),
+        hi: String(intelHighAlertCount),
+        exp: em != null && Number.isFinite(Number(em)) ? formatSignedPctForLang(Number(em), 1, lang) : '—',
+      })
+    }
+    if (fcData?.available) {
+      const rk = fcData.summary?.risk_level != null ? String(fcData.summary.risk_level) : '—'
+      const mom = fcData.summary?.trend_mom_revenue
+      subs.scenarios = strictTParams(tr, lang, 'cmd_intel_digest_scenarios', {
+        risk: rk,
+        mom: mom != null && Number.isFinite(Number(mom)) ? formatSignedPctForLang(Number(mom), 1, lang) : '—',
+      })
+    } else {
+      subs.scenarios = strictT(tr, lang, 'cmd_intel_digest_scenarios_no_fc')
+    }
+    return subs
+  }, [main, alerts, intelAlertCount, intelHighAlertCount, intelRiskScore, kpis, fcData, tr, lang])
+
   const period = main?.intelligence?.latest_period || main?.periods?.slice(-1)[0]
   const expenseIntel = main?.expense_intelligence
 
@@ -2782,27 +2360,6 @@ export default function CommandCenter() {
       },
       score: 0,
     })
-
-  const omitPrimaryExpenseId =
-    primaryResolution?.kind === 'expense' &&
-    primaryResolution.expense?.decision_id &&
-    primaryResolution.expense.decision_id !== '_cmd_baseline'
-      ? new Set([primaryResolution.expense.decision_id])
-      : null
-
-  const omitCausalIds = (() => {
-    if (!primaryResolution || !main?.realized_causal_items?.length) return null
-    const s = new Set()
-    if (primaryResolution.kind === 'cfo') {
-      const id = primaryResolution.decision?.causal_realized?.id
-      if (id) s.add(String(id))
-    }
-    if (primaryResolution.kind === 'expense') {
-      const row = pickExpenseCausalRow(main.realized_causal_items)
-      if (row?.id) s.add(String(row.id))
-    }
-    return s.size ? s : null
-  })()
 
   const primaryHeroKey =
     primaryResolution?.kind === 'expense'
@@ -2973,36 +2530,22 @@ export default function CommandCenter() {
                       lang={lang}
                       cinematic
                     />
-                    <div className="cmd-cine-split-charts">
-                      <ExecutiveKpiTrendChart
-                        kpiBlock={main.kpi_block}
-                        cashflow={main.cashflow}
-                        kpiType="net_margin"
-                        tr={tr}
-                        lang={lang}
-                        cinematic
-                      />
-                      <CommandCenterBranchGroupedChart
-                        comparativeIntelligence={main.comparative_intelligence}
-                        tr={tr}
-                        lang={lang}
-                        cinematic
-                        onOpenBranches={() => navigate('/branches')}
-                      />
-                    </div>
                     <div className="cmd-cine-intel-zone">
-                      <CommandCenterIntelligenceGrid
-                        onToggle={handleIntelTileToggle}
+                      <CommandCenterIntelligenceMosaic
                         activeTile={intelActiveTile}
-                        alertCount={intelAlertCount}
+                        onToggle={handleIntelTileToggle}
+                        main={main}
+                        fcData={fcData}
                         forecastReady={intelForecastReady}
                         forecastPrimaryMetric={intelForecastPrimaryMetric}
+                        alertCount={intelAlertCount}
                         liquidityHint={intelLiquidityHint}
                         liquidityScore={intelLiquidityScore}
                         efficiencyScore={intelEfficiencyScore}
                         efficiencyHint={intelEfficiencyHint}
                         riskScore={intelRiskScore}
                         highAlertCount={intelHighAlertCount}
+                        tileDigestSubs={intelTileDigestSubs}
                         tr={tr}
                         lang={lang}
                       />
@@ -3022,8 +2565,29 @@ export default function CommandCenter() {
                           primaryResolution={primaryResolution}
                           expenseIntel={expenseIntel}
                           health={health}
+                          impacts={impacts}
+                          narrative={narrative}
+                          bridgeSelKey={bridgeSelKey}
+                          onBridgeSegment={(pl) => open('profit_bridge_segment', pl)}
                         />
                       ) : null}
+                    </div>
+                    <div className="cmd-cine-split-charts">
+                      <ExecutiveKpiTrendChart
+                        kpiBlock={main.kpi_block}
+                        cashflow={main.cashflow}
+                        kpiType="net_margin"
+                        tr={tr}
+                        lang={lang}
+                        cinematic
+                      />
+                      <CommandCenterBranchGroupedChart
+                        comparativeIntelligence={main.comparative_intelligence}
+                        tr={tr}
+                        lang={lang}
+                        cinematic
+                        onOpenBranches={() => navigate('/branches')}
+                      />
                     </div>
                   </>
                 ) : null
@@ -3075,162 +2639,28 @@ export default function CommandCenter() {
                   </div>
                 </div>
               }
-              bridge={
-                main ? (
-                  main.structured_profit_bridge ? (
-                    <CommandCenterProfitPathBridge
-                      bridge={main.structured_profit_bridge}
-                      variance={main.structured_income_statement_variance}
-                      varianceMeta={main.structured_income_statement_variance_meta}
-                      bridgeInterpretation={main.structured_profit_bridge_interpretation}
-                      selectedKey={bridgeSelKey}
-                      onSegmentClick={(pl) => open('profit_bridge_segment', pl)}
-                      tr={tr}
-                      lang={lang}
-                    />
-                  ) : (
-                    <div className="cmd-p3-bridge-fallback">
-                      <ExecutiveProfitBridgeChart kpiBlock={main.kpi_block} tr={tr} lang={lang} />
-                    </div>
-                  )
-                ) : null
-              }
-              tileStrip={
-                main ? (
-                  <CommandCenterSecondaryTiles
-                    tr={tr}
-                    lang={lang}
-                    activeId={detailTile}
-                    onSelect={setDetailTile}
-                    onClose={() => setDetailTile(null)}
-                  >
-                    {detailTile === 'snapshot' ? (
-                      <ExecutiveKpiRow
-                        kpis={kpis}
-                        cashflow={main?.cashflow || {}}
-                        main={main}
-                        tr={tr}
-                        lang={lang}
-                        alerts={alerts}
-                        onSelect={open}
-                        ctxLabel={ctxLabel}
-                        hideTitle={false}
-                        layout="command"
-                        supportingOnly={false}
-                      />
-                    ) : null}
-                    {detailTile === 'signals' ? (
-                      <div
-                        style={{
-                          display: 'grid',
-                          gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
-                          gap: 14,
-                        }}
-                      >
-                        <KeySignalsSection
-                          financialBrain={null}
-                          comparativeIntel={main?.comparative_intelligence}
-                          alerts={alerts}
-                          narrative={narrative}
-                          tr={tr}
-                          lang={lang}
-                          main={main}
-                          intel={intel}
-                          expenseIntel={expenseIntel}
-                          onOpenAnalysis={(tab) => drillAnalysis(tab)}
-                          visualTier={2}
-                        />
-                        <ExpenseInsightsSection
-                          expenseIntel={expenseIntel}
-                          tr={tr}
-                          lang={lang}
-                          period={expenseIntel?.period || period}
-                          embedded
-                          onDrillExpense={() => drillAnalysis('profitability')}
-                          visualTier={2}
-                        />
-                      </div>
-                    ) : null}
-                    {detailTile === 'domains' ? (
-                      main && intel ? (
-                        <DomainGrid
-                          intelligence={intel}
-                          tr={tr}
-                          lang={lang}
-                          onSelect={open}
-                          rootCauses={causes}
-                          decisions={decs}
-                          alerts={alerts}
-                          secondary={false}
-                        />
-                      ) : (
-                        <p style={{ margin: 0, fontSize: 13, color: 'var(--text-secondary)' }}>
-                          {strictT(tr, lang, 'cmd_na_short')}
-                        </p>
-                      )
-                    ) : null}
-                    {detailTile === 'more' ? (
-                      <>
-                        <DecisionsSection
-                          key={
-                            primaryResolution
-                              ? primaryResolution.kind === 'expense'
-                                ? `pd-${primaryResolution.expense?.decision_id || 'x'}`
-                                : `pd-${primaryResolution.decision?.key || primaryResolution.decision?.domain || 'cfo'}`
-                              : 'dec-section'
-                          }
-                          expenseDecisionsV2={main?.expense_decisions_v2}
-                          expenseIntel={expenseIntel}
-                          realizedCausalItems={main?.realized_causal_items}
-                          tr={tr}
-                          lang={lang}
-                          onOpenDecision={(d) => open('causal_item', d, {})}
-                          visualTier={2}
-                          defaultCollapsed={false}
-                          omitDecisionIds={omitPrimaryExpenseId}
-                          omitCausalIds={omitCausalIds}
-                        />
-                        {Array.isArray(alerts) && alerts.length > 0 ? (
-                          <div style={{ marginTop: 14 }}>
-                            <AlertsBar alerts={alerts} tr={tr} lang={lang} onSelect={open} secondary />
-                          </div>
-                        ) : null}
-                      </>
-                    ) : null}
-                    {detailTile === 'narrative' ? (
-                      <ExecutiveNarrativeStrip
-                        narrative={narrative}
-                        tr={tr}
-                        lang={lang}
-                        compact={false}
-                        onOpenFullAnalysis={() => drillAnalysis('overview')}
-                      />
-                    ) : null}
-                  </CommandCenterSecondaryTiles>
-                ) : null
-              }
+              bridge={null}
+              tileStrip={null}
               collapsed={null}
               footerSecondary={
-                <>
-                  <div className="cmd-section-label" style={{ color: T.text3, letterSpacing: '.1em' }}>
-                    {strictT(tr, lang, 'cmd_secondary_section')}
-                  </div>
-                  <div
-                    className="cmd-card-section-subtitle cmd-card-section-subtitle--t3"
-                    style={{ textAlign: 'left', marginTop: 0 }}
-                  >
-                    {strictT(tr, lang, 'cmd_secondary_section_sub')}
-                  </div>
-                  <SecondaryInsightsGrid
-                    fcData={fcData}
-                    alerts={alerts}
+                main ? (
+                  <CommandCenterExecutionLayer
                     tr={tr}
                     lang={lang}
-                    navigate={navigate}
-                    drillAnalysis={drillAnalysis}
-                    onSelect={open}
+                    alerts={alerts}
+                    decs={decs}
+                    expenseDecisionsV2={main?.expense_decisions_v2}
+                    narrative={narrative}
+                    primaryResolution={primaryResolution}
+                    impacts={impacts}
+                    expenseIntel={expenseIntel}
+                    kpis={kpis}
+                    comparativeIntelligence={main?.comparative_intelligence}
+                    fcData={fcData}
+                    realizedCausalItems={main?.realized_causal_items}
+                    onActivate={(type, payload) => open(type, payload, {})}
                   />
-                </>
+                ) : null
               }
             />
           </div>

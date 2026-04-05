@@ -1,0 +1,190 @@
+{
+  "data": {
+    "health_score_v2": 82,
+    "kpi_block": {
+      "periods": ["2024-01", "2024-02", "2024-03", "2024-04", "2024-05", "2024-06"],
+      "series": {
+        "revenue": [2100000, 2150000, 2200000, 2250000, 2350000, 2480000],
+        "expenses": [1600000, 1620000, 1650000, 1680000, 1720000, 1780000],
+        "net_profit": [320000, 310000, 340000, 350000, 380000, 420000],
+        "net_margin": [0.152, 0.144, 0.155, 0.156, 0.162, 0.169]
+      },
+      "kpis": {
+        "revenue": { "value": 2480000, "mom_pct": 0.055, "yoy_pct": 0.12 },
+        "expenses": { "value": 1780000, "mom_pct": 0.035, "yoy_pct": 0.08 },
+        "net_profit": { "value": 420000, "mom_pct": 0.105, "yoy_pct": 0.18 },
+        "net_margin": { "value": 0.169, "mom_pct": 0.004 },
+        "working_capital": { "value": 890000 }
+      }
+    },
+    "cashflow": {
+      "operating_cashflow": 510000,
+      "operating_cashflow_mom": 0.021,
+      "reliability": "high",
+      "series": {
+        "periods": ["2024-01", "2024-02", "2024-03", "2024-04", "2024-05", "2024-06"],
+        "operating_cashflow": [400000, 420000, 435000, 460000, 490000, 510000]
+      }
+    },
+    "intelligence": {
+      "latest_period": "2024-06",
+      "status": "good",
+      "ratios": {
+        "profitability": {
+          "gross_margin": { "status": "good" },
+          "net_margin": { "status": "good" }
+        },
+        "liquidity": {
+          "current_ratio": { "status": "neutral", "value": 1.42 },
+          "quick_ratio": { "status": "good", "value": 1.08 }
+        },
+        "efficiency": {
+          "asset_turnover": { "status": "warning", "value": 0.88 }
+        },
+        "leverage": {
+          "debt_to_equity": { "status": "warning", "value": 0.62 },
+          "interest_coverage": { "status": "good", "value": 8.2 }
+        }
+      },
+      "anomaly_count": 1,
+      "anomalies": [{ "id": "demo-anom-1" }]
+    },
+    "comparative_intelligence": {
+      "cost_pressure": {
+        "driving_expense_increase_mom": { "branch_name": "Austin HQ", "mom_pct": 0.042 }
+      },
+      "efficiency_ranking": {
+        "by_expense_pct_of_revenue_desc": [
+          {
+            "branch_name": "Austin HQ",
+            "revenue": 920000,
+            "total_expense": 618000,
+            "expense_pct_of_revenue": 67.2
+          },
+          {
+            "branch_name": "Denver",
+            "revenue": 780000,
+            "total_expense": 545000,
+            "expense_pct_of_revenue": 69.9
+          }
+        ]
+      }
+    },
+    "structured_income_statement_variance": {
+      "revenue": { "delta": 130000, "delta_pct": 0.055 },
+      "cogs": { "delta": -22000, "delta_pct": -0.028 },
+      "opex": { "delta": 35000, "delta_pct": 0.022 },
+      "operating_profit": { "delta": 98000, "delta_pct": 0.062 },
+      "net_profit": { "delta": 40000, "delta_pct": 0.105 }
+    },
+    "structured_income_statement_variance_meta": {
+      "latest_period": "2024-06",
+      "previous_period": "2024-05",
+      "completeness": "full"
+    },
+    "structured_profit_bridge": {
+      "latest_period": "2024-06",
+      "previous_period": "2024-05",
+      "revenue_change": { "delta": 130000, "delta_pct": 0.055 },
+      "cogs_change": { "delta": -22000, "delta_pct": -0.028 },
+      "opex_change": { "delta": 35000, "delta_pct": 0.022 },
+      "operating_profit_change": { "delta": 98000, "delta_pct": 0.062 },
+      "net_profit_change": { "delta": 40000, "delta_pct": 0.105 }
+    },
+    "structured_profit_bridge_interpretation": {
+      "revenue_effect": "positive",
+      "cogs_effect": "positive",
+      "opex_effect": "negative",
+      "net_result": "profit_up",
+      "primary_driver": "revenue",
+      "paradox_flags": { "revenue_up_profit_down": false, "revenue_down_profit_up": false }
+    },
+    "structured_profit_story": {
+      "summary_type": "healthy_growth",
+      "what_changed_key": "profit_story.healthy_growth.what_changed",
+      "what_changed_params": {
+        "delta_np_fmt": "+400,000",
+        "delta_rev_fmt": "+130,000",
+        "previous_period": "2024-05",
+        "latest_period": "2024-06",
+        "nm_pct": "16.9"
+      },
+      "why_key": "profit_story.healthy_growth.why",
+      "why_params": { "nm_pct": "16.9" },
+      "action_key": "profit_story.healthy_growth.action",
+      "action_params": { "nm_pct": "16.9" }
+    },
+    "alerts": [
+      {
+        "id": "al-1",
+        "severity": "high",
+        "title": "Margin pressure on flagship SKU",
+        "body": "COGS mix shifted toward lower-margin lines in June.",
+        "category": "profitability"
+      },
+      {
+        "id": "al-2",
+        "severity": "medium",
+        "title": "OpEx run rate above plan",
+        "body": "Marketing +3.5% MoM vs budget corridor.",
+        "category": "efficiency"
+      }
+    ],
+    "decisions": [
+      {
+        "key": "pricing_guardrails",
+        "domain": "profitability",
+        "title": "Tighten pricing guardrails on top 20 SKUs",
+        "priority": "high",
+        "rationale": "Net margin momentum positive but COGS pressure in June bridge warrants SKU-level discipline."
+      },
+      {
+        "key": "opex_discipline",
+        "domain": "efficiency",
+        "title": "Cap marketing run-rate to plan corridor",
+        "priority": "medium",
+        "rationale": "OpEx trend above budget band in trailing month."
+      }
+    ],
+    "expense_decisions_v2": [
+      {
+        "decision_id": "ed-demo-1",
+        "title": "Renegotiate Austin HQ facilities charge",
+        "priority": "high",
+        "rationale": "Branch shows highest expense % of revenue in scope.",
+        "category": "facilities",
+        "expected_financial_impact": { "estimated_monthly_savings": 12500 }
+      }
+    ],
+    "decision_impacts": [
+      {
+        "decision_key": "pricing_guardrails",
+        "domain": "profitability",
+        "impact": { "value": 48000, "type": "quantitative" }
+      },
+      {
+        "decision_key": "opex_discipline",
+        "domain": "efficiency",
+        "impact": { "value": 22000, "type": "quantitative" }
+      }
+    ],
+    "expense_intelligence": null,
+    "realized_causal_items": [
+      {
+        "change_text": "Revenue rose 5.5% MoM with stable collection timing.",
+        "cause_text": "Operating cashflow at $510k supports working capital coverage.",
+        "action_text": "Hold price discipline; validate COGS pass-through on new contracts."
+      }
+    ],
+    "financial_brain": {
+      "available": true,
+      "what_changed": "June closed with net margin 16.9% — revenue growth outpaced OpEx creep."
+    }
+  },
+  "meta": {
+    "periods": ["2024-01", "2024-02", "2024-03", "2024-04", "2024-05", "2024-06"],
+    "scope": { "label": "Last 6 months", "months": ["2024-01", "2024-02", "2024-03", "2024-04", "2024-05", "2024-06"] },
+    "all_periods": ["2024-01", "2024-02", "2024-03", "2024-04", "2024-05", "2024-06"],
+    "pipeline_validation": null
+  }
+}
