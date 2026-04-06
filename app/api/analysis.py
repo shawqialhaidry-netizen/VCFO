@@ -4,7 +4,7 @@ api/analysis.py — Phase 9 Stabilized
 CANONICAL PRODUCT PATH (Phase 1 — single truth):
   • Primary UI data: GET /{company_id}/executive
   • Forecast: forecast_engine.build_forecast (in executive ``data.forecast`` and GET /{company_id}/forecast)
-  • Structured financial overlays: statement_engine.build_statement_bundle → root data + nested statements (stripped)
+  • Structured financial overlays: statement_engine.build_statement_bundle → root data (structured_*, statement_hierarchy) + nested statements (stripped)
   • CFO decisions: cfo_decision_engine.build_cfo_decisions
   • Surfaces on canonical path: Command Center (/), Statements, CfoPanel (executive only)
 

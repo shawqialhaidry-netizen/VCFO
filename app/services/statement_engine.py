@@ -25,6 +25,7 @@ from app.services.structured_profit_bridge import (
     build_structured_profit_bridge_bundle_from_window,
 )
 from app.services.structured_profit_story import build_structured_profit_story_from_window
+from app.services.statement_hierarchy import build_statement_hierarchy
 
 
 # Keys duplicated at executive root via extract_structured_financial_overlay — omit from nested `statements` to avoid payload drift.
@@ -38,6 +39,7 @@ STRUCTURED_FINANCIAL_KEYS = frozenset({
     "structured_profit_bridge_interpretation",
     "structured_profit_bridge_meta",
     "structured_profit_story",
+    "statement_hierarchy",
 })
 
 
@@ -165,6 +167,7 @@ def build_statement_bundle(
             **build_structured_income_statement_variance_bundle_from_window([]),
             **build_structured_profit_bridge_bundle_from_window([]),
             "structured_profit_story": build_structured_profit_story_from_window([]),
+            "statement_hierarchy": {"schema_version": 1, "available": False},
         }
 
     latest = windowed[-1]
@@ -426,6 +429,13 @@ def build_statement_bundle(
         windowed, latest_profitability=_ratio_prof
     )
 
+    _stmt_hierarchy = build_statement_hierarchy(
+        latest.get("income_statement") or {},
+        latest.get("balance_sheet") or {},
+        cashflow_raw,
+        period=period,
+    )
+
     return {
         "available":       True,
         "period":          period,
@@ -440,4 +450,5 @@ def build_statement_bundle(
         **_var,
         **_bridge,
         "structured_profit_story": _profit_story,
+        "statement_hierarchy": _stmt_hierarchy,
     }

@@ -2245,6 +2245,7 @@ export default function CommandCenter() {
         structured_profit_bridge_interpretation: d.structured_profit_bridge_interpretation ?? null,
         structured_profit_story: d.structured_profit_story ?? null,
         intel_tile_hints: d.intel_tile_hints ?? null,
+        statement_hierarchy: d.statement_hierarchy ?? null,
       })
       setFcData(d.forecast && typeof d.forecast === 'object' ? d.forecast : null)
     } finally {
@@ -2409,6 +2410,7 @@ export default function CommandCenter() {
                 kpi_block: main.kpi_block,
                 cashflow: main.cashflow,
                 comparative_intelligence: main.comparative_intelligence,
+                statement_hierarchy: main.statement_hierarchy ?? null,
               }
             : null,
         drillIntelBundle: {

@@ -3,7 +3,8 @@
  * Statement (structured variance table) → Interpretation (deltas + bridge + story) → Margin & supporting.
  *
  * Data: /executive — structured_income_statement_*, structured_profit_bridge, structured_profit_story;
- * legacy d.statements for BS/CF tabs and fallback IS rows.
+ * d.statement_hierarchy (root overlay, same bundle as Command Center) for drill trees;
+ * d.statements for flat BS/CF summary rows and fallback IS comparison.
  */
 import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
@@ -12,6 +13,7 @@ import CmdServerText from '../components/CmdServerText.jsx'
 import StructuredFinancialLayers, {
   formatStructuredProfitStoryForPrompt,
 } from '../components/StructuredFinancialLayers.jsx'
+import { StatementHierarchyTree } from '../components/StatementHierarchyTree.jsx'
 import { useCompany }     from '../context/CompanyContext.jsx'
 import { usePeriodScope } from '../context/PeriodScopeContext.jsx'
 import { buildAnalysisQuery } from '../utils/buildAnalysisQuery.js'
@@ -338,6 +340,7 @@ export default function Statements() {
 
   // ── Data extraction (single source of truth) ─────────────────────────────
   const d       = data?.data || {}
+  const stmtHier = d.statement_hierarchy || null
   const stmts   = d.statements || {}
   const is_     = stmts.income_statement || {}
   const bs_     = stmts.balance_sheet    || {}
@@ -615,6 +618,11 @@ export default function Statements() {
             )}
             <StructuredFinancialLayers data={d} tr={tr} lang={lang} variant="statements_interpretation" />
             <StructuredFinancialLayers data={d} tr={tr} lang={lang} variant="statements_margin_section" />
+            {stmtHier?.available && stmtHier.income_statement && (
+              <Card>
+                <StatementHierarchyTree root={stmtHier.income_statement} tr={tr} lang={lang} />
+              </Card>
+            )}
             <div style={{display:'flex',flexWrap:'wrap',alignItems:'center',gap:10}}>
               <span style={{fontSize:10,fontWeight:800,color:'var(--text-secondary)',textTransform:'uppercase',letterSpacing:'.06em'}}>
                 {tr('stmt_related_views')}
@@ -761,6 +769,9 @@ export default function Statements() {
                   {tr('bs_check_note')}
                 </div>
               </div>
+              {stmtHier?.available && stmtHier.balance_sheet && (
+                <StatementHierarchyTree root={stmtHier.balance_sheet} tr={tr} lang={lang} />
+              )}
             </Card>
 
             {/* Right panel: liquidity + leverage ratios + insights */}
@@ -870,6 +881,9 @@ export default function Statements() {
                   <Spark data={cf_.trend?.length?cf_.trend:series.net_profit}
                     color='var(--blue)' h={44}/>
                 </div>
+              )}
+              {stmtHier?.available && stmtHier.cashflow && (
+                <StatementHierarchyTree root={stmtHier.cashflow} tr={tr} lang={lang} />
               )}
             </Card>
 

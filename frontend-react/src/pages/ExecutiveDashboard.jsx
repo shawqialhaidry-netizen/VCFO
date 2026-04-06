@@ -1094,6 +1094,7 @@ export default function ExecutiveDashboard() {
           d.structured_income_statement_variance_meta ?? null,
         structured_profit_bridge: d.structured_profit_bridge ?? null,
         structured_profit_story: d.structured_profit_story ?? null,
+        statement_hierarchy: d.statement_hierarchy ?? null,
       })
       // Phase 6.4: forecast fetch
       try {
