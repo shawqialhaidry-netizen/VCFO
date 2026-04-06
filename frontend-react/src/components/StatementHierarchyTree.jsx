@@ -180,18 +180,18 @@ function valueStyle(lane, leaf, statementKind) {
 }
 
 function StmtHierRow({ node, tr, lang, defaultOpen = false, statementKind }) {
-  const kids = Array.isArray(node.children) ? node.children : []
+  const kids = Array.isArray(node?.children) ? node.children.filter((x) => x && typeof x === 'object') : []
   const hasKids = kids.length > 0
-  const lbl = node.label_key ? tr(String(node.label_key)) : String(node.label ?? '')
-  const val = node.value
-  const depth = Number(node.depth) || 0
+  const lbl = node?.label_key ? tr(String(node.label_key)) : String(node?.label ?? '')
+  const val = node?.value
+  const depth = Number(node?.depth) || 0
   const pad = 14 + depth * 16
-  const leaf = Boolean(node.leaf)
+  const leaf = Boolean(node?.leaf)
 
   let lane = 'line'
-  if (statementKind === 'income') lane = incomeRowLane(node)
-  else if (statementKind === 'balance') lane = balanceRowLane(node)
-  else lane = cashRowLane(node)
+  if (statementKind === 'income') lane = incomeRowLane(node || {})
+  else if (statementKind === 'balance') lane = balanceRowLane(node || {})
+  else lane = cashRowLane(node || {})
 
   const wrapSx = laneStyle(lane, { hasKids, leaf, statementKind })
 
@@ -311,7 +311,7 @@ function WorkspaceChrome({ title, tr, children }) {
 export function StatementHierarchyTree({ root, tr, lang, mode }) {
   if (!root) return null
   const title = root.label_key ? tr(String(root.label_key)) : String(root.label ?? '')
-  const children = Array.isArray(root.children) ? root.children : []
+  const children = Array.isArray(root.children) ? root.children.filter((x) => x && typeof x === 'object') : []
 
   if (mode === 'balance') {
     const byKey = {}
@@ -365,13 +365,13 @@ export function StatementHierarchyTree({ root, tr, lang, mode }) {
   /* income */
   return (
     <WorkspaceChrome title={title} tr={tr}>
-      {children.map((ch) => (
+      {children.map((ch, idx) => (
         <StmtHierRow
-          key={String(ch.key ?? ch.label)}
+          key={String(ch.key ?? ch.label ?? idx)}
           node={ch}
           tr={tr}
           lang={lang}
-          defaultOpen={ch.key === 'revenue'}
+          defaultOpen={ch?.key === 'revenue'}
           statementKind="income"
         />
       ))}
@@ -381,9 +381,10 @@ export function StatementHierarchyTree({ root, tr, lang, mode }) {
 
 /** Operating block from statement_hierarchy.cashflow — no inferred lines. */
 export function StatementCashOperatingTree({ cashflowRoot, tr, lang }) {
-  if (!cashflowRoot || !Array.isArray(cashflowRoot.children)) return null
+  const kids = Array.isArray(cashflowRoot?.children) ? cashflowRoot.children.filter((x) => x && typeof x === 'object') : []
+  if (!cashflowRoot || kids.length === 0) return null
   const operating =
-    cashflowRoot.children.find((c) => c.key === 'cf_operating') || cashflowRoot.children[0]
+    kids.find((c) => c.key === 'cf_operating') || kids[0]
   if (!operating) return null
   const rootTitle = cashflowRoot.label_key ? tr(String(cashflowRoot.label_key)) : String(cashflowRoot.label ?? '')
   return (

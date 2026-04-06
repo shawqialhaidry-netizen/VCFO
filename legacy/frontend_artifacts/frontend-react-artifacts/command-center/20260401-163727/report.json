@@ -1,0 +1,19 @@
+{
+  "baseUrl": "http://127.0.0.1:5173",
+  "runDir": "C:\\vcfo\\frontend-react\\artifacts\\command-center\\20260401-163727",
+  "screenshots": [
+    {
+      "name": "01-command-center-full",
+      "file": "C:\\vcfo\\frontend-react\\artifacts\\command-center\\20260401-163727\\01-command-center-full.png"
+    },
+    {
+      "name": "05-command-center-post-interactions",
+      "file": "C:\\vcfo\\frontend-react\\artifacts\\command-center\\20260401-163727\\05-command-center-post-interactions.png"
+    }
+  ],
+  "consoleErrors": [
+    "Failed to load resource: the server responded with a status of 403 (Forbidden)",
+    "Failed to load resource: the server responded with a status of 403 (Forbidden)"
+  ],
+  "ok": false
+}

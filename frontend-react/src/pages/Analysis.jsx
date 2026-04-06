@@ -680,14 +680,6 @@ export default function Analysis({ routeDefaultTab = null } = {}) {
       setData(json)
       setResolved(json.meta?.scope || null)  // FIX-1.2: sync scope label back to context
     } catch(e) { setErr(e.message) }
-    // Phase 6.4: forecast — silent fail
-    try {
-      const fqs = buildAnalysisQuery(scopeQS, { lang, window: win, consolidate })
-      if (fqs !== null) {
-        const fr = await fetch(`${API}/analysis/${selectedId}/forecast?${fqs}`, {headers:auth()})
-        if (fr.ok) { const fj = await fr.json(); if (fj?.data) setFcData(fj.data) }
-      }
-    } catch (_) {}
     finally { setLoading(false) }
   }, [selectedId, lang, consolidate, win, scopeQS, setResolved, isIncompleteCustom])
 

@@ -1025,7 +1025,6 @@ export default function ExecutiveDashboard() {
   const [main,     setMain]     = useState(null)
   const [decSum,   setDecSum]   = useState(null)
   const [alertSum, setAlertSum] = useState(null)
-  const [fcData,   setFcData]   = useState(null)
   const [loading,  setLoading]  = useState(false)
   const [consolidate, setConsolidate] = useState(false)
   const [noDataMsg, setNoDataMsg] = useState(null)
@@ -1095,15 +1094,8 @@ export default function ExecutiveDashboard() {
         structured_profit_bridge: d.structured_profit_bridge ?? null,
         structured_profit_story: d.structured_profit_story ?? null,
         statement_hierarchy: d.statement_hierarchy ?? null,
+        forecast:            d.forecast ?? null,
       })
-      // Phase 6.4: forecast fetch
-      try {
-        const fqs = buildAnalysisQuery(scopeQS, { lang, window: win, consolidate })
-        if (fqs !== null) {
-          const fr = await fetch(`${API}/analysis/${selectedId}/forecast?${fqs}`, { headers:auth() })
-          if (fr.ok) { const fj = await fr.json(); if (fj?.data) setFcData(fj.data) }
-        }
-      } catch (_) {}
     } catch(e) { console.error('exec:', e) }
     finally { setLoading(false) }
   }, [selectedId, lang, consolidate, win, scopeQS, tr])

@@ -4158,6 +4158,14 @@ def get_executive(
     to_period:   str = Query(default=""),
     consolidate: bool = Query(default=False, description="true = merge all branch TBs per period"),
     branch_id:   str  = Query(default="", description="single branch TB scope (mutually exclusive with consolidate)"),
+    include_comparative: bool = Query(
+        default=False,
+        description="true = build comparative/branch intelligence (heavy). Default=false for thin executive.",
+    ),
+    include_decisions: bool = Query(
+        default=False,
+        description="true = build CFO decisions + derived decision blocks (heavy). Default=false for thin executive.",
+    ),
     db: Session = Depends(get_db),
 ):
     """
@@ -4196,20 +4204,23 @@ def get_executive(
     # ── Alerts ────────────────────────────────────────────────────────────────
     alerts_data = build_alerts(intelligence, lang=safe_lang)
 
-    # ── Decisions (top 3 CFO-level) ───────────────────────────────────────────
-    dec_result = build_cfo_decisions(
-        intelligence=intelligence,
-        alerts=alerts_data.get("alerts", []),
-        lang=safe_lang,
-        n_periods=analysis.get("period_count", 3),
-        analysis=analysis,
-        branch_context=_branch_context_for_cfo_decisions(db, company_id),
-    )
+    # ── Decisions (top 3 CFO-level; heavy) ────────────────────────────────────
+    # Thin-by-default: do not build CFO decisions unless explicitly requested.
+    dec_result: dict = {}
+    if include_decisions:
+        dec_result = build_cfo_decisions(
+            intelligence=intelligence,
+            alerts=alerts_data.get("alerts", []),
+            lang=safe_lang,
+            n_periods=analysis.get("period_count", 3),
+            analysis=analysis,
+            branch_context=_branch_context_for_cfo_decisions(db, company_id),
+        )
 
     # ── Root causes ───────────────────────────────────────────────────────────
     rc_result = _build_root_causes(
         intelligence = intelligence,
-        decisions    = dec_result.get("decisions", []),
+        decisions    = (dec_result.get("decisions", []) if include_decisions else []),
         lang         = safe_lang,
         n_periods    = analysis.get("period_count", 3),
     )
@@ -4282,85 +4293,89 @@ def get_executive(
     _structured_overlay = extract_structured_financial_overlay(statement_bundle)
     statements_nested = strip_structured_keys_for_nested_statements(statement_bundle)
 
-    # ── Comparative Intelligence (company + branches; no group logic) ─────────
-    comparative_intelligence: dict = {
-        "branch_rankings": {},
-        "cost_pressure": {},
-        "efficiency_ranking": {},
-        "category_comparison": {},
-    }
+    # ── Comparative Intelligence (company + branches; heavy) ──────────────────
+    # Thin-by-default: do not build comparative/branch intelligence unless explicitly requested.
+    comparative_intelligence: dict | None = None
     company_expense_bundle: dict | None = None
-    try:
-        from app.services.expense_intelligence_engine import build_expense_intelligence_bundle
-        from app.services.comparative_intelligence import build_comparative_intelligence
-        from app.models.branch import Branch as _BranchModel
-
-        _periods_in_scope = set(resolved_scope.get("months") or [])
-
-        # Company bundle first (executive expense_intel + decisions + brain share this).
-        company_for_compare = None
+    if include_comparative:
+        comparative_intelligence = {
+            "branch_rankings": {},
+            "cost_pressure": {},
+            "efficiency_ranking": {},
+            "category_comparison": {},
+        }
         try:
-            _cons_stmts = _build_consolidated_statements(company_id, db)
-            if _cons_stmts:
-                if _periods_in_scope:
-                    _cons_stmts = [s for s in _cons_stmts if (s.get("period") in _periods_in_scope)]
-                company_for_compare = _cons_stmts
-        except Exception:
+            from app.services.expense_intelligence_engine import build_expense_intelligence_bundle
+            from app.services.comparative_intelligence import build_comparative_intelligence
+            from app.models.branch import Branch as _BranchModel
+
+            _periods_in_scope = set(resolved_scope.get("months") or [])
+
+            # Company bundle first (executive expense_intel + decisions + brain share this).
             company_for_compare = None
+            try:
+                _cons_stmts = _build_consolidated_statements(company_id, db)
+                if _cons_stmts:
+                    if _periods_in_scope:
+                        _cons_stmts = [s for s in _cons_stmts if (s.get("period") in _periods_in_scope)]
+                    company_for_compare = _cons_stmts
+            except Exception:
+                company_for_compare = None
 
-        company_expense_bundle = build_expense_intelligence_bundle(
-            company_for_compare or windowed, lang=safe_lang
-        )
+            company_expense_bundle = build_expense_intelligence_bundle(
+                company_for_compare or windowed, lang=safe_lang
+            )
 
-        _branches_active = (
-            db.query(_BranchModel)
-            .filter(_BranchModel.company_id == company_id, _BranchModel.is_active == True)  # noqa
-            .all()
-        )
-
-        branch_bundles: list[dict] = []
-        for _b in _branches_active:
-            _b_uploads = (
-                db.query(TrialBalanceUpload)
-                .filter(
-                    TrialBalanceUpload.branch_id == _b.id,
-                    TrialBalanceUpload.status == "ok",
-                )
-                .order_by(TrialBalanceUpload.uploaded_at.asc())
+            _branches_active = (
+                db.query(_BranchModel)
+                .filter(_BranchModel.company_id == company_id, _BranchModel.is_active == True)  # noqa
                 .all()
             )
-            if not _b_uploads:
-                continue
 
-            _b_stmts_all = _build_period_statements(company_id, _b_uploads)
-            if not _b_stmts_all:
-                continue
+            branch_bundles: list[dict] = []
+            for _b in _branches_active:
+                _b_uploads = (
+                    db.query(TrialBalanceUpload)
+                    .filter(
+                        TrialBalanceUpload.branch_id == _b.id,
+                        TrialBalanceUpload.status == "ok",
+                    )
+                    .order_by(TrialBalanceUpload.uploaded_at.asc())
+                    .all()
+                )
+                if not _b_uploads:
+                    continue
 
-            if _periods_in_scope:
-                _b_stmts = [s for s in _b_stmts_all if (s.get("period") in _periods_in_scope)]
-            else:
-                _b_stmts = _b_stmts_all
+                _b_stmts_all = _build_period_statements(company_id, _b_uploads)
+                if not _b_stmts_all:
+                    continue
 
-            if not _b_stmts:
-                continue
+                if _periods_in_scope:
+                    _b_stmts = [s for s in _b_stmts_all if (s.get("period") in _periods_in_scope)]
+                else:
+                    _b_stmts = _b_stmts_all
 
-            _bundle = build_expense_intelligence_bundle(_b_stmts, lang=safe_lang)
-            branch_bundles.append(
-                {
-                    "branch_id": _b.id,
-                    "branch_name": _b.name,
-                    "expense_bundle": _bundle,
-                }
-            )
+                if not _b_stmts:
+                    continue
 
-        if branch_bundles:
-            comparative_intelligence = build_comparative_intelligence(
-                company_expense_bundle=company_expense_bundle,
-                branch_bundles=branch_bundles,
-            )
-    except Exception as _ci_exc:
-        logger.warning("comparative_intelligence build failed: %s", _ci_exc)
+                _bundle = build_expense_intelligence_bundle(_b_stmts, lang=safe_lang)
+                branch_bundles.append(
+                    {
+                        "branch_id": _b.id,
+                        "branch_name": _b.name,
+                        "expense_bundle": _bundle,
+                    }
+                )
 
+            if branch_bundles:
+                comparative_intelligence = build_comparative_intelligence(
+                    company_expense_bundle=company_expense_bundle,
+                    branch_bundles=branch_bundles,
+                )
+        except Exception as _ci_exc:
+            logger.warning("comparative_intelligence build failed: %s", _ci_exc)
+
+    # Ensure expense bundle exists for downstream blocks (expense_intelligence/decisions/brain).
     if company_expense_bundle is None:
         try:
             from app.services.expense_intelligence_engine import build_expense_intelligence_bundle as _beb_fb
@@ -4405,16 +4420,20 @@ def get_executive(
         }
 
     # ── Decision impacts (Phase 32) ──────────────────────────────────────────
-    decision_impacts = _build_impacts(
-        decisions    = dec_result.get("decisions", []),
-        intelligence = intelligence,
-        kpi_block    = kpi_block,
-        lang         = safe_lang,
-    )
+    decision_impacts = []
+    if include_decisions:
+        decision_impacts = _build_impacts(
+            decisions    = dec_result.get("decisions", []),
+            intelligence = intelligence,
+            kpi_block    = kpi_block,
+            lang         = safe_lang,
+        )
 
     # ── Derive top_focus from #1 decision ────────────────────────────────────
-    top_decision = dec_result.get("decisions", [{}])[0]
-    top_focus    = top_decision.get("title") or dec_result.get("summary", {}).get("top_focus")
+    top_focus = None
+    if include_decisions:
+        top_decision = dec_result.get("decisions", [{}])[0]
+        top_focus = top_decision.get("title") or dec_result.get("summary", {}).get("top_focus")
 
     # ── FIX-4.1: Validation layer — runs in ALL main endpoints ─────────────
     exec_validation: dict = {}
@@ -4438,7 +4457,7 @@ def get_executive(
             company_name=company.name,
             currency=(company.currency or ""),
             company_bundle=company_expense_bundle,
-            comparative_intelligence=comparative_intelligence,
+            comparative_intelligence=comparative_intelligence or {},
             lang=safe_lang,
         )
     except Exception as _ed2_exc:
@@ -4454,7 +4473,7 @@ def get_executive(
             company_name=company.name,
             currency=(company.currency or ""),
             expense_bundle=company_expense_bundle,
-            comparative_intelligence=comparative_intelligence,
+            comparative_intelligence=comparative_intelligence or {},
             expense_decisions_v2=expense_decisions_v2,
             anomalies=(company_expense_bundle or {}).get("expense_anomalies") or [],
             lang=safe_lang,
@@ -4465,24 +4484,26 @@ def get_executive(
     # ── Realized causal (single UI-facing financial wording source) ───────────
     from app.services.causal_realize import realize_causal_items
 
-    _merged_causal_exec = _merge_causal_sources_for_realize(
-        dec_result, deep_intelligence, profitability_intelligence
-    )
-    realized_causal_items = realize_causal_items(_merged_causal_exec, safe_lang)
-    _raw_cfo_causal = dec_result.get("causal_items") or []
-    _realized_cfo_only = realize_causal_items(_raw_cfo_causal, safe_lang)
+    realized_causal_items: list = []
     decisions_for_api: list[dict] = []
-    for i, dec in enumerate(dec_result.get("decisions", [])):
-        row = dict(dec)
-        if i < len(_realized_cfo_only):
-            r = _realized_cfo_only[i]
-            row["causal_realized"] = {
-                "id": r.get("id"),
-                "change_text": r.get("change_text") or "",
-                "cause_text": r.get("cause_text") or "",
-                "action_text": r.get("action_text") or "",
-            }
-        decisions_for_api.append(row)
+    if include_decisions:
+        _merged_causal_exec = _merge_causal_sources_for_realize(
+            dec_result, deep_intelligence, profitability_intelligence
+        )
+        realized_causal_items = realize_causal_items(_merged_causal_exec, safe_lang)
+        _raw_cfo_causal = dec_result.get("causal_items") or []
+        _realized_cfo_only = realize_causal_items(_raw_cfo_causal, safe_lang)
+        for i, dec in enumerate(dec_result.get("decisions", [])):
+            row = dict(dec)
+            if i < len(_realized_cfo_only):
+                r = _realized_cfo_only[i]
+                row["causal_realized"] = {
+                    "id": r.get("id"),
+                    "change_text": r.get("change_text") or "",
+                    "cause_text": r.get("cause_text") or "",
+                    "action_text": r.get("action_text") or "",
+                }
+            decisions_for_api.append(row)
 
     # ── Phase 2: integrity gate — strip governance outputs when validation errors ─
     if _gov_block:
@@ -4540,8 +4561,8 @@ def get_executive(
             # ── Decisions ─────────────────────────────────────────────────────
             "decisions":         decisions_for_api,
             "realized_causal_items": realized_causal_items,
-            "decisions_summary": dec_result.get("summary", {}),
-            "recommendations":   [] if _gov_block else dec_result.get("recommendations", []),
+            "decisions_summary": (dec_result.get("summary", {}) if include_decisions else {}),
+            "recommendations":   ([] if (_gov_block or not include_decisions) else dec_result.get("recommendations", [])),
 
             # ── Alerts ────────────────────────────────────────────────────────
             "alerts":            alerts_data.get("alerts", [])[:5],
