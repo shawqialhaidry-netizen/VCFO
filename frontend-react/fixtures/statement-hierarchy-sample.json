@@ -1,0 +1,327 @@
+{
+  "schema_version": 2,
+  "available": true,
+  "period": "2024-06",
+  "income_statement": {
+    "key": "income_statement",
+    "label": "Income statement",
+    "label_key": "stmt_section_is",
+    "value": null,
+    "children": [
+      {
+        "key": "revenue",
+        "label": "Revenue",
+        "label_key": "stmt_hier_revenue",
+        "value": null,
+        "children": [
+          {
+            "key": "rev_line_4010_0",
+            "label": "Sales",
+            "label_key": null,
+            "value": 2480000.0,
+            "children": [],
+            "depth": 2,
+            "account_code": "4010",
+            "account_name": "Sales",
+            "mapped_type": "revenue",
+            "leaf": true
+          },
+          {
+            "key": "revenue_total",
+            "label": "Net revenue (total)",
+            "label_key": "stmt_hier_net_revenue",
+            "value": 2480000.0,
+            "children": [],
+            "depth": 2
+          }
+        ],
+        "depth": 1
+      },
+      {
+        "key": "cogs_total",
+        "label": "Total COGS",
+        "label_key": "stmt_hier_total_cogs",
+        "value": 1200000.0,
+        "children": [
+          {
+            "key": "cogs_line_5010_0",
+            "label": "COGS",
+            "label_key": null,
+            "value": 1200000.0,
+            "children": [],
+            "depth": 3,
+            "account_code": "5010",
+            "account_name": "COGS",
+            "mapped_type": "cogs",
+            "leaf": true
+          }
+        ],
+        "depth": 2
+      },
+      {
+        "key": "gross_profit",
+        "label": "Gross profit",
+        "label_key": "stmt_hier_gross_profit",
+        "value": 1280000.0,
+        "children": [],
+        "depth": 1
+      },
+      {
+        "key": "opex_total",
+        "label": "Total operating expenses",
+        "label_key": "stmt_hier_total_opex",
+        "value": 780000.0,
+        "children": [
+          {
+            "key": "opex_line_6010_0",
+            "label": "OpEx",
+            "label_key": null,
+            "value": 780000.0,
+            "children": [],
+            "depth": 3,
+            "account_code": "6010",
+            "account_name": "OpEx",
+            "mapped_type": "expenses",
+            "leaf": true
+          }
+        ],
+        "depth": 2
+      },
+      {
+        "key": "operating_profit",
+        "label": "Operating profit",
+        "label_key": "stmt_hier_operating_profit",
+        "value": 500000.0,
+        "children": [],
+        "depth": 1
+      },
+      {
+        "key": "tax",
+        "label": "Tax",
+        "label_key": "stmt_hier_tax",
+        "value": 80000.0,
+        "children": [],
+        "depth": 1
+      },
+      {
+        "key": "net_profit",
+        "label": "Net profit",
+        "label_key": "stmt_hier_net_profit",
+        "value": 420000.0,
+        "children": [],
+        "depth": 1
+      }
+    ],
+    "depth": 0
+  },
+  "balance_sheet": {
+    "key": "balance_sheet",
+    "label": "Balance sheet",
+    "label_key": "stmt_section_bs",
+    "value": null,
+    "children": [
+      {
+        "key": "assets",
+        "label": "Assets",
+        "label_key": "stmt_hier_assets",
+        "value": 3200000.0,
+        "children": [
+          {
+            "key": "asset_line_1010_0",
+            "label": "Cash",
+            "label_key": null,
+            "value": 900000.0,
+            "children": [],
+            "depth": 3,
+            "account_code": "1010",
+            "account_name": "Cash",
+            "mapped_type": "assets",
+            "leaf": true
+          }
+        ],
+        "depth": 1
+      },
+      {
+        "key": "current_assets",
+        "label": "Current assets (total)",
+        "label_key": "stmt_hier_current_assets",
+        "value": 1400000.0,
+        "children": [],
+        "depth": 1
+      },
+      {
+        "key": "noncurrent_assets",
+        "label": "Non-current assets (total)",
+        "label_key": "stmt_hier_noncurrent_assets",
+        "value": 1800000.0,
+        "children": [],
+        "depth": 1
+      },
+      {
+        "key": "liabilities",
+        "label": "Liabilities",
+        "label_key": "stmt_hier_liabilities",
+        "value": 1200000.0,
+        "children": [
+          {
+            "key": "liab_line_2010_0",
+            "label": "AP",
+            "label_key": null,
+            "value": 400000.0,
+            "children": [],
+            "depth": 3,
+            "account_code": "2010",
+            "account_name": "AP",
+            "mapped_type": "liabilities",
+            "leaf": true
+          }
+        ],
+        "depth": 1
+      },
+      {
+        "key": "current_liabilities",
+        "label": "Current liabilities (total)",
+        "label_key": "stmt_hier_current_liabilities",
+        "value": 510000.0,
+        "children": [],
+        "depth": 1
+      },
+      {
+        "key": "noncurrent_liabilities",
+        "label": "Non-current liabilities (total)",
+        "label_key": "stmt_hier_noncurrent_liabilities",
+        "value": 690000.0,
+        "children": [],
+        "depth": 1
+      },
+      {
+        "key": "equity",
+        "label": "Equity",
+        "label_key": "stmt_hier_equity",
+        "value": 2000000.0,
+        "children": [
+          {
+            "key": "eq_line_3010_0",
+            "label": "Equity",
+            "label_key": null,
+            "value": 2000000.0,
+            "children": [],
+            "depth": 3,
+            "account_code": "3010",
+            "account_name": "Equity",
+            "mapped_type": "equity",
+            "leaf": true
+          }
+        ],
+        "depth": 1
+      },
+      {
+        "key": "working_capital",
+        "label": "Working capital (current assets \u2212 current liabilities)",
+        "label_key": "stmt_hier_working_capital",
+        "value": 890000.0,
+        "children": [],
+        "depth": 1
+      }
+    ],
+    "depth": 0
+  },
+  "cashflow": {
+    "key": "cashflow_statement",
+    "label": "Cash flow (indirect operating view)",
+    "label_key": "stmt_hier_cashflow_root",
+    "value": null,
+    "children": [
+      {
+        "key": "cf_operating",
+        "label": "Operating activities",
+        "label_key": "stmt_hier_cf_operating",
+        "value": 510000.0,
+        "children": [
+          {
+            "key": "cf_np",
+            "label": "Net profit (from statements)",
+            "label_key": "stmt_hier_cf_np",
+            "value": 420000.0,
+            "children": [],
+            "depth": 2
+          },
+          {
+            "key": "cf_da",
+            "label": "Depreciation & amortization (add-back)",
+            "label_key": "stmt_hier_cf_da",
+            "value": 120000.0,
+            "children": [],
+            "depth": 2
+          },
+          {
+            "key": "cf_d_ar",
+            "label": "Change in receivables",
+            "label_key": "stmt_hier_cf_d_ar",
+            "value": -30000.0,
+            "children": [],
+            "depth": 2
+          },
+          {
+            "key": "cf_d_inv",
+            "label": "Change in inventory",
+            "label_key": "stmt_hier_cf_d_inv",
+            "value": 10000.0,
+            "children": [],
+            "depth": 2
+          },
+          {
+            "key": "cf_d_ap",
+            "label": "Change in payables",
+            "label_key": "stmt_hier_cf_d_ap",
+            "value": 15000.0,
+            "children": [],
+            "depth": 2
+          },
+          {
+            "key": "cf_wc_adj",
+            "label": "Working capital adjustment (as reported)",
+            "label_key": "stmt_hier_cf_wc_adj",
+            "value": null,
+            "children": [],
+            "depth": 2
+          },
+          {
+            "key": "cf_fcf",
+            "label": "Free cash flow (as reported)",
+            "label_key": "stmt_hier_cf_fcf",
+            "value": 380000.0,
+            "children": [],
+            "depth": 2
+          }
+        ],
+        "depth": 1
+      },
+      {
+        "key": "cf_investing",
+        "label": "Investing activities",
+        "label_key": "stmt_hier_cf_investing",
+        "value": null,
+        "children": [],
+        "depth": 1,
+        "availability": "unavailable",
+        "note": "not_modeled"
+      },
+      {
+        "key": "cf_financing",
+        "label": "Financing activities",
+        "label_key": "stmt_hier_cf_financing",
+        "value": null,
+        "children": [],
+        "depth": 1,
+        "availability": "unavailable",
+        "note": "not_modeled"
+      }
+    ],
+    "depth": 0
+  },
+  "cashflow_meta": {
+    "period": "2024-06",
+    "flags": {}
+  }
+}

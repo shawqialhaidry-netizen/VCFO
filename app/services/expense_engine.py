@@ -15,7 +15,7 @@ Adjustments applied:
   - threshold_source: "internal_default" for future configurability
   - decision_hint field on every insight
   - expense_heatmap block per group
-  - branch_comparison reuses existing BranchFinancial data
+  - branch_comparison uses branch_financials kpis from canonical branch statements (caller)
 """
 from __future__ import annotations
 from typing import Optional

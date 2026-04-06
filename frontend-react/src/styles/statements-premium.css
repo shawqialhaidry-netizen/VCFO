@@ -1,0 +1,48 @@
+/* Phase 4B — Statements workspace (presentation only) */
+.stmt-premium {
+  --stmt-rail: rgba(255, 255, 255, 0.04);
+  --stmt-hover: rgba(255, 255, 255, 0.03);
+  --stmt-profit: rgba(63, 185, 80, 0.14);
+  --stmt-profit-border: rgba(63, 185, 80, 0.55);
+  --stmt-wc: rgba(210, 168, 75, 0.12);
+  --stmt-wc-border: rgba(210, 168, 75, 0.45);
+}
+
+.stmt-premium details {
+  transition: background 0.15s ease;
+}
+.stmt-premium details[open] > summary {
+  background: var(--stmt-hover);
+}
+.stmt-premium summary {
+  list-style: none;
+}
+.stmt-premium summary::-webkit-details-marker {
+  display: none;
+}
+.stmt-premium .stmt-chevron {
+  display: inline-block;
+  width: 0.45em;
+  margin-right: 6px;
+  opacity: 0.45;
+  transition: transform 0.18s ease;
+  font-size: 0.65em;
+  vertical-align: middle;
+}
+.stmt-premium details[open] > summary .stmt-chevron {
+  transform: rotate(90deg);
+}
+
+.stmt-premium-grid {
+  display: grid;
+  grid-template-columns: 1fr 128px;
+  align-items: center;
+  column-gap: 16px;
+}
+
+@media (max-width: 640px) {
+  .stmt-premium-grid {
+    grid-template-columns: 1fr 96px;
+    column-gap: 10px;
+  }
+}

@@ -26,7 +26,7 @@ Legacy GET /analysis execution order (strict, historical):
   6. fe_debug          = _build_debug_block(windowed)
 """
 import logging
-from typing import Optional
+from typing import Optional, Any
 
 import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -39,6 +39,7 @@ from app.models.company import Company
 from app.models.trial_balance import TrialBalanceUpload
 from app.services.financial_statements import build_statements, statements_to_dict
 from app.services.canonical_period_statements import (
+    build_branch_period_statements,
     build_period_statements_from_uploads,
     load_normalized_tb_dataframe,
 )
@@ -246,9 +247,11 @@ def _load_df(record: TrialBalanceUpload):
 def _branch_context_for_cfo_decisions(db: Session, company_id: str) -> Optional[dict]:
     """
     Latest-period branch snapshots for portfolio-level recommendations (2+ branches with data).
+    Uses canonical branch TB statements (Phase 5).
     """
     try:
-        from app.models.branch import Branch, BranchFinancial
+        from app.api import branches as _branches_api
+        from app.models.branch import Branch
 
         branches = (
             db.query(Branch)
@@ -259,22 +262,24 @@ def _branch_context_for_cfo_decisions(db: Session, company_id: str) -> Optional[
             return None
         snapshots: list[dict] = []
         for b in branches:
-            bf = (
-                db.query(BranchFinancial)
-                .filter(BranchFinancial.branch_id == b.id)
-                .order_by(BranchFinancial.period.desc())
-                .first()
-            )
-            if bf and float(bf.revenue or 0) > 0:
-                rev = float(bf.revenue or 0)
-                npv = float(bf.net_profit or 0)
+            stmts_b = _branches_api._branch_statements_from_uploads(db, company_id, b.id)
+            if not stmts_b:
+                continue
+            last = stmts_b[-1]
+            is_ = last.get("income_statement") or {}
+            rev = float((is_.get("revenue") or {}).get("total") or 0)
+            if rev <= 0:
+                continue
+            npv = float(is_.get("net_profit") or 0)
+            nm = is_.get("net_margin_pct")
+            if nm is None:
                 nm = round(npv / rev * 100, 2) if rev else None
-                snapshots.append({
-                    "branch_id": b.id,
-                    "name": b.name or str(b.id),
-                    "revenue": rev,
-                    "net_margin_pct": nm,
-                })
+            snapshots.append({
+                "branch_id": b.id,
+                "name": b.name or str(b.id),
+                "revenue": rev,
+                "net_margin_pct": nm,
+            })
         if len(snapshots) < 2:
             return None
         total_rev = sum(s["revenue"] for s in snapshots) or 1.0
@@ -303,222 +308,112 @@ def _branch_context_for_cfo_decisions(db: Session, company_id: str) -> Optional[
         return None
 
 
-def _build_consolidated_statements(company_id: str, db) -> list[dict]:
-    """
-    Build period statements by SUMMING branch_financials rows per period.
-
-    This is the consolidation path: company = sum of branches.
-    Produces the same statement dict shape as _build_period_statements()
-    so the entire downstream pipeline (analysis, trends, decisions, executive)
-    works unchanged.
-
-    Returns empty list if no branch financials exist for this company.
-    """
-    from app.models.branch import BranchFinancial
-    from collections import defaultdict
-
-    rows = (
-        db.query(BranchFinancial)
-        .filter(BranchFinancial.company_id == company_id)
-        .order_by(BranchFinancial.period)
+def _query_branch_tb_uploads(db: Session, company_id: str) -> list:
+    """All successful branch-scoped TB uploads for consolidation (Phase 5)."""
+    return (
+        db.query(TrialBalanceUpload)
+        .filter(
+            TrialBalanceUpload.company_id == company_id,
+            TrialBalanceUpload.status == "ok",
+            TrialBalanceUpload.branch_id.isnot(None),
+        )
+        .order_by(TrialBalanceUpload.uploaded_at.asc())
         .all()
     )
-    if not rows:
+
+
+def _apply_statement_scope_meta(
+    stmts: list[dict],
+    *,
+    company_id: str,
+    data_source: str,
+    branch_id: Optional[str] = None,
+    is_consolidated: bool = False,
+) -> None:
+    for d in stmts:
+        d["company_id"] = company_id
+        d["data_source"] = data_source
+        d["is_consolidated"] = is_consolidated
+        if branch_id:
+            d["branch_id"] = branch_id
+
+
+def _attach_consolidation_branch_coverage(
+    db: Session,
+    company_id: str,
+    stmts: list[dict],
+    uploads: list[Any],
+) -> None:
+    """
+    Mark periods where not every active branch contributed a TB for that period.
+    Does not alter numbers — visibility only.
+    """
+    from app.models.branch import Branch
+
+    active = {
+        b.id
+        for b in db.query(Branch)
+        .filter(Branch.company_id == company_id, Branch.is_active == True)  # noqa: E712
+        .all()
+    }
+    for d in stmts:
+        p = d.get("period")
+        if not p or not active:
+            d["incomplete_accounting_data"] = False
+            d.pop("missing_active_branch_ids", None)
+            continue
+        present: set[str] = set()
+        for u in uploads:
+            if not u.branch_id:
+                continue
+            df = load_normalized_tb_dataframe(u)
+            if df is not None and not df.empty and "period" in df.columns:
+                if str(p) in df["period"].astype(str).unique():
+                    present.add(u.branch_id)
+            elif getattr(u, "period", None) == p:
+                present.add(u.branch_id)
+        missing = active - present
+        d["incomplete_accounting_data"] = bool(missing)
+        if missing:
+            d["missing_active_branch_ids"] = sorted(missing)
+        else:
+            d.pop("missing_active_branch_ids", None)
+
+
+def _build_consolidated_statements(company_id: str, db) -> list[dict]:
+    """
+    Phase 5 — TB-level consolidation: merge branch normalized TB rows per period,
+    then canonical classify → financial_statements (same path as company uploads).
+    """
+    uploads = _query_branch_tb_uploads(db, company_id)
+    if not uploads:
         return []
-
-    # Aggregate all branches per period
-    agg: dict[str, dict] = defaultdict(lambda: {
-        "revenue": 0.0, "cogs": 0.0, "gross_profit": 0.0,
-        "expenses": 0.0, "net_profit": 0.0, "total_assets": 0.0,
-    })
-    for r in rows:
-        p = r.period
-        agg[p]["revenue"]      += r.revenue      or 0.0
-        agg[p]["cogs"]         += r.cogs          or 0.0
-        agg[p]["gross_profit"] += r.gross_profit  or 0.0
-        agg[p]["expenses"]     += r.expenses      or 0.0
-        agg[p]["net_profit"]   += r.net_profit    or 0.0
-        agg[p]["total_assets"] += r.total_assets  or 0.0
-
-    def _pct(n: float, d: float) -> float:
-        return round(n / d * 100, 2) if d and d > 0 else 0.0
-
-    def _consolidate_bs(total_assets: float, net_profit: float) -> dict:
-        """
-        Derive balance sheet from branch aggregates.
-
-        BranchFinancial stores only: revenue, cogs, expenses, net_profit, total_assets.
-        Liabilities and equity are not stored per branch.
-
-        Derivation (aggregation layer only — statement_engine unchanged):
-          equity      = net_profit  (best available proxy for retained earnings)
-          liabilities = total_assets - equity  (residual, enforces equation)
-          is_balanced = abs(assets - liabilities - equity) < 1.0
-
-        is_consolidated: True  (always — this is the branch aggregation path)
-        imbalance_reason: populated when equation cannot be satisfied
-        """
-        assets = round(total_assets, 2)
-        equity = round(net_profit, 2)            # proxy: accumulated net profit
-        liab   = round(assets - equity, 2)       # residual → enforces A = L + E
-
-        # Validate accounting equation
-        diff   = round(abs(assets - (liab + equity)), 2)
-        balanced = diff < 1.0
-
-        imbalance_reason = None
-        if not balanced:
-            imbalance_reason = (
-                f"Assets ({assets}) ≠ Liabilities ({liab}) + Equity ({equity}). "
-                f"Difference: {diff}. Branch data may be incomplete."
-            )
-
-        return {
-    "assets":               {"total": assets, "items": []},
-    "liabilities":          {"total": liab, "items": []},
-    "equity":               {"total": equity, "items": []},
-    "current_assets":       float(assets or 0),
-    "current_liabilities":  float(max(0.0, liab or 0)),
-    "working_capital":      float((assets or 0) - max(0.0, liab or 0)),
-    "total_assets":         assets,
-    "is_balanced":          balanced,
-    "is_consolidated":      True,
-    "imbalance_reason":     imbalance_reason,
-    "consolidation_note": (
-        "Equity derived from net_profit; liabilities = assets - equity. "
-        "Branch balance sheets are not individually stored."
-    ),
-}
-
-    stmts = []
-    for period in sorted(agg.keys()):
-        a   = agg[period]
-        rev = a["revenue"]
-        gp  = a["gross_profit"]
-        exp = a["expenses"]
-        np_ = a["net_profit"]
-        op_ = gp - exp
-
-        cg_tot = round(a["cogs"], 2)
-        ex_tot = round(exp, 2)
-        rv_tot = round(rev, 2)
-        stmt = {
-            "period":          period,
-            "company_id":      company_id,
-            "data_source":     "branch_consolidation",
-            "is_consolidated": True,
-            "income_statement": {
-                "revenue":              {"total": rv_tot, "items": []},
-                "cogs":                 {"total": cg_tot, "items": []},
-                "gross_profit":         round(gp, 2),
-                "gross_margin_pct":     _pct(gp, rev),
-                "expenses":             {"total": ex_tot, "items": []},
-                "unclassified_pnl_debits": {"items": [], "total": 0.0},
-                "operating_profit":     round(op_, 2),
-                "operating_margin_pct": _pct(op_, rev),
-                "tax":                  {"total": 0.0, "items": []},
-                "net_profit":           round(np_, 2),
-                "net_margin_pct":       _pct(np_, rev),
-                "opex_ratio_pct":       opex_ratio_pct(ex_tot, rv_tot if rv_tot else None),
-                "cogs_ratio_pct":       cogs_ratio_pct(cg_tot, rv_tot if rv_tot else None),
-                "total_cost_ratio_pct": total_cost_ratio_pct(
-                    cg_tot, ex_tot, rv_tot if rv_tot else None, 0.0,
-                ),
-                "expense_ratio_pct":    total_cost_ratio_pct(
-                    cg_tot, ex_tot, rv_tot if rv_tot else None, 0.0,
-                ),
-            },
-            "balance_sheet": _consolidate_bs(a["total_assets"], np_),
-        }
-        attach_structured_income_statement(stmt)
-        stmts.append(stmt)
-
+    stmts = build_period_statements_from_uploads(company_id, uploads)
+    _apply_statement_scope_meta(
+        stmts,
+        company_id=company_id,
+        data_source="branch_consolidation",
+        is_consolidated=True,
+    )
+    _attach_consolidation_branch_coverage(db, company_id, stmts, uploads)
     return stmts
 
 
-
 def _build_single_branch_statements(branch_id: str, company_id: str, db) -> list[dict]:
-    """
-    Build period statements for ONE branch from BranchFinancial rows.
-
-    Produces the SAME statement dict shape as _build_consolidated_statements()
-    so the entire downstream pipeline (analysis, executive, board_report) works
-    unchanged — just filtered to a single branch.
-
-    Returns empty list if no branch financials exist for this branch.
-    """
-    from app.models.branch import BranchFinancial
-    from collections import defaultdict
-
-    rows = (
-        db.query(BranchFinancial)
+    """Phase 5 — single branch: canonical TB → statements (identical pipeline to company)."""
+    uploads = (
+        db.query(TrialBalanceUpload)
         .filter(
-            BranchFinancial.branch_id == branch_id,
-            BranchFinancial.company_id == company_id,
+            TrialBalanceUpload.company_id == company_id,
+            TrialBalanceUpload.status == "ok",
+            TrialBalanceUpload.branch_id == branch_id,
         )
-        .order_by(BranchFinancial.period)
+        .order_by(TrialBalanceUpload.uploaded_at.asc())
         .all()
     )
-    if not rows:
+    if not uploads:
         return []
-
-    def _pct(n: float, d: float) -> float:
-        return round(n / d * 100, 2) if d and d > 0 else 0.0
-
-    def _consolidate_bs(total_assets: float, net_profit: float) -> dict:
-        assets = round(total_assets, 2)
-        equity = round(net_profit, 2)
-        liab   = round(assets - equity, 2)
-        diff   = round(abs(assets - (liab + equity)), 2)
-        return {
-            "total_assets": assets, "total_liabilities": liab, "total_equity": equity,
-            "current_assets": assets, "current_liabilities": max(0.0, liab),
-            "working_capital": round(assets - max(0.0, liab), 2),
-            "is_balanced": diff < 1.0, "is_consolidated": True,
-        }
-
-    result = []
-    for r in rows:
-        rev  = float(r.revenue      or 0.0)
-        cogs = float(r.cogs         or 0.0)
-        gp   = float(r.gross_profit or 0.0)
-        exp  = float(r.expenses     or 0.0)
-        np_  = float(r.net_profit   or 0.0)
-        ta   = float(r.total_assets or 0.0)
-
-        gm_pct  = _pct(gp,  rev)
-        nm_pct  = _pct(np_, rev)
-        om_pct  = _pct(gp - exp, rev)
-        rv_f = rev if rev else None
-        ox_r = opex_ratio_pct(exp, rv_f)
-        cg_r = cogs_ratio_pct(cogs, rv_f)
-        tc_r = total_cost_ratio_pct(cogs, exp, rv_f, 0.0)
-
-        result.append({
-            "period":    r.period,
-            "tb_type":   "branch",
-            "income_statement": {
-                "revenue":          {"total": rev,  "items": []},
-                "cogs":             {"total": cogs, "items": []},
-                "gross_profit":     gp,
-                "expenses":         {"total": exp,  "items": []},
-                "unclassified_pnl_debits": {"items": [], "total": 0.0},
-                "operating_profit": round(gp - exp, 2),
-                "tax":              {"total": 0.0, "items": []},
-                "net_profit":       np_,
-                "gross_margin_pct":    gm_pct,
-                "net_margin_pct":      nm_pct,
-                "operating_margin_pct": om_pct,
-                "opex_ratio_pct":      ox_r,
-                "cogs_ratio_pct":      cg_r,
-                "total_cost_ratio_pct": tc_r,
-                "expense_ratio_pct":   tc_r,
-            },
-            "balance_sheet": _consolidate_bs(ta, np_),
-        })
-        attach_structured_income_statement(result[-1])
-
-    return result
+    return build_branch_period_statements(company_id, branch_id, uploads)
 
 
 def _build_period_statements(company_id: str, uploads: list) -> list[dict]:
@@ -531,6 +426,7 @@ def _product_windowed_statements(
     company_id: str,
     *,
     consolidate: bool,
+    branch_id: Optional[str] = None,
     window: str,
     basis_type: str,
     period: str,
@@ -539,18 +435,43 @@ def _product_windowed_statements(
     to_period: str,
 ) -> tuple[Company, list[dict], list[dict], dict, Optional[dict]]:
     """
-    Phase 3 — one statement + scope path for executive-aligned product endpoints.
+    Phase 3 + Phase 5 — one statement + scope path for executive-aligned product endpoints.
+
+    ``branch_id``: optional single-branch TB scope (mutually exclusive with ``consolidate``).
+    ``consolidate``: merge all branch TB uploads per period, then canonical pipeline.
 
     Returns (company, all_stmts, windowed, resolved_scope, scope22_or_none).
     """
+    from app.models.branch import Branch
+
     company = db.query(Company).filter(Company.id == company_id).first()
     if not company:
         raise HTTPException(404, "Company not found.")
 
-    if consolidate:
+    bid = (branch_id or "").strip() or None
+    if bid and consolidate:
+        raise HTTPException(
+            400,
+            "Invalid scope: use branch_id for a single branch, or consolidate=true for merged branches — not both.",
+        )
+
+    if bid:
+        br = db.query(Branch).filter(Branch.id == bid, Branch.company_id == company_id).first()
+        if not br:
+            raise HTTPException(404, "Branch not found for this company.")
+        all_stmts = _build_single_branch_statements(bid, company_id, db)
+        if not all_stmts:
+            raise HTTPException(
+                422,
+                "No Trial Balance data for this branch. Upload a branch-scoped TB with normalized output.",
+            )
+    elif consolidate:
         all_stmts = _build_consolidated_statements(company_id, db)
         if not all_stmts:
-            raise HTTPException(422, "No financial data uploaded yet (branch consolidation).")
+            raise HTTPException(
+                422,
+                "No branch Trial Balance uploads to consolidate. Upload TBs with a branch selected.",
+            )
     else:
         uploads = (
             db.query(TrialBalanceUpload)
@@ -598,6 +519,10 @@ def _product_windowed_statements(
         "to_period": available[-1] if available else None,
         "error": None,
     }
+    if bid:
+        resolved_scope = {**resolved_scope, "branch_id": bid}
+    if consolidate:
+        resolved_scope = {**resolved_scope, "consolidated": True}
     return company, all_stmts, windowed, resolved_scope, scope22
 
 
@@ -1117,8 +1042,8 @@ def get_consolidated(
     db: Session = Depends(get_db),
 ):
     """
-    Company financials derived entirely from branch uploads (consolidation mode).
-    Aggregates branch_financials by period → runs through the full analysis pipeline.
+    Company financials derived entirely from branch Trial Balance uploads (TB-level consolidation).
+    Merged branch TBs per period → classify → statements → same analysis pipeline as company scope.
 
     **Not the canonical product path** (Phase 1.1): different shape than
     ``GET /{company_id}/executive``. Use executive for Command Center / Statements /
@@ -1184,8 +1109,10 @@ def get_consolidated(
         health_v2    = 0
         logger.warning("consolidated intelligence failed: %s", exc)
 
-    # Branch breakdown summary (what went into consolidation)
-    from app.models.branch import BranchFinancial, Branch as _Branch
+    # Branch breakdown summary (canonical TB periods per branch)
+    from app.api import branches as _branches_api
+    from app.models.branch import Branch as _Branch
+
     branch_breakdown: list[dict] = []
     branches_q = (
         db.query(_Branch)
@@ -1193,21 +1120,21 @@ def get_consolidated(
         .all()
     )
     for b in branches_q:
-        bf_periods = (
-            db.query(BranchFinancial)
-            .filter(BranchFinancial.branch_id == b.id)
-            .order_by(BranchFinancial.period)
-            .all()
+        stmts_b = _branches_api._branch_statements_from_uploads(db, company_id, b.id)
+        if not stmts_b:
+            continue
+        tr = sum(
+            float((s.get("income_statement") or {}).get("revenue", {}).get("total") or 0)
+            for s in stmts_b
         )
-        if bf_periods:
-            branch_breakdown.append({
-                "branch_id":   b.id,
-                "branch_name": b.name,
-                "branch_code": getattr(b, "code", None),
-                "period_count": len(bf_periods),
-                "periods":     [f.period for f in bf_periods],
-                "total_revenue": round(sum(f.revenue or 0 for f in bf_periods), 2),
-            })
+        branch_breakdown.append({
+            "branch_id":   b.id,
+            "branch_name": b.name,
+            "branch_code": getattr(b, "code", None),
+            "period_count": len(stmts_b),
+            "periods":     [s.get("period") for s in stmts_b],
+            "total_revenue": round(tr, 2),
+        })
 
     safe_lang = lang if lang in ("en", "ar", "tr") else "en"
     deep_intel: dict = {}
@@ -1316,8 +1243,8 @@ def get_consolidated(
         "cfo_recommendations":    cfo_recommendations,
         "forecast":               exec_forecast_consolidated,
         "note": (
-            "Financial data consolidated from branch uploads. "
-            "Balance sheet ratios are not available in consolidation mode."
+            "Financial data consolidated from merged branch trial balances per period "
+            "(TB-level consolidation → same statement builders as company scope)."
         ),
     }
 
@@ -2210,8 +2137,7 @@ def get_decisions_v2(
     from app.services.period_aggregation import build_annual_layer
     from app.services.alerts_engine      import build_alerts
     from app.services.cfo_decision_engine import build_cfo_decisions
-    from app.models.branch               import Branch, BranchFinancial
-    from app.api.branches import _bf_to_stmt_dict
+    from app.models.branch import Branch
 
     safe_lang = lang if lang in ("en", "ar", "tr") else "en"
 
@@ -2273,18 +2199,11 @@ def get_decisions_v2(
         )
         branch_data = []
         for b in branches:
-            financials = (
-                db.query(BranchFinancial)
-                .filter(BranchFinancial.branch_id == b.id)
-                .order_by(BranchFinancial.period)
-                .all()
-            )
-            if not financials:
+            stmts = _build_single_branch_statements(b.id, company_id, db)
+            if not stmts:
                 continue
-            stmts    = [_bf_to_stmt_dict(f) for f in financials]
             b_anal   = run_analysis(stmts)
             b_trends = b_anal.get("trends", {})
-            lat_bf   = financials[-1]
             lat_is   = stmts[-1].get("income_statement", {})
             rev      = lat_is.get("revenue", {}).get("total", 0) or 0
             exp      = lat_is.get("expenses", {}).get("total", 0) or 0
@@ -2295,8 +2214,13 @@ def get_decisions_v2(
             c_pos    = sum(1 for _ in __import__('itertools').takewhile(lambda x: x > 0, reversed(mom_vals)))
             c_neg    = sum(1 for _ in __import__('itertools').takewhile(lambda x: x < 0, reversed(mom_vals)))
 
-            avg_exp  = (sum(f.expenses or 0 for f in financials) /
-                        sum(f.revenue or 1 for f in financials) * 100) if financials else 50.0
+            _revs = [float(x.get("revenue", {}).get("total") or 0) for x in stmts]
+            _exps = [float(x.get("expenses", {}).get("total") or 0) for x in stmts]
+            avg_exp = (
+                round(sum(_exps) / sum(_r for _r in _revs if _r) * 100, 2)
+                if _revs and sum(_r for _r in _revs if _r) > 0
+                else 50.0
+            )
 
             # Build action detail text — lang-aware inline (avoids closure import issues)
             def _act_detail(key: str, **kw) -> str:
@@ -2399,10 +2323,11 @@ def get_expense_intelligence(
     """
     CFO-grade expense intelligence.
     Returns grouped breakdown, variance, heatmap, thresholds, insights, branch comparison.
-    Branch comparison reuses existing BranchFinancial kpis — no separate recomputation.
+    Branch comparison uses latest-period KPIs from canonical branch TB statements.
     """
+    from app.api import branches as _branches_api
     from app.services.expense_engine import build_expense_intelligence
-    from app.models.branch           import Branch, BranchFinancial
+    from app.models.branch import Branch
 
     company = db.query(Company).filter(Company.id == company_id).first()
     if not company:
@@ -2432,7 +2357,7 @@ def get_expense_intelligence(
             raise HTTPException(422, "Could not build statements.")
         data_source = "direct_uploads"
 
-    # ── Branch kpis — reuse existing BranchFinancial data ────────────────────
+    # ── Branch kpis — latest period from canonical branch statements ─────────
     branch_financials: list[dict] = []
     try:
         branches = (
@@ -2441,16 +2366,12 @@ def get_expense_intelligence(
             .all()
         )
         for b in branches:
-            latest_bf = (
-                db.query(BranchFinancial)
-                .filter(BranchFinancial.branch_id == b.id)
-                .order_by(BranchFinancial.period.desc())
-                .first()
-            )
-            if not latest_bf:
+            stmts_b = _branches_api._branch_statements_from_uploads(db, company_id, b.id)
+            if not stmts_b:
                 continue
-            rev = latest_bf.revenue or 0
-            exp = latest_bf.expenses or 0
+            is_ = (stmts_b[-1].get("income_statement") or {})
+            rev = float((is_.get("revenue") or {}).get("total") or 0)
+            exp = float((is_.get("expenses") or {}).get("total") or 0)
             exp_ratio = round(exp / rev * 100, 2) if rev > 0 else None
             branch_financials.append({
                 "branch_id":   b.id,
@@ -2490,6 +2411,7 @@ def get_cfo_decisions(
     from_period: str  = Query(default=""),
     to_period:   str  = Query(default=""),
     consolidate: bool = Query(default=False),
+    branch_id:   str  = Query(default="", description="Single-branch TB scope (same as GET /executive)"),
     current_user       = Depends(get_current_user),
     db:          Session = Depends(get_db),
 ):
@@ -2507,6 +2429,7 @@ def get_cfo_decisions(
         db,
         company_id,
         consolidate=consolidate,
+        branch_id=branch_id or None,
         window=window,
         basis_type=basis_type,
         period=period,
@@ -2549,13 +2472,29 @@ def get_cfo_decisions(
     except Exception:
         fc = {"available": False, "reason": "unavailable"}
 
+    exec_cf: dict = {}
+    exec_pv: dict = {}
+    try:
+        exec_cf = build_cashflow(windowed) if windowed else {}
+        exec_pv = _validate_pipeline(windowed, analysis, exec_cf)
+    except Exception as _pv_exc:
+        logger.warning("cfo-decisions pipeline_validation failed: %s", _pv_exc)
+
     return {
         "status":       "success",
         "company_id":   company_id,
         "company_name": company.name,
         "lang":         safe_lang,
-        "data_source":  "branch_consolidation" if consolidate else "direct_uploads",
-        "meta":         {"scope": resolved_scope, "window": window},
+        "data_source": (
+            "branch_upload"
+            if (branch_id or "").strip()
+            else ("branch_consolidation" if consolidate else "direct_uploads")
+        ),
+        "meta":         {
+            "scope": resolved_scope,
+            "window": window,
+            "pipeline_validation": exec_pv,
+        },
         "data": {
             "decisions":       raw_dec.get("decisions", []),
             "decisions_summary": raw_dec.get("summary", {}),
@@ -3897,6 +3836,7 @@ def get_alerts(
     from_period: str = Query(default=""),
     to_period:   str = Query(default=""),
     consolidate: bool = Query(default=False, description="Same as GET /executive — branch consolidation"),
+    branch_id:   str  = Query(default="", description="Single-branch TB scope (same as GET /executive)"),
     db: Session = Depends(get_db),
 ):
     safe_lang = lang if lang in ("en", "ar", "tr") else "en"
@@ -3905,6 +3845,7 @@ def get_alerts(
         db,
         company_id,
         consolidate=consolidate,
+        branch_id=branch_id or None,
         window=window,
         basis_type=basis_type,
         period=period,
@@ -3915,6 +3856,8 @@ def get_alerts(
 
     analysis = run_analysis(windowed)
     annual   = build_annual_layer(windowed)
+    cf_raw = build_cashflow(windowed) if windowed else {}
+    pv = _validate_pipeline(windowed, analysis, cf_raw)
 
     intelligence = build_intelligence(
         analysis     = analysis,
@@ -3935,6 +3878,7 @@ def get_alerts(
             "periods":      analysis.get("periods", []),
             "currency":     company.currency or "",
             "lang":         safe_lang,
+            "pipeline_validation": pv,
         },
     }
 
@@ -3955,6 +3899,7 @@ def get_cfo_decisions_v2(
     from_period: str = Query(default=""),
     to_period:   str = Query(default=""),
     consolidate: bool = Query(default=False, description="Same as GET /executive — branch consolidation"),
+    branch_id:   str  = Query(default="", description="Single-branch TB scope (same as GET /executive)"),
     db: Session = Depends(get_db),
 ):
     """
@@ -3967,6 +3912,7 @@ def get_cfo_decisions_v2(
         db,
         company_id,
         consolidate=consolidate,
+        branch_id=branch_id or None,
         window=window,
         basis_type=basis_type,
         period=period,
@@ -3997,6 +3943,9 @@ def get_cfo_decisions_v2(
         logger.error("get_cfo_decisions_v2 error for %s: %s", company_id, _e, exc_info=True)
         raise HTTPException(status_code=500, detail=f"Decision engine error: {_e}")
 
+    cf_raw = build_cashflow(windowed) if windowed else {}
+    pv = _validate_pipeline(windowed, analysis, cf_raw)
+
     decisions_aug, realized_list, merged_templates = _augment_cfo_decision_pack_for_api(
         result, safe_lang, deep_intel=None, profit_intel=None
     )
@@ -4018,7 +3967,7 @@ def get_cfo_decisions_v2(
             "periods":           analysis.get("periods", []),
             "lang":              safe_lang,
             "currency":          company.currency or "",
-            "pipeline_validation": {},  # validation not run in this endpoint
+            "pipeline_validation": pv,
         },
     }
 
@@ -4041,6 +3990,7 @@ def get_root_causes(
     from_period: str = Query(default=""),
     to_period:   str = Query(default=""),
     consolidate: bool = Query(default=False, description="Same as GET /executive — branch consolidation"),
+    branch_id:   str  = Query(default="", description="Single-branch TB scope (same as GET /executive)"),
     db: Session = Depends(get_db),
 ):
     safe_lang = lang if lang in ("en", "ar", "tr") else "en"
@@ -4049,6 +3999,7 @@ def get_root_causes(
         db,
         company_id,
         consolidate=consolidate,
+        branch_id=branch_id or None,
         window=window,
         basis_type=basis_type,
         period=period,
@@ -4080,6 +4031,9 @@ def get_root_causes(
         n_periods    = analysis.get("period_count", 3),
     )
 
+    cf_raw = build_cashflow(windowed) if windowed else {}
+    pv = _validate_pipeline(windowed, analysis, cf_raw)
+
     return {
         "status":       "success",
         "company_id":   company_id,
@@ -4091,7 +4045,7 @@ def get_root_causes(
             "periods":           analysis.get("periods", []),
             "lang":              safe_lang,
             "currency":          company.currency or "",
-            "pipeline_validation": {},  # validation not run in this endpoint
+            "pipeline_validation": pv,
             "cfo_recommendations": dec_result.get("recommendations", []),
         },
     }
@@ -4202,7 +4156,8 @@ def get_executive(
     year_scope:  str = Query(default="", alias="year"),
     from_period: str = Query(default=""),
     to_period:   str = Query(default=""),
-    consolidate: bool = Query(default=False, description="true = derive from branch uploads"),
+    consolidate: bool = Query(default=False, description="true = merge all branch TBs per period"),
+    branch_id:   str  = Query(default="", description="single branch TB scope (mutually exclusive with consolidate)"),
     db: Session = Depends(get_db),
 ):
     """
@@ -4217,6 +4172,7 @@ def get_executive(
         db,
         company_id,
         consolidate=consolidate,
+        branch_id=branch_id or None,
         window=window,
         basis_type=basis_type,
         period=period,
@@ -4558,7 +4514,11 @@ def get_executive(
         "company_id":   company_id,
         "company_name": company.name,
         "currency":     company.currency or "",
-        "data_source":  "branch_consolidation" if consolidate else "direct_uploads",
+        "data_source": (
+            "branch_upload"
+            if (branch_id or "").strip()
+            else ("branch_consolidation" if consolidate else "direct_uploads")
+        ),
 
         "data": {
             **_structured_overlay,

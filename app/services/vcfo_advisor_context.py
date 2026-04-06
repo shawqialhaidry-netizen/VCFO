@@ -230,7 +230,9 @@ def build_advisor_context(
     # ── Branch context ────────────────────────────────────────────────────────
     branch_ctx: dict = {}
     try:
-        from app.models.branch import Branch, BranchFinancial
+        from app.api import branches as _branches_api
+        from app.models.branch import Branch
+
         branches_active = (
             db.query(Branch)
             .filter(Branch.company_id == company_id, Branch.is_active == True)
@@ -238,24 +240,26 @@ def build_advisor_context(
         )
         branch_summaries = []
         for b in branches_active:
-            bf = (
-                db.query(BranchFinancial)
-                .filter(BranchFinancial.branch_id == b.id)
-                .order_by(BranchFinancial.period.desc())
-                .first()
-            )
-            if bf:
-                b_rev = bf.revenue or 0
-                b_nm  = round(bf.net_profit / b_rev * 100, 2) if b_rev else None
-                branch_summaries.append({
-                    "branch_id":   b.id,
-                    "branch_name": b.name,
-                    "period":      bf.period,
-                    "revenue":     b_rev,
-                    "net_profit":  bf.net_profit,
-                    "net_margin":  b_nm,
-                    "is_loss":     (bf.net_profit or 0) < 0,
-                })
+            stmts_b = _branches_api._branch_statements_from_uploads(db, company_id, b.id)
+            if not stmts_b:
+                continue
+            last = stmts_b[-1]
+            is_ = last.get("income_statement") or {}
+            b_rev = float((is_.get("revenue") or {}).get("total") or 0)
+            npv = is_.get("net_profit")
+            b_np = float(npv) if npv is not None else 0.0
+            b_nm = is_.get("net_margin_pct")
+            if b_nm is None and b_rev:
+                b_nm = round(b_np / b_rev * 100, 2)
+            branch_summaries.append({
+                "branch_id":   b.id,
+                "branch_name": b.name,
+                "period":      last.get("period"),
+                "revenue":     b_rev,
+                "net_profit":  b_np,
+                "net_margin":  b_nm,
+                "is_loss":     b_np < 0,
+            })
         # Sort by revenue desc
         branch_summaries.sort(key=lambda x: -(x["revenue"] or 0))
         branch_ctx = {

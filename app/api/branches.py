@@ -16,9 +16,10 @@ Endpoints:
   GET    /companies/{company_id}/branch-comparison
          → ranking, top/bottom, margin comparison
 
-Branch financials are populated via the normal upload flow:
-  POST /uploads with branch_id form field → triggers branch_financial upsert
+Branch TB uploads: POST /uploads with branch_id → TrialBalanceUpload (+ legacy BranchFinancial upsert).
+Read APIs use canonical statements built from branch-scoped TB rows (not P&L-only synthesis).
 """
+import itertools
 import logging
 import uuid
 from datetime import datetime
@@ -40,6 +41,30 @@ from app.services.metric_definitions import cogs_ratio_pct, opex_ratio_pct, tota
 router = APIRouter(tags=["branches"])
 
 logger = logging.getLogger("vcfo.branches")
+
+
+def _branch_tb_uploads_query(db: Session, company_id: str, branch_id: str):
+    return (
+        db.query(TrialBalanceUpload)
+        .filter(
+            TrialBalanceUpload.company_id == company_id,
+            TrialBalanceUpload.branch_id == branch_id,
+            TrialBalanceUpload.status == "ok",
+        )
+        .order_by(TrialBalanceUpload.uploaded_at.asc())
+        .all()
+    )
+
+
+def _branch_statements_from_uploads(db: Session, company_id: str, branch_id: str) -> list[dict]:
+    """Canonical TB → statements for one branch (Phase 5 — no BranchFinancial synthesis)."""
+    from app.services.canonical_period_statements import build_branch_period_statements
+
+    uploads = _branch_tb_uploads_query(db, company_id, branch_id)
+    if not uploads:
+        return []
+    return build_branch_period_statements(company_id, branch_id, uploads)
+
 
 # Rolling windows — same vocabulary as company analysis / executive
 _VALID_BRANCH_WINDOWS = frozenset({"3M", "6M", "12M", "YTD", "ALL"})
@@ -300,91 +325,33 @@ def get_branch_financials(
         raise HTTPException(status_code=404, detail="Branch not found")
     require_active_membership(db, current_user.id, b.company_id)
 
-    financials = (
-        db.query(BranchFinancial)
-        .filter(BranchFinancial.branch_id == branch_id)
-        .order_by(BranchFinancial.period)
-        .all()
-    )
+    stmts = _branch_statements_from_uploads(db, b.company_id, branch_id)
+    financials_out: list[dict] = []
+    for s in stmts:
+        is_ = s.get("income_statement") or {}
+        bs = s.get("balance_sheet") or {}
+        rev = (is_.get("revenue") or {}).get("total")
+        npv = is_.get("net_profit")
+        financials_out.append(
+            {
+                "period":       s.get("period"),
+                "revenue":      rev,
+                "expenses":     (is_.get("expenses") or {}).get("total"),
+                "gross_profit": is_.get("gross_profit"),
+                "net_profit":   npv,
+                "total_assets": (bs.get("assets") or {}).get("total"),
+                "net_margin":   round(float(npv) / float(rev) * 100, 2)
+                if (rev is not None and float(rev) > 0 and npv is not None)
+                else None,
+            }
+        )
 
     return {
         "branch_id":   branch_id,
         "branch_name": b.name,
-        "periods":     [f.period for f in financials],
-        "financials":  [
-            {
-                "period":       f.period,
-                "revenue":      f.revenue,
-                "expenses":     f.expenses,
-                "gross_profit": f.gross_profit,
-                "net_profit":   f.net_profit,
-                "total_assets": f.total_assets,
-                "net_margin":   round(f.net_profit / f.revenue * 100, 2)
-                                if (f.revenue is not None and f.revenue > 0
-                                    and f.net_profit is not None) else None,
-            }
-            for f in financials
-        ],
-    }
-
-
-# ── Branch analysis helpers ───────────────────────────────────────────────────
-
-def _bf_to_stmt_dict(bf: "BranchFinancial") -> dict:
-    """
-    Convert a BranchFinancial row into a synthetic statement dict
-    compatible with analysis_engine.compute_ratios() and compute_trends().
-    Only the fields stored in branch_financials are populated.
-    BS-derived ratios (liquidity, leverage) will be None — that's correct.
-    """
-    rev  = bf.revenue    or 0.0
-    cogs = bf.cogs       or 0.0
-    gp   = bf.gross_profit if bf.gross_profit is not None else (rev - cogs)
-    exp  = bf.expenses   or 0.0
-    np_  = bf.net_profit if bf.net_profit is not None else (gp - exp)
-    ta   = bf.total_assets or 0.0
-
-    gm_pct = round(gp / rev * 100, 2) if rev > 0 else 0.0
-    nm_pct = round(np_ / rev * 100, 2) if rev > 0 else 0.0
-    op_    = gp - exp
-    om_pct = round(op_ / rev * 100, 2) if rev > 0 else 0.0
-    rv_f = rev if rev else None
-    ox_r = opex_ratio_pct(exp, rv_f)
-    cg_r = cogs_ratio_pct(cogs, rv_f)
-    tc_r = total_cost_ratio_pct(cogs, exp, rv_f, 0.0)
-
-    return {
-        "period": bf.period,
-        "company_id": bf.company_id,
-        "data_scope": "branch",
-        "branch_id": getattr(bf, "branch_id", None),
-        "income_statement": {
-            "revenue":          {"total": rev,  "items": []},
-            "cogs":             {"total": cogs, "items": []},
-            "gross_profit":     gp,
-            "gross_margin_pct": gm_pct,
-            "expenses":         {"total": exp, "items": []},
-            "unclassified_pnl_debits": {"items": [], "total": 0.0},
-            "operating_profit": op_,
-            "operating_margin_pct": om_pct,
-            "tax":              {"total": 0.0,  "items": []},
-            "net_profit":       np_,
-            "net_margin_pct":   nm_pct,
-            "opex_ratio_pct":       ox_r,
-            "cogs_ratio_pct":       cg_r,
-            "total_cost_ratio_pct": tc_r,
-            "expense_ratio_pct":    tc_r,
-        },
-        "balance_sheet": {
-            "assets":      {"total": ta, "items": []},
-            "liabilities": {"total": 0.0, "items": []},
-            "equity":      {"total": 0.0, "items": []},
-            "current_assets":      None,
-            "current_liabilities": None,
-            "working_capital":     None,
-            "total_assets":        ta,
-            "is_balanced":         False,
-        },
+        "periods":     [x["period"] for x in financials_out],
+        "financials":  financials_out,
+        "data_source": "branch_upload",
     }
 
 
@@ -404,11 +371,9 @@ def get_branch_analysis(
     current_user = Depends(get_current_user),
 ):
     """
-    Branch-level financial analysis using the existing analysis pipeline.
-
-    Converts BranchFinancial rows → synthetic statement dicts →
-    run_analysis() — same core as company path. Optional time window.
-    Additive: deep_intelligence, phase43_root_causes, cfo_decisions (financial brain V1).
+    Branch-level financial analysis using the same pipeline as company:
+    branch Trial Balance uploads → canonical statements → run_analysis().
+    Optional time window. Additive: deep_intelligence, phase43_root_causes, cfo_decisions.
     """
     from app.services.alerts_engine import build_alerts
     from app.services.analysis_engine                       import run_analysis
@@ -424,24 +389,17 @@ def get_branch_analysis(
 
     require_active_membership(db, current_user.id, b.company_id)
 
-    financials = (
-        db.query(BranchFinancial)
-        .filter(BranchFinancial.branch_id == branch_id)
-        .order_by(BranchFinancial.period)
-        .all()
-    )
+    stmts_all = _branch_statements_from_uploads(db, b.company_id, branch_id)
 
-    if not financials:
+    if not stmts_all:
         return {
             "branch_id":    branch_id,
             "branch_name":  b.name,
             "branch_code":  getattr(b, "code", None),
             "company_id":   b.company_id,
             "has_data":     False,
-            "message":      "No financial data uploaded for this branch yet.",
+            "message":      "No trial balance data uploaded for this branch yet.",
         }
-
-    stmts_all = [_bf_to_stmt_dict(f) for f in financials]
     stmts, _win = _scoped_branch_statements(
         stmts_all,
         window=window,
@@ -460,7 +418,7 @@ def get_branch_analysis(
 
     latest_stmt = stmts[-1]
     latest_is   = latest_stmt.get("income_statement", {})
-    latest_bf   = financials[-1]
+    latest_bs   = latest_stmt.get("balance_sheet") or {}
 
     rev  = latest_is.get("revenue",  {}).get("total", 0) or 0
     exp  = latest_is.get("expenses", {}).get("total", 0) or 0
@@ -636,10 +594,10 @@ def get_branch_analysis(
         "has_data":    True,
         "window":      _win,
         "period_count": len(stmts),
-        "total_periods_available": len(financials),
+        "total_periods_available": len(stmts_all),
         "periods":     [s.get("period") for s in stmts],
-        "all_periods": [f.period for f in financials],
-        "last_period": latest_stmt.get("period") or financials[-1].period,
+        "all_periods": [s.get("period") for s in stmts_all],
+        "last_period": latest_stmt.get("period"),
         "latest": {
             "revenue":             rev,
             "net_profit":          latest_is.get("net_profit"),
@@ -651,7 +609,7 @@ def get_branch_analysis(
             "total_cost_ratio_pct": tc_ratio,
             "opex_ratio_pct":       latest_is.get("opex_ratio_pct"),
             "cogs_ratio_pct":       latest_is.get("cogs_ratio_pct"),
-            "total_assets":        latest_bf.total_assets,
+            "total_assets":        (latest_bs.get("assets") or {}).get("total"),
         },
         "trends":   trends,
         "analysis": {
@@ -713,14 +671,9 @@ def get_branch_drill_down(
 
     require_active_membership(db, current_user.id, branch.company_id)
 
-    financials = (
-        db.query(BranchFinancial)
-        .filter(BranchFinancial.branch_id == branch_id)
-        .order_by(BranchFinancial.period)
-        .all()
-    )
+    stmts = _branch_statements_from_uploads(db, branch.company_id, branch_id)
 
-    if not financials:
+    if not stmts:
         return {
             "branch_id":   branch_id,
             "branch_name": branch.name,
@@ -730,9 +683,6 @@ def get_branch_drill_down(
             "has_data":    False,
             "status":      "active" if branch.is_active else "inactive",
         }
-
-    # ── Build synthetic statements (branch-only — no company data) ────────────
-    stmts = [_bf_to_stmt_dict(f) for f in financials]
 
     # ── Core analysis (reuse locked engine) ──────────────────────────────────
     analysis = run_analysis(stmts)
@@ -747,7 +697,7 @@ def get_branch_drill_down(
     _tc_r     = last_is.get("total_cost_ratio_pct")
     exp_ratio = _tc_r if _tc_r is not None else (round(exp_total / rev * 100, 2) if rev > 0 else None)
 
-    # Operating cashflow — branch-only via build_cashflow (safe on synthetic stmts)
+    # Operating cashflow — branch-only via build_cashflow (canonical stmts)
     ocf = None
     try:
         cf_raw = build_cashflow(stmts)
@@ -853,7 +803,7 @@ def get_branch_drill_down(
         # Branch bundle from the same statement dicts used in this endpoint
         branch_bundle = build_expense_intelligence_bundle(stmts, lang=safe_lang)
 
-        # Company bundle for contribution + comparative context (prefer consolidated from branches)
+        # Company bundle for contribution + comparative context (TB-level branch consolidation)
         cons = _build_consolidated_statements(branch.company_id, db) or []
         periods_union = set(s.get("period") for s in stmts if s.get("period"))
         if periods_union:
@@ -870,21 +820,10 @@ def get_branch_drill_down(
         )
         branch_bundles = []
         for b2 in branches_active:
-            # Drill-down uses BranchFinancial-derived synthetic statements.
-            # For comparative signals we only need consistent by_period totals/ratios/categories.
             if str(b2.id) == str(branch.id):
                 stmts_b = stmts
             else:
-                # Best-effort: use BranchFinancial synthetic statements if present
-                bfs = (
-                    db.query(BranchFinancial)
-                    .filter(BranchFinancial.branch_id == b2.id)
-                    .order_by(BranchFinancial.period)
-                    .all()
-                )
-                if not bfs:
-                    continue
-                stmts_b = [_bf_to_stmt_dict(f) for f in bfs]
+                stmts_b = _branch_statements_from_uploads(db, branch.company_id, b2.id)
                 if periods_union:
                     stmts_b = [s for s in stmts_b if s.get("period") in periods_union]
             if not stmts_b:
@@ -1202,15 +1141,12 @@ def branch_comparison(
     all_periods_union: set[str] = set()
 
     for b in branches:
-        financials = (
-            db.query(BranchFinancial)
-            .filter(BranchFinancial.branch_id == b.id)
-            .order_by(BranchFinancial.period)
-            .all()
-        )
-        branch_rows.append((b, financials))
-        for f in financials:
-            all_periods_union.add(f.period)
+        stmts_full = _branch_statements_from_uploads(db, company_id, b.id)
+        branch_rows.append((b, stmts_full))
+        for s in stmts_full:
+            p = s.get("period")
+            if p:
+                all_periods_union.add(p)
 
     _win = (window or "ALL").strip().upper()
     if _win not in _VALID_BRANCH_WINDOWS:
@@ -1231,13 +1167,13 @@ def branch_comparison(
             raise HTTPException(status_code=400, detail=scope22["error"])
         active_months = set(scope22.get("months") or [])
 
-    # Gather financials for all branches (same order as branch_rows)
+    # Gather canonical statements for all branches (same order as branch_rows)
     branch_data = []
     active_periods_union: set[str] = set()
 
-    for b, financials in branch_rows:
+    for b, stmts_full in branch_rows:
 
-        if not financials:
+        if not stmts_full:
             branch_data.append({
                 "branch_id":   b.id,
                 "branch_name": b.name,
@@ -1246,52 +1182,49 @@ def branch_comparison(
             })
             continue
 
-        # Apply scope or rolling window — convert to period-keyed dicts (same shape as before)
-        _all_periods_list = [
-            {"period": f.period,
-             "income_statement": {"revenue": {"total": f.revenue or 0.0},
-                                  "net_profit": f.net_profit or 0.0,
-                                  "gross_profit": f.gross_profit or 0.0,
-                                  "expenses": {"total": f.expenses or 0.0},
-                                  "cogs": {"total": f.cogs or 0.0}},
-             "_bf": f}
-            for f in financials
-        ]
         if active_months is not None:
-            _windowed_list = [item for item in _all_periods_list if item["period"] in active_months]
+            _windowed_list = [s for s in stmts_full if s.get("period") in active_months]
         else:
-            _windowed_list = _fp(_all_periods_list, _win)
-        _windowed_bf = [item["_bf"] for item in _windowed_list]
-        if not _windowed_bf:
-            _windowed_bf = [financials[-1]]   # fallback: at least latest
+            _windowed_list = _fp(stmts_full, _win)
+        if not _windowed_list:
+            _windowed_list = [stmts_full[-1]]
 
-        for _bf in _windowed_bf:
-            active_periods_union.add(_bf.period)
+        def _stmt_rev(s):
+            return float((s.get("income_statement") or {}).get("revenue", {}).get("total") or 0)
 
-        latest   = _windowed_bf[-1]
-        prev_rev = _windowed_bf[-2].revenue if len(_windowed_bf) >= 2 else None
-        mom_rev  = _safe_pct(latest.revenue, prev_rev)
+        def _stmt_np(s):
+            v = (s.get("income_statement") or {}).get("net_profit")
+            return float(v) if v is not None else 0.0
 
-        total_rev = sum(f.revenue or 0.0 for f in _windowed_bf)
-        total_np  = sum(f.net_profit or 0.0 for f in _windowed_bf)
+        for s in _windowed_list:
+            p = s.get("period")
+            if p:
+                active_periods_union.add(p)
 
-        avg_margin = None
-        margin_pts = [
-            (f.net_profit / f.revenue * 100)
-            for f in _windowed_bf
-            if f.revenue is not None and f.revenue > 0 and f.net_profit is not None
-        ]
-        if margin_pts:
-            avg_margin = round(sum(margin_pts) / len(margin_pts), 2)
+        latest = _windowed_list[-1]
+        lat_is = latest.get("income_statement") or {}
+        prev_rev = _stmt_rev(_windowed_list[-2]) if len(_windowed_list) >= 2 else None
+        mom_rev = _safe_pct(_stmt_rev(latest), prev_rev)
 
-        # latest net_margin — safe: revenue is always abs() from upsert
-        latest_net_margin = None
-        if latest.revenue is not None and latest.revenue > 0 and latest.net_profit is not None:
-            latest_net_margin = round(latest.net_profit / latest.revenue * 100, 2)
+        total_rev = sum(_stmt_rev(s) for s in _windowed_list)
+        total_np = sum(_stmt_np(s) for s in _windowed_list)
 
-        _rv = float(latest.revenue or 0)
-        _cg = float(latest.cogs or 0)
-        _ex = float(latest.expenses or 0)
+        margin_pts = []
+        for s in _windowed_list:
+            is_ = s.get("income_statement") or {}
+            r = (is_.get("revenue") or {}).get("total")
+            npv = is_.get("net_profit")
+            if r is not None and float(r) > 0 and npv is not None:
+                margin_pts.append(float(npv) / float(r) * 100)
+        avg_margin = round(sum(margin_pts) / len(margin_pts), 2) if margin_pts else None
+
+        latest_net_margin = lat_is.get("net_margin_pct")
+        _rv = _stmt_rev(latest)
+        if latest_net_margin is None and _rv > 0 and lat_is.get("net_profit") is not None:
+            latest_net_margin = round(float(lat_is["net_profit"]) / _rv * 100, 2)
+
+        _cg = float((lat_is.get("cogs") or {}).get("total") or 0)
+        _ex = float((lat_is.get("expenses") or {}).get("total") or 0)
         _rvf = _rv if _rv else None
         _opex_l = opex_ratio_pct(_ex, _rvf)
         _cogs_l = cogs_ratio_pct(_cg, _rvf)
@@ -1304,12 +1237,12 @@ def branch_comparison(
             "code":            getattr(b, "code", None),
             "city":            b.city,
             "has_data":        True,
-            "period_count":    len(_windowed_bf),
-            "latest_period":   latest.period,
-            "revenue":         latest.revenue,
-            "cogs":            latest.cogs,
-            "expenses":        latest.expenses,
-            "net_profit":      latest.net_profit,
+            "period_count":    len(_windowed_list),
+            "latest_period":   latest.get("period"),
+            "revenue":         (lat_is.get("revenue") or {}).get("total"),
+            "cogs":            (lat_is.get("cogs") or {}).get("total"),
+            "expenses":        (lat_is.get("expenses") or {}).get("total"),
+            "net_profit":      lat_is.get("net_profit"),
             "net_margin":      latest_net_margin,
             "total_revenue":   round(total_rev, 2),
             "total_net_profit": round(total_np, 2),
@@ -1527,7 +1460,7 @@ def get_branch_intelligence(
 ):
     """
     CFO-grade branch intelligence.
-    Reuses _bf_to_stmt_dict → run_analysis → compute_trends per branch.
+    Canonical branch TB statements → run_analysis → compute_trends per branch.
     Adds rankings, classifications, per-branch profiles, insights, CFO actions.
     """
     from app.services.analysis_engine import run_analysis, compute_trends
@@ -1682,13 +1615,8 @@ def get_branch_intelligence(
     all_periods: set = set()
 
     for b in branches:
-        financials = (
-            db.query(BranchFinancial)
-            .filter(BranchFinancial.branch_id == b.id)
-            .order_by(BranchFinancial.period)
-            .all()
-        )
-        if not financials:
+        stmts = _branch_statements_from_uploads(db, company_id, b.id)
+        if not stmts:
             branch_profiles.append({
                 "branch_id":   b.id,
                 "branch_name": b.name,
@@ -1699,15 +1627,14 @@ def get_branch_intelligence(
             })
             continue
 
-        for f in financials:
-            all_periods.add(f.period)
+        for s in stmts:
+            p = s.get("period")
+            if p:
+                all_periods.add(p)
 
-        # Reuse existing synthetic stmt builder + analysis engines
-        stmts    = [_bf_to_stmt_dict(f) for f in financials]
         analysis = run_analysis(stmts)
         trends   = compute_trends(stmts)
 
-        latest   = financials[-1]
         lat_is   = stmts[-1].get("income_statement", {})
         rev      = lat_is.get("revenue",  {}).get("total",  0) or 0
         exp      = lat_is.get("expenses", {}).get("total",  0) or 0
@@ -1718,27 +1645,32 @@ def get_branch_intelligence(
         om_pct   = lat_is.get("operating_margin_pct", 0) or 0
         exp_ratio = _r2(exp / rev * 100) if rev > 0 else None
 
-        # Aggregates across all periods
-        rev_series = [f.revenue    or 0 for f in financials]
-        np_series  = [f.net_profit or 0 for f in financials]
-        n          = len(financials)
+        rev_series = [
+            float((x.get("income_statement") or {}).get("revenue", {}).get("total") or 0)
+            for x in stmts
+        ]
+        np_series = [
+            float((x.get("income_statement") or {}).get("net_profit") or 0)
+            for x in stmts
+        ]
+        n          = len(stmts)
         avg_rev    = _r2(sum(rev_series) / n)
         avg_np     = _r2(sum(np_series)  / n)
-        nm_pts     = [
-            f.net_profit / f.revenue * 100
-            for f in financials
-            if f.revenue and f.revenue > 0 and f.net_profit is not None
-        ]
+        nm_pts     = []
+        for x in stmts:
+            is_ = x.get("income_statement") or {}
+            r = (is_.get("revenue") or {}).get("total")
+            npv = is_.get("net_profit")
+            if r is not None and float(r) > 0 and npv is not None:
+                nm_pts.append(float(npv) / float(r) * 100)
         avg_nm_pct = _r2(sum(nm_pts) / len(nm_pts)) if nm_pts else None
 
-        # MoM growth from trends
         mom_rev = trends.get("revenue_mom_pct") or trends.get("revenue_mom") or []
         last_mom = next((x for x in reversed(mom_rev) if x is not None), None)
 
-        # Consecutive positive/negative MoM (for insight rules)
         mom_vals = [x for x in mom_rev if x is not None]
-        consec_positive = sum(1 for _ in __import__('itertools').takewhile(lambda x: x > 0, reversed(mom_vals)))
-        consec_negative = sum(1 for _ in __import__('itertools').takewhile(lambda x: x < 0, reversed(mom_vals)))
+        consec_positive = sum(1 for _ in itertools.takewhile(lambda x: x > 0, reversed(mom_vals)))
+        consec_negative = sum(1 for _ in itertools.takewhile(lambda x: x < 0, reversed(mom_vals)))
 
         branch_profiles.append({
             "branch_id":    b.id,
@@ -1748,8 +1680,8 @@ def get_branch_intelligence(
             "city":         b.city,
             "has_data":     True,
             "period_count": n,
-            "latest_period": latest.period,
-            "periods":      [f.period for f in financials],
+            "latest_period": stmts[-1].get("period"),
+            "periods":      [x.get("period") for x in stmts],
 
             "kpis": {
                 "revenue":              _r2(rev),
@@ -2198,11 +2130,9 @@ def get_company_executive(
             .filter(Branch.company_id == company_id, Branch.is_active == True).all())  # noqa
         profiles = []
         for b in branches:
-            fins = (db.query(BranchFinancial)
-                .filter(BranchFinancial.branch_id == b.id)
-                .order_by(BranchFinancial.period).all())
-            p = _build_branch_profile_for_portfolio(b, fins)
-            if p: profiles.append(p)
+            p = _build_branch_profile_for_portfolio(db, b)
+            if p:
+                profiles.append(p)
 
         if profiles:
             total_rev_b = sum(p["kpis"]["revenue"] or 0 for p in profiles)
@@ -2373,18 +2303,15 @@ def get_portfolio_intelligence(
     # ── Build branch profiles using internal shared helper ────────────────────
     profiles = []
     for b in branches:
-        financials = (
-            db.query(BranchFinancial)
-            .filter(BranchFinancial.branch_id == b.id)
-            .order_by(BranchFinancial.period)
-            .all()
-        )
-        p = _build_branch_profile_for_portfolio(b, financials)
+        p = _build_branch_profile_for_portfolio(db, b)
         if p:
             profiles.append(p)
 
     if not profiles:
-        raise HTTPException(422, "No financial data uploaded yet (branch financials).")
+        raise HTTPException(
+            422,
+            "No trial balance data uploaded yet for any branch. Upload TBs with a branch selected.",
+        )
 
     # ── Portfolio totals ──────────────────────────────────────────────────────
     total_revenue = sum(p["kpis"]["revenue"] or 0 for p in profiles)
@@ -2498,21 +2425,19 @@ def _r2(x):
     except Exception:
         return None
 
-def _build_branch_profile_for_portfolio(b: "Branch", financials: list) -> dict | None:
+def _build_branch_profile_for_portfolio(db: Session, b: "Branch") -> dict | None:
     """
-    Shared internal builder: produces a minimal branch profile dict
-    for portfolio aggregation. Does NOT call get_branch_intelligence().
-    Returns None if no financials.
+    Shared internal builder: minimal branch profile for portfolio aggregation
+    from canonical branch TB statements. Does NOT call get_branch_intelligence().
     """
     from app.services.analysis_engine import run_analysis, compute_trends
-    import itertools
-    if not financials:
+
+    stmts = _branch_statements_from_uploads(db, b.company_id, b.id)
+    if not stmts:
         return None
-    stmts = [_bf_to_stmt_dict(f) for f in financials]
     analysis = run_analysis(stmts)
     trends   = compute_trends(stmts)
 
-    latest = financials[-1]
     lat_is = stmts[-1].get("income_statement", {})
     rev    = lat_is.get("revenue",  {}).get("total", 0) or 0
     exp    = lat_is.get("expenses", {}).get("total", 0) or 0
@@ -2527,8 +2452,14 @@ def _build_branch_profile_for_portfolio(b: "Branch", financials: list) -> dict |
     c_neg = sum(1 for _ in itertools.takewhile(lambda x: x < 0, reversed(mom_vals)))
     last_mom = mom_vals[-1] if mom_vals else None
 
-    rev_series = [f.revenue    or 0 for f in financials]
-    np_series  = [f.net_profit or 0 for f in financials]
+    rev_series = [
+        float((x.get("income_statement") or {}).get("revenue", {}).get("total") or 0)
+        for x in stmts
+    ]
+    np_series = [
+        float((x.get("income_statement") or {}).get("net_profit") or 0)
+        for x in stmts
+    ]
 
     return {
         "branch_id":       b.id,
@@ -2536,8 +2467,8 @@ def _build_branch_profile_for_portfolio(b: "Branch", financials: list) -> dict |
         "name_ar":         b.name_ar,
         "city":            b.city,
         "is_active":       b.is_active,
-        "period_count":    len(financials),
-        "latest_period":   latest.period,
+        "period_count":    len(stmts),
+        "latest_period":   stmts[-1].get("period"),
         "kpis": {
             "revenue":        _r2(rev),
             "net_profit":     _r2(np_),
