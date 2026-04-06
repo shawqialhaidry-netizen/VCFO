@@ -19,12 +19,24 @@ const PAGE_TITLE_KEYS = {
   '/settings':   'nav_settings',
 }
 
+const ANALYSIS_PATHS = new Set([
+  '/analysis',
+  '/revenue',
+  '/expenses',
+  '/profitability',
+  '/cash',
+  '/decisions',
+  '/alerts',
+  '/forecast',
+])
+
 function titleKeyForPath(pathname) {
   if (!pathname) return 'nav_command_center'
   if (pathname === '/') return 'nav_command_center'
-  if (pathname.startsWith('/analysis')) return 'nav_drill_analysis'
+  const base = pathname.split('?')[0] || pathname
+  if (base.startsWith('/analysis') || ANALYSIS_PATHS.has(base)) return 'nav_drill_analysis'
   if (pathname.startsWith('/branches')) return 'nav_drill_branches'
-  return PAGE_TITLE_KEYS[pathname] || 'nav_command_center'
+  return PAGE_TITLE_KEYS[pathname] || PAGE_TITLE_KEYS[base] || 'nav_command_center'
 }
 
 export default function HeaderBar({ onOpenSidebar, onOpenCfo }) {

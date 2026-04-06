@@ -132,7 +132,7 @@ export default function Statements() {
   const TABS = [
     { k: 'income', label: tr('stmt_section_is') },
     { k: 'balance', label: tr('stmt_section_bs') },
-    { k: 'cash', label: tr('cashflow_operating') },
+    { k: 'cash', label: tr('stmt_section_cf') },
   ]
 
   if (!selectedId) {
@@ -155,7 +155,7 @@ export default function Statements() {
 
   return (
     <div
-      className="stmt-premium"
+      className="stmt-premium statements-page-root"
       style={{
         padding: '20px 24px 32px',
         minHeight: 'calc(100vh - 62px)',
@@ -322,7 +322,7 @@ export default function Statements() {
 
       {loading && !data && (
         <div style={{ maxWidth: 1200, margin: '0 auto', padding: 32, color: 'rgba(196,204,214,0.5)', fontSize: 13 }}>
-          …
+          {tr('stmt_loading')}
         </div>
       )}
 
@@ -439,7 +439,7 @@ export default function Statements() {
           </div>
 
           {/* MAIN STATEMENT AREA */}
-          <div style={{ width: '100%' }}>
+          <div className="statements-workspace" style={{ width: '100%' }}>
             {tab === 'income' && stmtH.income_statement && (
               <StatementHierarchyTree root={stmtH.income_statement} tr={tr} lang={lang} mode="income" />
             )}

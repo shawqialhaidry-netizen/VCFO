@@ -3,6 +3,7 @@ import './styles/commandCenterAppShell.css'
 import { useState } from 'react'
 import { useAuth } from './context/AuthContext.jsx'
 import { useCompany } from './context/CompanyContext.jsx'
+import { useLang } from './context/LangContext.jsx'
 import SessionExpiredBanner from './components/SessionExpiredBanner.jsx'
 import Sidebar from './components/Sidebar.jsx'
 import HeaderBar from './components/HeaderBar.jsx'
@@ -22,31 +23,31 @@ import CfoPanel from './components/CfoPanel.jsx'
 // Shown to analysts and viewers when the company trial has expired.
 // Owners bypass this and can still access /members and /settings.
 function TrialExpiredWall({ logout }) {
+  const { tr } = useLang()
   return (
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column',
       alignItems: 'center', justifyContent: 'center', background: '#0B0F14',
       padding: 24, gap: 20, textAlign: 'center' }}>
       <div style={{ fontSize: 48, opacity: .25 }}>⛔</div>
       <div style={{ fontSize: 22, fontWeight: 800, color: '#ffffff' }}>
-        Your trial has ended
+        {tr('trial_wall_title')}
       </div>
       <div style={{ fontSize: 14, color: '#aab4c3', maxWidth: 380, lineHeight: 1.6 }}>
-        Your company's trial period has expired. Please contact your account owner or
-        reach out to us to continue using VCFO.
+        {tr('trial_wall_body')}
       </div>
       <div style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>
-        Your data is safe and preserved.
+        {tr('trial_wall_data_safe')}
       </div>
       <div style={{ display: 'flex', gap: 12, marginTop: 8 }}>
         <a href="mailto:support@vcfo.io" style={{
           padding: '10px 24px', borderRadius: 9, background: '#00d4aa',
           color: '#000', fontWeight: 700, fontSize: 13, textDecoration: 'none',
-        }}>Contact Support</a>
-        <button onClick={logout} style={{
+        }}>{tr('trial_wall_contact_support')}</a>
+        <button type="button" onClick={logout} style={{
           padding: '10px 24px', borderRadius: 9, border: '1px solid rgba(255,255,255,.15)',
           background: 'transparent', color: '#aab4c3', fontWeight: 600, fontSize: 13,
           cursor: 'pointer',
-        }}>Log out</button>
+        }}>{tr('trial_wall_logout')}</button>
       </div>
     </div>
   )

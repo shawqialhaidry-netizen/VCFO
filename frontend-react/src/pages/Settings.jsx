@@ -81,7 +81,7 @@ export default function Settings() {
             <span style={s.label}>{tr('settings_trial_ends')}</span>
             <span style={{ ...s.value, color: planColor }}>
               {fmtDate(trialEndsAt)}
-              {trialDaysLeft !== null && !isTrialExpired && ` (${trialDaysLeft}d left)`}
+              {trialDaysLeft !== null && !isTrialExpired && ` ${tr('settings_trial_short_days_left', { n: trialDaysLeft })}`}
             </span>
           </div>
         )}
@@ -92,13 +92,16 @@ export default function Settings() {
             <div style={{ padding: '12px 16px', borderRadius: 8, background: 'rgba(248,113,113,.06)',
               border: '1px solid rgba(248,113,113,.2)', fontSize: 12, color: 'var(--red)',
               marginBottom: 12 }}>
-              ⛔ Your trial has expired. Contact us to restore access.
+              ⛔ {tr('settings_trial_expired_notice')}
             </div>
           ) : isTrial ? (
             <div style={{ padding: '12px 16px', borderRadius: 8, background: 'rgba(251,191,36,.06)',
               border: '1px solid rgba(251,191,36,.2)', fontSize: 12, color: '#fbbf24',
               marginBottom: 12 }}>
-              ⏱ {trialDaysLeft !== null ? `${trialDaysLeft} days remaining in your trial.` : 'Trial active.'}
+              ⏱{' '}
+              {trialDaysLeft !== null
+                ? tr('settings_trial_days_remaining', { n: trialDaysLeft })
+                : tr('settings_trial_active')}
             </div>
           ) : null}
           <a href="mailto:sales@vcfo.io" style={{

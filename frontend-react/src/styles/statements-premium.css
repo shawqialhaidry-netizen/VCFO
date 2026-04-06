@@ -46,3 +46,47 @@
     column-gap: 10px;
   }
 }
+
+/* Structural (i18n) vs source (ledger) row labels — accounting-safe readability */
+.stmt-premium-grid.stmt-row--structural .stmt-row-label-cell {
+  border-inline-start: 3px solid rgba(136, 166, 255, 0.42);
+  padding-inline-start: 10px;
+  margin-inline-start: -2px;
+}
+.stmt-premium-grid.stmt-row--source .stmt-row-label-cell {
+  border-inline-start: 3px solid rgba(148, 163, 184, 0.22);
+  padding-inline-start: 10px;
+  margin-inline-start: -2px;
+  font-variant-numeric: normal;
+}
+
+/* Nested statement lines — read like a real hierarchy */
+.stmt-hier-children {
+  padding-inline-start: 12px;
+  margin-inline-start: 10px;
+  border-inline-start: 2px solid rgba(255, 255, 255, 0.07);
+}
+
+.stmt-bs-section-heading {
+  padding: 12px 22px 8px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(136, 166, 255, 0.78);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  margin-bottom: 4px;
+}
+
+.stmt-bs-group + .stmt-bs-group {
+  margin-top: 2px;
+}
+
+/* Tier hints (amount column rhythm; labels are mostly inline-styled) */
+.stmt-premium-grid.stmt-tier-ledger {
+  opacity: 0.97;
+}
+
+.statements-workspace {
+  width: 100%;
+}

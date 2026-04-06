@@ -14,6 +14,7 @@ import { useNavigate } from 'react-router-dom'
 import { useLang }        from '../context/LangContext.jsx'
 import { useCompany }     from '../context/CompanyContext.jsx'
 import { usePeriodScope } from '../context/PeriodScopeContext.jsx'
+import { useDeferredMount } from '../hooks/useDeferredMount.js'
 import { kpiContextLabel, kpiLabel } from '../utils/kpiContext.js'
 import {
   formatCompactForLang,
@@ -1032,6 +1033,7 @@ export default function ExecutiveDashboard() {
   const navigate = useNavigate()
   const [impacts, setImpacts] = useState({})
   const [narrative, setNarrative] = useState(null)
+  const heavyReady = useDeferredMount({ idle: true, timeoutMs: 1200 })
   const ctxLabel = () =>
     kpiContextLabel({
       window: win,
@@ -1200,7 +1202,11 @@ export default function ExecutiveDashboard() {
       {/* FIX-4.3: Data quality banner */}
       <DataQualityBanner validation={main?.pipeline_validation} lang={lang} tr={tr}/>
       {main ? (
-        <StructuredFinancialLayers data={main} tr={tr} lang={lang} variant="command" />
+        heavyReady ? (
+          <StructuredFinancialLayers data={main} tr={tr} lang={lang} variant="command" />
+        ) : (
+          <div style={{height: 78, borderRadius: 14, border: `1px solid ${T.border}`, background: 'rgba(255,255,255,0.02)'}} />
+        )
       ) : null}
       <TopBar tr={tr} lang={lang} health={health} status={status}
         companyName={selectedCompany?.name}
@@ -1216,15 +1222,15 @@ export default function ExecutiveDashboard() {
       {main && <ExecutiveKpiRow kpis={kpis} cashflow={main.cashflow||{}} main={main} tr={tr} lang={lang}
         alerts={alerts} onSelect={open} ctxLabel={ctxLabel}/>}
 
-      {intel && <DomainGrid intelligence={intel} tr={tr} lang={lang}
+      {heavyReady && intel && <DomainGrid intelligence={intel} tr={tr} lang={lang}
         rootCauses={causes} decisions={decs} onSelect={open}/>}
 
       {/* Root Causes — shown only when causes exist */}
-      {causes?.length>0 && <RootCausesStrip causes={causes} tr={tr} lang={lang} onSelect={open}/>}
+      {heavyReady && causes?.length>0 && <RootCausesStrip causes={causes} tr={tr} lang={lang} onSelect={open}/>}
 
-      <KeyInsightsStrip stmtInsights={main?.stmtInsights} decisions={decs} fcData={fcData} lang={lang} tr={tr}/>
+      {heavyReady && <KeyInsightsStrip stmtInsights={main?.stmtInsights} decisions={decs} fcData={fcData} lang={lang} tr={tr}/>}
 
-      <AlertsBar alerts={alerts} tr={tr} lang={lang} onSelect={open}/>
+      {heavyReady && <AlertsBar alerts={alerts} tr={tr} lang={lang} onSelect={open}/>}
 
       {pType && <ContextPanel type={pType} payload={pLoad} extra={pXtra} impacts={impacts}
         tr={tr} lang={lang} onClose={close}

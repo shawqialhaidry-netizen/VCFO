@@ -5,10 +5,13 @@
  * Replaces silent API failures with a clear user prompt.
  *
  * Props:
- *   onLogin: () => void — called when user clicks "Log In"
+ *   onLogin: () => void — called when user taps sign-in
  *                         (should clear auth and navigate to login)
  */
+import { useLang } from '../context/LangContext.jsx'
+
 export default function SessionExpiredBanner({ onLogin }) {
+  const { tr } = useLang()
   return (
     <div style={{
       position:       'fixed',
@@ -25,10 +28,11 @@ export default function SessionExpiredBanner({ onLogin }) {
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
         <span style={{ fontSize: 16 }}>⚠</span>
         <span style={{ fontSize: 13, color: '#fca5a5', fontWeight: 600 }}>
-          Your session has expired. Please log in again.
+          {tr('session_expired_banner')}
         </span>
       </div>
       <button
+        type="button"
         onClick={onLogin}
         style={{
           background:   '#f87171',
@@ -42,7 +46,7 @@ export default function SessionExpiredBanner({ onLogin }) {
           flexShrink:   0,
         }}
       >
-        Log In
+        {tr('session_expired_login')}
       </button>
     </div>
   )

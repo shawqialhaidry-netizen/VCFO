@@ -36,10 +36,15 @@ export function localizedMissingPlaceholder(lang) {
   return loc === 'ar' ? '[؟]' : loc === 'tr' ? '[?]' : '[?]'
 }
 
+/** Translation *values* that look like unresolved keys — never show as visible UI copy in any locale */
 export function looksLikeRawI18nKey(v) {
   if (typeof v !== 'string') return false
   const t = v.trim()
-  return /^(exec_|cmd_|nav_|dq_|kpi_label_|kpi_explain_|tab_|ratio_|domain_signal_|narr_|drill_intel_|drill_sig_|ai_cfo_|loc_)[a-z0-9_]+$/i.test(t)
+  return (
+    /^(exec_|cmd_|nav_|dq_|kpi_|tab_|ratio_|domain_signal_|narr_|drill_|ai_cfo_|loc_|stmt_|gen_|cashflow_|app_|upload_|login_|tb_|cfo_|validation_|mapped_|period_|forecast_|analysis_|branch_|trial_|search_|health_|company_|data_|board_|members_|settings_|plan_|role_|hint_|api_|session_|trial_wall_|i18n_|fmt_)[a-z0-9_]+$/i.test(
+      t
+    )
+  )
 }
 
 function invalidTranslation(key, val) {

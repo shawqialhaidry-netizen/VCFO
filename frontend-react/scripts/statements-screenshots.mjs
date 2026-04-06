@@ -131,7 +131,7 @@ try {
   await page.waitForTimeout(600)
   await snapStatements(page, '02-balance.png')
 
-  await page.getByRole('button', { name: 'Cash Flow' }).click()
+  await page.getByRole('button', { name: 'Cash Flow Statement' }).click()
   await page.waitForTimeout(600)
   await snapStatements(page, '03-cash.png')
 

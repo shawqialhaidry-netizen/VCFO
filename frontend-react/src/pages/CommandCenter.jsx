@@ -9,6 +9,7 @@ import '../styles/commandCenterChromeImport.css'
 import '../styles/commandCenterOS.css'
 import '../styles/commandCenterCinematic.css'
 import { useCountUp } from '../hooks/useCountUp.js'
+import { useDeferredMount } from '../hooks/useDeferredMount.js'
 import { useNavigate } from 'react-router-dom'
 import { useLang }        from '../context/LangContext.jsx'
 import { useAuth }        from '../context/AuthContext.jsx'
@@ -2184,6 +2185,9 @@ export default function CommandCenter() {
   const [bridgeSelKey, setBridgeSelKey] = useState(null)
   const [intelActiveTile, setIntelActiveTile] = useState(null)
 
+  // Defer expensive charts / composites until after first paint/idle.
+  const heavyReady = useDeferredMount({ idle: true, timeoutMs: 1400 })
+
   const drillAnalysis = useCallback(
     (tab) => {
       const { path, focus } = pathForDrillAnalysisTab(tab || 'overview')
@@ -2526,73 +2530,84 @@ export default function CommandCenter() {
               }
               mainCharts={
                 main ? (
-                  <>
-                    <CommandCenterTripleTrendChart
-                      kpiBlock={main.kpi_block}
-                      tr={tr}
-                      lang={lang}
-                      cinematic
-                    />
-                    <div className="cmd-cine-intel-zone">
-                      <CommandCenterIntelligenceMosaic
-                        activeTile={intelActiveTile}
-                        onToggle={handleIntelTileToggle}
-                        main={main}
-                        fcData={fcData}
-                        forecastReady={intelForecastReady}
-                        forecastPrimaryMetric={intelForecastPrimaryMetric}
-                        alertCount={intelAlertCount}
-                        liquidityHint={intelLiquidityHint}
-                        liquidityScore={intelLiquidityScore}
-                        efficiencyScore={intelEfficiencyScore}
-                        efficiencyHint={intelEfficiencyHint}
-                        riskScore={intelRiskScore}
-                        highAlertCount={intelHighAlertCount}
-                        tileDigestSubs={intelTileDigestSubs}
+                  heavyReady ? (
+                    <>
+                      <CommandCenterTripleTrendChart
+                        kpiBlock={main.kpi_block}
                         tr={tr}
                         lang={lang}
+                        cinematic
                       />
-                      {intelActiveTile ? (
-                        <CommandCenterIntelligenceExpanded
-                          key={intelActiveTile}
-                          tileId={intelActiveTile}
-                          onClose={closeIntelExpanded}
+                      <div className="cmd-cine-intel-zone">
+                        <CommandCenterIntelligenceMosaic
+                          activeTile={intelActiveTile}
+                          onToggle={handleIntelTileToggle}
+                          main={main}
+                          fcData={fcData}
+                          forecastReady={intelForecastReady}
+                          forecastPrimaryMetric={intelForecastPrimaryMetric}
+                          alertCount={intelAlertCount}
+                          liquidityHint={intelLiquidityHint}
+                          liquidityScore={intelLiquidityScore}
+                          efficiencyScore={intelEfficiencyScore}
+                          efficiencyHint={intelEfficiencyHint}
+                          riskScore={intelRiskScore}
+                          highAlertCount={intelHighAlertCount}
+                          tileDigestSubs={intelTileDigestSubs}
                           tr={tr}
                           lang={lang}
-                          main={main}
-                          intel={intel}
-                          alerts={alerts}
-                          fcData={fcData}
-                          kpis={kpis}
-                          decs={decs}
-                          primaryResolution={primaryResolution}
-                          expenseIntel={expenseIntel}
-                          health={health}
-                          impacts={impacts}
-                          narrative={narrative}
-                          bridgeSelKey={bridgeSelKey}
-                          onBridgeSegment={(pl) => open('profit_bridge_segment', pl)}
                         />
-                      ) : null}
-                    </div>
-                    <div className="cmd-cine-split-charts">
-                      <ExecutiveKpiTrendChart
-                        kpiBlock={main.kpi_block}
-                        cashflow={main.cashflow}
-                        kpiType="net_margin"
-                        tr={tr}
-                        lang={lang}
-                        cinematic
-                      />
-                      <CommandCenterBranchGroupedChart
-                        comparativeIntelligence={main.comparative_intelligence}
-                        tr={tr}
-                        lang={lang}
-                        cinematic
-                        onOpenBranches={() => navigate('/branches')}
-                      />
-                    </div>
-                  </>
+                        {intelActiveTile ? (
+                          <CommandCenterIntelligenceExpanded
+                            key={intelActiveTile}
+                            tileId={intelActiveTile}
+                            onClose={closeIntelExpanded}
+                            tr={tr}
+                            lang={lang}
+                            main={main}
+                            intel={intel}
+                            alerts={alerts}
+                            fcData={fcData}
+                            kpis={kpis}
+                            decs={decs}
+                            primaryResolution={primaryResolution}
+                            expenseIntel={expenseIntel}
+                            health={health}
+                            impacts={impacts}
+                            narrative={narrative}
+                            bridgeSelKey={bridgeSelKey}
+                            onBridgeSegment={(pl) => open('profit_bridge_segment', pl)}
+                          />
+                        ) : null}
+                      </div>
+                      <div className="cmd-cine-split-charts">
+                        <ExecutiveKpiTrendChart
+                          kpiBlock={main.kpi_block}
+                          cashflow={main.cashflow}
+                          kpiType="net_margin"
+                          tr={tr}
+                          lang={lang}
+                          cinematic
+                        />
+                        <CommandCenterBranchGroupedChart
+                          comparativeIntelligence={main.comparative_intelligence}
+                          tr={tr}
+                          lang={lang}
+                          cinematic
+                          onOpenBranches={() => navigate('/branches')}
+                        />
+                      </div>
+                    </>
+                  ) : (
+                    <div
+                      style={{
+                        height: 380,
+                        borderRadius: 16,
+                        border: '1px solid rgba(255,255,255,0.06)',
+                        background: 'linear-gradient(165deg, rgba(22,27,34,0.55) 0%, rgba(13,17,23,0.65) 100%)',
+                      }}
+                    />
+                  )
                 ) : null
               }
               rightRail={
@@ -2613,20 +2628,26 @@ export default function CommandCenter() {
                   <div className="cmd-cine-rail-card cmd-cine-rail-card--story" style={{ minWidth: 0 }}>
                     <div className="cmd-cine-rail-section-title">{strictT(tr, lang, 'cmd_rail_section_story')}</div>
                     {main ? (
-                      main.structured_profit_story?.what_changed_key ? (
-                        <StructuredFinancialLayers data={main} tr={tr} lang={lang} variant="command" />
+                      heavyReady ? (
+                        main.structured_profit_story?.what_changed_key ? (
+                          <StructuredFinancialLayers data={main} tr={tr} lang={lang} variant="command" />
+                        ) : (
+                          <div className="cmd-magic-story-empty cmd-cine-rail-empty">
+                            <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.6, margin: 0 }}>
+                              {strictT(tr, lang, 'cmd_cc_story_empty')}
+                            </p>
+                          </div>
+                        )
                       ) : (
-                        <div className="cmd-magic-story-empty cmd-cine-rail-empty">
-                          <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.6, margin: 0 }}>
-                            {strictT(tr, lang, 'cmd_cc_story_empty')}
-                          </p>
+                        <div className="cmd-cine-rail-empty" style={{ padding: 14, opacity: 0.65, fontSize: 12, color: 'var(--text-secondary)' }}>
+                          …
                         </div>
                       )
                     ) : null}
                   </div>
                   <div className="cmd-cine-rail-card cmd-cine-rail-card--decision" style={{ minWidth: 0 }}>
                     <div className="cmd-cine-rail-section-title">{strictT(tr, lang, 'cmd_rail_section_decision')}</div>
-                    {main && primaryResolution ? (
+                    {heavyReady && main && primaryResolution ? (
                       <PrimaryDecisionHero
                         resolution={primaryResolution}
                         impacts={impacts}
@@ -2646,7 +2667,7 @@ export default function CommandCenter() {
               tileStrip={null}
               collapsed={null}
               footerSecondary={
-                main ? (
+                heavyReady && main ? (
                   <CommandCenterExecutionLayer
                     tr={tr}
                     lang={lang}

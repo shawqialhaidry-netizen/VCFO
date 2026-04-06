@@ -19,6 +19,7 @@ const ERROR_MAP = {
     'No normalized file':                     'Processed data not found on server. Please re-upload the file.',
     'Annual wide file parsed to zero rows':   'No valid data rows found in annual file. Check that account codes are present.',
     'Period already exists':                  'A upload for this period already exists for this company.',
+    __unmapped:                              'This action could not be completed. Try again or contact support if the problem continues.',
   },
   ar: {
     'Company not found':                      'الشركة غير موجودة. يرجى اختيار شركة صحيحة.',
@@ -34,6 +35,7 @@ const ERROR_MAP = {
     'No normalized file':                     'البيانات المعالجة غير موجودة على الخادم. يرجى إعادة الرفع.',
     'Annual wide file parsed to zero rows':   'لم يتم العثور على صفوف بيانات في الملف السنوي. تأكد من وجود أرقام الحسابات.',
     'Period already exists':                  'يوجد رفع لهذه الفترة مسبقاً لهذه الشركة.',
+    __unmapped:                              'تعذّر إتمام الطلب. أعد المحاولة أو تواصل مع الدعم إذا استمرّت المشكلة.',
   },
   tr: {
     'Company not found':                      'Şirket bulunamadı. Lütfen geçerli bir şirket seçin.',
@@ -49,6 +51,7 @@ const ERROR_MAP = {
     'No normalized file':                     'İşlenmiş veriler sunucuda bulunamadı. Lütfen dosyayı yeniden yükleyin.',
     'Annual wide file parsed to zero rows':   'Yıllık dosyada geçerli veri satırı bulunamadı. Hesap kodlarının mevcut olduğunu kontrol edin.',
     'Period already exists':                  'Bu şirket için bu döneme ait bir yükleme zaten mevcut.',
+    __unmapped:                              'İşlem tamamlanamadı. Tekrar deneyin veya sorun sürerse destek ile iletişime geçin.',
   },
 }
 
@@ -60,9 +63,11 @@ const ERROR_MAP = {
  */
 export function mapError(rawError, lang = 'en') {
   if (!rawError) return ''
-  const map = ERROR_MAP[lang] || ERROR_MAP.en
+  const code = lang === 'ar' ? 'ar' : lang === 'tr' ? 'tr' : 'en'
+  const map = ERROR_MAP[code] || ERROR_MAP.en
   for (const [key, friendly] of Object.entries(map)) {
+    if (key === '__unmapped') continue
     if (rawError.includes(key)) return friendly
   }
-  return rawError   // fallback to raw message
+  return map.__unmapped || ERROR_MAP.en.__unmapped || ''
 }
