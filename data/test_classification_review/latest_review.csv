@@ -1,0 +1,4 @@
+﻿account_code,account_name,mapped_type,confidence,match_reason,classification_source,debit,credit
+4010,Sales Revenue,expenses,0.75,stale_snapshot_wrong,rule,0.0,100.0
+MKT,Marketing,expenses,0.4,name_keyword (weak) (expenses),rule,25.0,0.0
+ZZZ,Mystery Account,other,0.0,no_match,fallback,10.0,0.0

@@ -23,6 +23,15 @@ function readStoredAuth() {
   }
 }
 
+function getStoredToken() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY)
+    return raw ? JSON.parse(raw)?.token || null : null
+  } catch {
+    return null
+  }
+}
+
 // ─── Provider ────────────────────────────────────────────────────────────────
 
 export function AuthProvider({ children }) {
@@ -47,14 +56,19 @@ export function AuthProvider({ children }) {
 
   // FIX-FE1: authFetch — wraps fetch(), auto-detects 401 and triggers logout
   const authFetch = useCallback(async (url, options = {}) => {
-    const res = await fetch(url, options)
+    const token = auth?.token || getStoredToken()
+    const headers = new Headers(options.headers || {})
+    if (token && !headers.has('Authorization')) {
+      headers.set('Authorization', `Bearer ${token}`)
+    }
+    const res = await fetch(url, { ...options, headers })
     if (res.status === 401 && !loggingOut.current) {
       loggingOut.current = true
       setAuth(null)
       setExpired(true)
     }
     return res
-  }, [setAuth])
+  }, [auth, setAuth])
 
   return (
     <AuthContext.Provider

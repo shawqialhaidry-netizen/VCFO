@@ -32,6 +32,12 @@ class Company(Base):
 
     group         = relationship("Group", back_populates="companies")
     memberships   = relationship("Membership", back_populates="company", lazy="dynamic")
+    account_mapping_overrides = relationship(
+        "AccountMappingOverride",
+        back_populates="company",
+        cascade="all, delete-orphan",
+        lazy="dynamic",
+    )
 
     def __repr__(self):
         return f"<Company id={self.id} name={self.name}>"

@@ -65,6 +65,28 @@ def test_analysis_net_profit_not_recomputed():
     )
 
 
+def test_unclassified_debit_net_reduces_profit_without_polluting_opex():
+    from app.services.financial_statements import build_statements, statements_to_dict
+
+    df = pd.DataFrame([
+        {"account_code": "4010", "account_name": "Revenue", "debit": 0, "credit": 1000, "mapped_type": "revenue", "confidence": 0.95},
+        {"account_code": "5010", "account_name": "COGS", "debit": 400, "credit": 0, "mapped_type": "cogs", "confidence": 0.95},
+        {"account_code": "6010", "account_name": "Salaries", "debit": 100, "credit": 0, "mapped_type": "expenses", "confidence": 0.95},
+        {"account_code": "9999", "account_name": "Mystery debit", "debit": 50, "credit": 0, "mapped_type": "other", "confidence": 0.0},
+    ])
+
+    d = statements_to_dict(build_statements(df, company_id="c1", period="2026-01", tb_type="pre_closing"))
+    is_ = d["income_statement"]
+
+    assert is_["expenses"]["total"] == 100.0
+    assert is_["unclassified_pnl_debits"]["total"] == 50.0
+    assert is_["unclassified_pnl_debits"]["excluded_from_profit"] is False
+    assert is_["unclassified_pnl_debits"]["deducted_from_profit"] is True
+    assert is_["operating_profit"] == 450.0
+    assert is_["net_profit"] == 450.0
+    assert "deducted_from_profit" in is_["income_statement_warning"]
+
+
 def test_statements_endpoint_tb_type_passthrough(client, company_and_headers):
     """statements.py must not silently drop tb_type."""
     # This is a smoke test — without uploads we can't do a full end-to-end,

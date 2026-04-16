@@ -174,14 +174,19 @@ def build_advisor_context(
         dec_pack = _safe(_pack_cfo_domain, {}) or {}
 
     # Legacy AI-CFO heuristic pack (isolated — not merged into primary causal/decisions)
-    from app.services.ai_cfo_engine import build_company_decision
     from app.services.causal_realize import realize_causal_items
 
     snapshot = {"revenue": w_rev, "net_profit": w_np, "net_margin_pct": nm, "expense_ratio": er}
-    legacy_ai_cfo_decision = _safe(
-        lambda: build_company_decision(company.name, analysis, snapshot, period),
-        {"decisions": [], "causal_items": [], "risk_score": 50, "priority": "UNKNOWN"},
-    ) if analysis else {"decisions": [], "causal_items": [], "risk_score": 50, "priority": "UNKNOWN"}
+    legacy_ai_cfo_decision = {
+        "available": False,
+        "used_as_fallback": False,
+        "decisions": [],
+        "causal_items": [],
+        "risk_score": None,
+        "priority": None,
+        "source": None,
+        "reason": "not_used",
+    }
 
     # Same merge path as executive realized causal (no deep_intel / profit_intel here)
     from app.api.analysis import _merge_causal_sources_for_realize
@@ -226,6 +231,45 @@ def build_advisor_context(
         "risk_score": int(_hs) if isinstance(_hs, (int, float)) else 50,
         "priority": _urgency_to_priority(_first.get("urgency")),
     }
+
+    decision_engine_meta = {
+        "primary_engine_available": bool(decisions_for_ctx),
+        "fallback_used": False,
+        "fallback_source": None,
+    }
+
+    if analysis and not decisions_for_ctx:
+        from app.services.ai_cfo_engine import build_company_decision
+
+        try:
+            _fallback = build_company_decision(company.name, analysis, snapshot, period) or {}
+            legacy_ai_cfo_decision = {
+                "available": True,
+                "used_as_fallback": True,
+                "decisions": _fallback.get("decisions") or [],
+                "causal_items": _fallback.get("causal_items") or [],
+                "risk_score": _fallback.get("risk_score"),
+                "priority": _fallback.get("priority"),
+                "source": "ai_cfo_engine.build_company_decision",
+                "reason": "primary_engine_empty",
+            }
+            decision_engine_meta = {
+                "primary_engine_available": False,
+                "fallback_used": True,
+                "fallback_source": "ai_cfo_engine.build_company_decision",
+            }
+        except Exception as e:
+            logger.warning("vcfo_advisor_context fallback decision engine failed: %s", e)
+            legacy_ai_cfo_decision = {
+                **legacy_ai_cfo_decision,
+                "reason": "fallback_failed",
+                "error": str(e),
+            }
+            decision_engine_meta = {
+                "primary_engine_available": False,
+                "fallback_used": False,
+                "fallback_source": None,
+            }
 
     # ── Branch context ────────────────────────────────────────────────────────
     branch_ctx: dict = {}
@@ -364,6 +408,7 @@ def build_advisor_context(
         "decisions":  cfo_decisions_ctx,
         "causal_items": merged_causal_templates,
         "realized_causal_items": realized_causal_advisor,
+        "decision_engine_meta": decision_engine_meta,
         "legacy_ai_cfo_decision": legacy_ai_cfo_decision,
 
         # ── Spec-mandated key aliases ─────────────────────────────────────────
@@ -372,7 +417,7 @@ def build_advisor_context(
         # "forecast" = not yet in live pipeline; stub with available trend data
         "forecast":   {
             "available":        False,
-            "note":             "Forecast engine not active in current pipeline",
+            "note":             "Forecast is not surfaced from the current production pipeline, so any forward view should be framed as directional rather than forecast-grade.",
             "revenue_direction": trends.get("revenue", {}).get("direction"),
             "revenue_mom_pct":   rev_mom,
         },

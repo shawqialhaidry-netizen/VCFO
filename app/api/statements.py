@@ -21,6 +21,7 @@ from app.core.database import get_db
 from app.core.deps import require_active_membership, require_company_access
 from app.models.trial_balance import TrialBalanceUpload
 from app.models.company import Company
+from app.services.account_classifier import classify_dataframe_for_company
 from app.services.financial_statements import build_statements, statements_to_dict
 
 router = APIRouter(prefix="/statements", tags=["statements"])
@@ -76,7 +77,7 @@ def _check_upload_access(company_id: str, current_user, db: Session):
 # ── Helper ─────────────────────────────────────────────────────────────────────
 
 def _load_classified_df(record: TrialBalanceUpload) -> pd.DataFrame:
-    """Load the normalized+classified CSV saved during upload (Phase 2+3)."""
+    """Load normalized TB CSV. Classification columns are re-applied downstream."""
     if not record.normalized_path:
         raise HTTPException(status_code=422, detail="No normalized file found for this upload.")
     try:
@@ -86,12 +87,12 @@ def _load_classified_df(record: TrialBalanceUpload) -> pd.DataFrame:
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Could not read file: {e}")
 
-    required = {"account_code", "account_name", "debit", "credit", "mapped_type", "confidence"}
+    required = {"account_code", "account_name", "debit", "credit"}
     missing = required - set(df.columns)
     if missing:
         raise HTTPException(
             status_code=422,
-            detail=f"File is missing Phase 3 classification columns: {missing}. Re-upload the file.",
+            detail=f"File is missing required trial balance columns: {missing}. Re-upload the file.",
         )
     return df
 
@@ -123,7 +124,7 @@ def get_statements_by_upload(
     # FIX-S1: verify membership before returning financial data
     _check_upload_access(record.company_id, current_user, db)
 
-    df = _load_classified_df(record)
+    df = classify_dataframe_for_company(_load_classified_df(record), record.company_id, db)
 
     # FIX-S0: pass tb_type so equity injection is correct for pre_closing uploads
     fs = build_statements(
@@ -210,12 +211,12 @@ def get_multi_period_statements(
         .all()
     )
     if not uploads:
-        raise HTTPException(status_code=422, detail="No financial data uploaded yet. Upload a Trial Balance first.")
+        raise HTTPException(status_code=404, detail="No financial data uploaded yet. Upload a Trial Balance first.")
 
     period_dfs: dict[str, pd.DataFrame] = {}
     for record in uploads:
         try:
-            df = _load_classified_df(record)
+            df = classify_dataframe_for_company(_load_classified_df(record), company_id, db)
         except Exception:
             continue
         if "period" in df.columns:

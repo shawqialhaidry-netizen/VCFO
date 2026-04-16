@@ -25,8 +25,8 @@ _T: dict[str, dict] = {
     # ── Profitability ─────────────────────────────────────────────────────────
     "net_margin_low": {
         "en": {"title": "Low Net Margin",
-               "message": "Net margin is {val}% — below the 5% healthy threshold.",
-               "action": "Review Cost of Goods Sold and Operating Expenses for reduction opportunities."},
+               "message": "Net margin is {val}%, below the 5% operating buffer and too thin to absorb normal cost or volume pressure.",
+               "action": "Review COGS and operating expenses immediately, and identify which cost lines can be reduced without weakening revenue delivery."},
         "ar": {"title": "هامش صافٍ منخفض",
                "message": "الهامش الصافي {val}% — أقل من الحد الصحي 5%.",
                "action": "راجع تكلفة المبيعات والمصاريف التشغيلية لتحديد فرص التخفيض."},
@@ -36,8 +36,8 @@ _T: dict[str, dict] = {
     },
     "net_margin_drop": {
         "en": {"title": "Net Margin Declining",
-               "message": "Net margin trending downward over recent periods.",
-               "action": "Investigate cost structure — rising COGS or OpEx may be compressing margins."},
+               "message": "Net margin is trending down across recent periods, which means recent activity is converting into less profit than before.",
+               "action": "Compare the latest period with the prior period and isolate whether COGS, OpEx, pricing, or one-off charges are causing the compression."},
         "ar": {"title": "تراجع الهامش الصافي",
                "message": "الهامش الصافي في اتجاه هبوطي خلال الفترات الأخيرة.",
                "action": "افحص هيكل التكاليف — ارتفاع تكلفة المبيعات أو المصاريف قد يضغط على الهوامش."},
@@ -47,8 +47,8 @@ _T: dict[str, dict] = {
     },
     "gross_margin_low": {
         "en": {"title": "Weak Gross Margin",
-               "message": "Gross margin is {val}% — below 25% indicates cost pressure.",
-               "action": "Evaluate pricing strategy and Cost of Goods Sold efficiency."},
+               "message": "Gross margin is {val}%, which indicates that direct service or product cost is consuming too much of revenue before overhead.",
+               "action": "Review pricing discipline, supplier cost, and delivery efficiency to recover gross margin before overhead cuts."},
         "ar": {"title": "هامش إجمالي ضعيف",
                "message": "هامش الربح الإجمالي {val}% — أقل من 25% يُشير إلى ضغط على التكاليف.",
                "action": "قيّم استراتيجية التسعير وكفاءة تكلفة المبيعات."},
@@ -59,8 +59,8 @@ _T: dict[str, dict] = {
     # ── Liquidity ──────────────────────────────────────────────────────────────
     "current_ratio_low": {
         "en": {"title": "Liquidity Risk",
-               "message": "Current ratio is {val}x — below 1.0 means current liabilities exceed current assets.",
-               "action": "Accelerate receivables collection and review short-term debt obligations."},
+               "message": "Current ratio is {val}x, which means short-term liabilities are stretching beyond the liquid asset base available to cover them.",
+               "action": "Accelerate collections, review near-term payables and debt maturities, and protect cash before the next payment cycle."},
         "ar": {"title": "خطر السيولة",
                "message": "نسبة التداول {val} — أقل من 1 تعني أن الالتزامات قصيرة الأجل تتجاوز الأصول المتداولة.",
                "action": "سرّع تحصيل المستحقات وراجع الالتزامات قصيرة الأجل."},
@@ -82,8 +82,8 @@ _T: dict[str, dict] = {
     # ── Revenue ────────────────────────────────────────────────────────────────
     "revenue_declining": {
         "en": {"title": "Revenue Decline",
-               "message": "Revenue is in a sustained downward trend.",
-               "action": "Investigate Revenue Drivers, pricing, and customer retention."},
+               "message": "Revenue is in a sustained downward trend, so the commercial engine is weakening rather than just fluctuating month to month.",
+               "action": "Review pipeline conversion, pricing, and retention immediately to identify where the revenue base is leaking."},
         "ar": {"title": "تراجع الإيرادات",
                "message": "الإيرادات في اتجاه هبوطي مستمر.",
                "action": "افحص محركات الإيرادات والتسعير والاحتفاظ بالعملاء."},
@@ -163,8 +163,8 @@ _T: dict[str, dict] = {
     # ── Health ────────────────────────────────────────────────────────────────
     "health_low": {
         "en": {"title": "Low Financial Health Score",
-               "message": "Overall financial health score is {val}/100 — requires management attention.",
-               "action": "Review top financial risks and prioritize corrective actions across profitability and liquidity."},
+               "message": "Overall financial health score is {val}/100, which indicates that the current balance of profitability, liquidity, and trend quality needs active management attention.",
+               "action": "Prioritize the top profitability and liquidity actions first, then review whether the next period is showing measurable recovery."},
         "ar": {"title": "مؤشر صحة مالية منخفض",
                "message": "مؤشر الصحة المالية الإجمالي {val}/100 — يستدعي اهتمام الإدارة.",
                "action": "راجع أبرز المخاطر المالية وحدّد الإجراءات التصحيحية للربحية والسيولة."},

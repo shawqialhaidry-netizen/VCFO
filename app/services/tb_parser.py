@@ -68,6 +68,16 @@ def _find_col(df: pd.DataFrame, aliases: set[str]) -> str | None:
     return None
 
 
+def _parse_numeric_series(series: pd.Series, field_name: str) -> pd.Series:
+    """Parse a numeric column strictly; blanks are allowed and treated as zero."""
+    blanks = series.isna() | series.astype(str).str.strip().eq("")
+    prepared = series.where(~blanks, 0)
+    try:
+        return pd.to_numeric(prepared, errors="raise")
+    except Exception as e:
+        raise ValueError(f"Invalid numeric value in {field_name}: {e}") from e
+
+
 # ── Auto header detection ─────────────────────────────────────────────────────
 
 def _find_header_and_slice(df: pd.DataFrame, max_scan: int = 20) -> pd.DataFrame:
@@ -209,8 +219,8 @@ def _parse_standard(
     out = pd.DataFrame()
     out["account_code"] = df[code_col].astype(str).str.strip() if code_col else ""
     out["account_name"] = df[name_col].astype(str).str.strip() if name_col else ""
-    out["debit"]        = pd.to_numeric(df[debit_col],  errors="coerce").fillna(0.0)
-    out["credit"]       = pd.to_numeric(df[credit_col], errors="coerce").fillna(0.0)
+    out["debit"]        = _parse_numeric_series(df[debit_col], "debit column")
+    out["credit"]       = _parse_numeric_series(df[credit_col], "credit column")
     out["period"]       = (
         df[period_col].astype(str).str.strip() if period_col is not None
         else (period or "")
@@ -232,15 +242,19 @@ def _parse_long(
          if c not in exclude and pd.api.types.is_numeric_dtype(df[c])),
         None,
     )
-    if amount_col is None:
+    parsed_amount = None
+    if amount_col is not None:
+        parsed_amount = _parse_numeric_series(df[amount_col], f"amount column '{amount_col}'")
+    else:
         for c in df.columns:
-            if c not in exclude:
-                converted = pd.to_numeric(df[c], errors="coerce")
-                if converted.notna().sum() > 0:
-                    df = df.copy()
-                    df[c] = converted
-                    amount_col = c
-                    break
+            if c in exclude:
+                continue
+            try:
+                parsed_amount = _parse_numeric_series(df[c], f"amount column '{c}'")
+                amount_col = c
+                break
+            except ValueError:
+                continue
 
     if type_col is None or amount_col is None:
         raise ValueError("Long format requires a 'type' column and an amount column.")
@@ -250,7 +264,13 @@ def _parse_long(
         "credit":"credit","cr":"credit","دائن":"credit","alacak":"credit",
     }
     df = df.copy()
+    df[amount_col] = parsed_amount
     df["_entry"] = df[type_col].astype(str).str.strip().str.lower().map(_type_map)
+    raw_type_vals = df[type_col].astype(str).str.strip()
+    invalid_type_mask = raw_type_vals.ne("") & df["_entry"].isna()
+    if invalid_type_mask.any():
+        invalid_values = sorted(raw_type_vals[invalid_type_mask].unique().tolist())[:5]
+        raise ValueError(f"Invalid entry type value(s): {invalid_values}")
 
     rows = []
     group_col = code_col or df.index
@@ -316,6 +336,11 @@ def _parse_annual_wide(
     # ── Sort month cols by month number ───────────────────────────────────────
     sorted_month_cols = sorted(detected.items(), key=lambda x: x[1])
 
+    parsed_month_values = {
+        col: _parse_numeric_series(df[col], f"month column '{col}'")
+        for col, _ in sorted_month_cols
+    }
+
     rows: list[dict] = []
     generated_periods: list[str] = []
 
@@ -324,7 +349,7 @@ def _parse_annual_wide(
         if period_str not in generated_periods:
             generated_periods.append(period_str)
 
-        for _, row in df.iterrows():
+        for idx, row in df.iterrows():
             code = str(row[code_col]).strip() if code_col else ""
             name = str(row[name_col]).strip() if name_col else ""
 
@@ -334,11 +359,7 @@ def _parse_annual_wide(
             }:
                 continue
 
-            raw_val = pd.to_numeric(row[col], errors="coerce")
-            if pd.isna(raw_val):
-                raw_val = 0.0
-            else:
-                raw_val = float(raw_val)
+            raw_val = float(parsed_month_values[col].loc[idx])
 
             # Sign convention: positive → debit, negative → credit
             debit  = raw_val  if raw_val >= 0 else 0.0
@@ -362,6 +383,7 @@ def _parse_annual_wide(
 # ── Validation ────────────────────────────────────────────────────────────────
 
 BALANCE_TOLERANCE = 0.01
+_PERIOD_RE = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
 
 def validate(df: pd.DataFrame, per_period: bool = False) -> dict[str, Any]:
     if df.empty:
@@ -369,6 +391,67 @@ def validate(df: pd.DataFrame, per_period: bool = False) -> dict[str, Any]:
             "ok": False, "error": "validation_empty",
             "total_debit": 0.0, "total_credit": 0.0,
             "diff": 0.0, "balanced": False, "record_count": 0,
+        }
+
+    account_code = df["account_code"].fillna("").astype(str).str.strip()
+    account_name = df["account_name"].fillna("").astype(str).str.strip()
+    period_vals  = df["period"].fillna("").astype(str).str.strip() if "period" in df.columns else pd.Series([""] * len(df))
+
+    orphan_mask = account_code.eq("") & account_name.eq("")
+    if orphan_mask.any():
+        orphan_count = int(orphan_mask.sum())
+        return {
+            "ok": False,
+            "error": f"validation_orphan_rows: {orphan_count} row(s) missing account_code and account_name",
+            "total_debit": 0.0, "total_credit": 0.0,
+            "diff": 0.0, "balanced": False, "record_count": int(len(df)),
+        }
+
+    invalid_period_mask = period_vals.ne("") & ~period_vals.str.match(_PERIOD_RE)
+    if invalid_period_mask.any():
+        invalid_values = sorted(period_vals[invalid_period_mask].unique().tolist())[:5]
+        return {
+            "ok": False,
+            "error": f"validation_invalid_periods: invalid period value(s) {invalid_values}",
+            "total_debit": 0.0, "total_credit": 0.0,
+            "diff": 0.0, "balanced": False, "record_count": int(len(df)),
+        }
+
+    both_sides_mask = (df["debit"].abs() > 0) & (df["credit"].abs() > 0)
+    if both_sides_mask.any():
+        both_sides_count = int(both_sides_mask.sum())
+        return {
+            "ok": False,
+            "error": f"validation_dual_sided_rows: {both_sides_count} row(s) have both debit and credit populated",
+            "total_debit": 0.0, "total_credit": 0.0,
+            "diff": 0.0, "balanced": False, "record_count": int(len(df)),
+        }
+
+    negative_side_mask = (df["debit"] < 0) | (df["credit"] < 0)
+    if negative_side_mask.any():
+        negative_side_count = int(negative_side_mask.sum())
+        return {
+            "ok": False,
+            "error": f"validation_negative_sides: {negative_side_count} row(s) have negative debit/credit values",
+            "total_debit": 0.0, "total_credit": 0.0,
+            "diff": 0.0, "balanced": False, "record_count": int(len(df)),
+        }
+
+    duplicate_keys = pd.DataFrame({
+        "account_code": account_code,
+        "account_name": account_name,
+        "debit": df["debit"].round(2),
+        "credit": df["credit"].round(2),
+        "period": period_vals,
+    })
+    duplicate_mask = duplicate_keys.duplicated(keep=False)
+    if duplicate_mask.any():
+        duplicate_count = int(duplicate_mask.sum())
+        return {
+            "ok": False,
+            "error": f"validation_duplicate_rows: {duplicate_count} duplicate row(s) detected",
+            "total_debit": 0.0, "total_credit": 0.0,
+            "diff": 0.0, "balanced": False, "record_count": int(len(df)),
         }
 
     total_debit  = round(float(df["debit"].sum()),  2)
@@ -445,14 +528,12 @@ def parse_file(
         elif ext == ".csv":
             _preview = pd.read_csv(
                 io.BytesIO(file_bytes), header=None, dtype=str,
-                engine="python", nrows=5, encoding_errors="replace",
-                on_bad_lines="skip",
+                engine="python", nrows=5,
             )
             _max_cols = max(len(_preview.columns), 30)
             df_raw = pd.read_csv(
                 io.BytesIO(file_bytes), header=None, dtype=str,
                 engine="python", names=list(range(_max_cols)),
-                encoding_errors="replace", on_bad_lines="skip",
             )
         else:
             return {"ok": False, "error": f"Unsupported file type '{ext}'. Allowed: .xlsx, .xls, .csv"}
@@ -548,8 +629,15 @@ def parse_file(
 
     # ── Clean up ──────────────────────────────────────────────────────────────
     df = df.copy()
-    df["debit"]  = pd.to_numeric(df["debit"],  errors="coerce").fillna(0.0)
-    df["credit"] = pd.to_numeric(df["credit"], errors="coerce").fillna(0.0)
+    try:
+        df["debit"]  = pd.to_numeric(df["debit"],  errors="raise")
+        df["credit"] = pd.to_numeric(df["credit"], errors="raise")
+    except Exception as e:
+        return {
+            "ok": False,
+            "error": f"Invalid numeric value in parsed debit/credit columns: {e}",
+            "column_report": col_report,
+        }
     df = df[(df["debit"] != 0) | (df["credit"] != 0)]
     df = df.reset_index(drop=True)
 
@@ -562,6 +650,12 @@ def parse_file(
 
     is_annual  = actual_mode == "annual"
     validation = validate(df, per_period=is_annual)
+    if not validation.get("ok", False):
+        return {
+            "ok": False,
+            "error": validation.get("error", "Validation failed."),
+            "column_report": col_report,
+        }
 
     return {
         "ok":                True,

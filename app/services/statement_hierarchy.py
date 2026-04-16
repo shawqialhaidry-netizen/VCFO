@@ -14,6 +14,12 @@ from __future__ import annotations
 from typing import Any, Optional
 
 _SCHEMA_VERSION = 2
+PROV_DIRECT_SOURCE_LEAF = "direct_source_leaf"
+PROV_MERGED_SOURCE_LEAF = "merged_source_leaf"
+PROV_DERIVED_SUBTOTAL = "derived_subtotal"
+PROV_DERIVED_METRIC = "derived_metric"
+PROV_SYNTHETIC_INJECTED = "synthetic_injected"
+PROV_STRUCTURAL_CONTAINER = "structural_container"
 
 
 def _r2(v: Any) -> Optional[float]:
@@ -65,6 +71,8 @@ def _line_leaf(prefix: str, idx: int, item: dict, depth: int) -> dict:
         account_code=code or None,
         account_name=item.get("account_name"),
         mapped_type=item.get("mapped_type"),
+        provenance=item.get("provenance") or PROV_DIRECT_SOURCE_LEAF,
+        source_row_count=int(item.get("source_row_count") or 1),
         leaf=True,
     )
 
@@ -109,6 +117,7 @@ def build_income_statement_hierarchy(is_: dict) -> dict:
             value=total_rev,
             children=[],
             label_key="stmt_hier_net_revenue",
+            provenance=PROV_DERIVED_SUBTOTAL,
         )
     ]
     revenue_block = _node(
@@ -118,24 +127,27 @@ def build_income_statement_hierarchy(is_: dict) -> dict:
         value=None,
         children=revenue_children,
         label_key="stmt_hier_revenue",
+        provenance=PROV_STRUCTURAL_CONTAINER,
     )
 
     cogs_subtotal = _node(
         "cogs_total",
         "Total COGS",
-        2,
+        1,
         value=total_cogs,
-        children=[_line_leaf("cogs", i, x, 3) for i, x in enumerate(cogs_items)],
+        children=[_line_leaf("cogs", i, x, 2) for i, x in enumerate(cogs_items)],
         label_key="stmt_hier_total_cogs",
+        provenance=PROV_DERIVED_SUBTOTAL,
     )
 
     opex_subtotal = _node(
         "opex_total",
         "Total operating expenses",
-        2,
+        1,
         value=total_exp,
-        children=[_line_leaf("opex", i, x, 3) for i, x in enumerate(exp_items)],
+        children=[_line_leaf("opex", i, x, 2) for i, x in enumerate(exp_items)],
         label_key="stmt_hier_total_opex",
+        provenance=PROV_DERIVED_SUBTOTAL,
     )
 
     unc_children = [_line_leaf("unc", i, x, 3) for i, x in enumerate(unc_items)]
@@ -146,6 +158,7 @@ def build_income_statement_hierarchy(is_: dict) -> dict:
         value=total_unc if total_unc else None,
         children=unc_children,
         label_key="stmt_hier_unclassified_pnl",
+        provenance=PROV_STRUCTURAL_CONTAINER,
     )
 
     tax_children = [
@@ -160,6 +173,7 @@ def build_income_statement_hierarchy(is_: dict) -> dict:
         value=total_tax,
         children=tax_children,
         label_key="stmt_hier_tax",
+        provenance=PROV_STRUCTURAL_CONTAINER,
     )
 
     gp_node = _node(
@@ -169,6 +183,7 @@ def build_income_statement_hierarchy(is_: dict) -> dict:
         value=gp,
         children=[],
         label_key="stmt_hier_gross_profit",
+        provenance=PROV_DERIVED_METRIC,
     )
     op_node = _node(
         "operating_profit",
@@ -177,6 +192,7 @@ def build_income_statement_hierarchy(is_: dict) -> dict:
         value=op_profit,
         children=[],
         label_key="stmt_hier_operating_profit",
+        provenance=PROV_DERIVED_METRIC,
     )
     np_node = _node(
         "net_profit",
@@ -185,6 +201,7 @@ def build_income_statement_hierarchy(is_: dict) -> dict:
         value=np_,
         children=[],
         label_key="stmt_hier_net_profit",
+        provenance=PROV_DERIVED_METRIC,
     )
 
     children = [
@@ -205,6 +222,7 @@ def build_income_statement_hierarchy(is_: dict) -> dict:
             value=None,
             children=children,
             label_key="stmt_section_is",
+            provenance=PROV_STRUCTURAL_CONTAINER,
         ),
     }
 
@@ -246,6 +264,7 @@ def build_balance_sheet_hierarchy(bs: dict) -> dict:
         for i, item in enumerate(eq.get("items") or [])
         if isinstance(item, dict)
     ]
+    has_data = bool(asset_lines or liab_lines or eq_lines)
 
     assets_node = _node(
         "assets",
@@ -254,6 +273,7 @@ def build_balance_sheet_hierarchy(bs: dict) -> dict:
         value=ta,
         children=asset_lines,
         label_key="stmt_hier_assets",
+        provenance=PROV_DERIVED_SUBTOTAL,
     )
 
     ca_node = _node(
@@ -263,6 +283,7 @@ def build_balance_sheet_hierarchy(bs: dict) -> dict:
         value=ca,
         children=[],
         label_key="stmt_hier_current_assets",
+        provenance=PROV_DERIVED_METRIC,
     )
     nca_node = _node(
         "noncurrent_assets",
@@ -271,6 +292,7 @@ def build_balance_sheet_hierarchy(bs: dict) -> dict:
         value=nca,
         children=[],
         label_key="stmt_hier_noncurrent_assets",
+        provenance=PROV_DERIVED_METRIC,
     )
 
     liab_node = _node(
@@ -280,6 +302,7 @@ def build_balance_sheet_hierarchy(bs: dict) -> dict:
         value=tl,
         children=liab_lines,
         label_key="stmt_hier_liabilities",
+        provenance=PROV_DERIVED_SUBTOTAL,
     )
 
     cl_node = _node(
@@ -289,6 +312,7 @@ def build_balance_sheet_hierarchy(bs: dict) -> dict:
         value=cl,
         children=[],
         label_key="stmt_hier_current_liabilities",
+        provenance=PROV_DERIVED_METRIC,
     )
     ncl_node = _node(
         "noncurrent_liabilities",
@@ -297,6 +321,7 @@ def build_balance_sheet_hierarchy(bs: dict) -> dict:
         value=ncl,
         children=[],
         label_key="stmt_hier_noncurrent_liabilities",
+        provenance=PROV_DERIVED_METRIC,
     )
 
     eq_node = _node(
@@ -306,6 +331,7 @@ def build_balance_sheet_hierarchy(bs: dict) -> dict:
         value=te,
         children=eq_lines,
         label_key="stmt_hier_equity",
+        provenance=PROV_DERIVED_SUBTOTAL,
     )
 
     wc_node = _node(
@@ -315,6 +341,7 @@ def build_balance_sheet_hierarchy(bs: dict) -> dict:
         value=wc,
         children=[],
         label_key="stmt_hier_working_capital",
+        provenance=PROV_DERIVED_METRIC,
     )
 
     children = [
@@ -336,108 +363,136 @@ def build_balance_sheet_hierarchy(bs: dict) -> dict:
             value=None,
             children=children,
             label_key="stmt_section_bs",
+            has_data=has_data,
+            provenance=PROV_STRUCTURAL_CONTAINER,
         ),
     }
 
 
 def build_cashflow_hierarchy(cashflow_raw: dict, period: str = "") -> dict:
     """
-    Pass-through of cashflow_engine top-level and ``debug`` fields only.
-    Investing / financing: explicitly unavailable (no engine lines — never inferred).
+    Project additive cashflow_engine output into statement hierarchy form.
+    Sections are rendered only from explicit engine fields; unavailable sections
+    remain explicit and flagged.
     """
-    dbg = cashflow_raw.get("debug") if isinstance(cashflow_raw.get("debug"), dict) else {}
+    op = cashflow_raw.get("operating") if isinstance(cashflow_raw.get("operating"), dict) else {}
+    inv = cashflow_raw.get("investing") if isinstance(cashflow_raw.get("investing"), dict) else {}
+    fin = cashflow_raw.get("financing") if isinstance(cashflow_raw.get("financing"), dict) else {}
+    stmt_meta = cashflow_raw.get("statement_meta") if isinstance(cashflow_raw.get("statement_meta"), dict) else {}
 
-    ocf = _r2(cashflow_raw.get("operating_cashflow"))
-    fcf = _r2(cashflow_raw.get("free_cashflow"))
-    np_ = _r2(dbg.get("net_profit"))
-    da = _r2(dbg.get("da_addback"))
-    dr = _r2(dbg.get("delta_receivables"))
-    di = _r2(dbg.get("delta_inventory"))
-    dp = _r2(dbg.get("delta_payables"))
-    wc_adj = _r2(dbg.get("wc_adjustment"))
+    def _cf_line(line: dict, idx: int, prefix: str) -> dict:
+        line_id = str(line.get("id") or f"{prefix}_{idx}")
+        return _node(
+            f"{prefix}_{line_id}",
+            str(line.get("label") or line_id),
+            2,
+            value=line.get("amount"),
+            label_key=None,
+            provenance=PROV_DERIVED_METRIC,
+            line_id=line_id,
+        )
 
-    op_children = [
-        _node("cf_np", "Net profit (from statements)", 2, value=np_, label_key="stmt_hier_cf_np"),
-        _node("cf_da", "Depreciation & amortization (add-back)", 2, value=da, label_key="stmt_hier_cf_da"),
-        _node(
-            "cf_d_ar",
-            "Change in receivables",
-            2,
-            value=dr,
-            label_key="stmt_hier_cf_d_ar",
-        ),
-        _node(
-            "cf_d_inv",
-            "Change in inventory",
-            2,
-            value=di,
-            label_key="stmt_hier_cf_d_inv",
-        ),
-        _node(
-            "cf_d_ap",
-            "Change in payables",
-            2,
-            value=dp,
-            label_key="stmt_hier_cf_d_ap",
-        ),
-        _node(
-            "cf_wc_adj",
-            "Working capital adjustment (as reported)",
-            2,
-            value=wc_adj,
-            label_key="stmt_hier_cf_wc_adj",
-        ),
-    ]
-    if fcf is not None or cashflow_raw.get("free_cashflow") is not None:
-        op_children.append(
+    def _cf_section(
+        key: str,
+        label: str,
+        label_key: str,
+        section: dict,
+        subtotal_fallback: Any = None,
+    ) -> dict:
+        lines = section.get("lines") if isinstance(section.get("lines"), list) else []
+        children = [_cf_line(line, i, key) for i, line in enumerate(lines) if isinstance(line, dict)]
+        extra = {}
+        if section.get("available") is False:
+            extra["availability"] = "partial"
+            extra["note"] = section.get("reason") or "not_modeled"
+        if isinstance(section.get("flags"), dict) and section.get("flags"):
+            extra["section_flags"] = section.get("flags")
+        return _node(
+            key,
+            label,
+            1,
+            value=section.get("subtotal", subtotal_fallback),
+            children=children,
+            label_key=label_key,
+            provenance=PROV_STRUCTURAL_CONTAINER,
+            **extra,
+        )
+
+    opening = _node(
+        "cf_opening_cash",
+        "Opening cash",
+        1,
+        value=cashflow_raw.get("opening_cash"),
+        children=[],
+        label_key="stmt_hier_cf_opening_cash",
+        provenance=PROV_DERIVED_METRIC,
+    )
+
+    operating = _cf_section(
+        "cf_operating",
+        "Operating activities",
+        "stmt_hier_cf_operating",
+        op,
+        subtotal_fallback=cashflow_raw.get("operating_cashflow"),
+    )
+
+    if cashflow_raw.get("free_cashflow") is not None:
+        operating["children"].append(
             _node(
                 "cf_fcf",
                 "Free cash flow (as reported)",
                 2,
-                value=fcf,
+                value=cashflow_raw.get("free_cashflow"),
                 label_key="stmt_hier_cf_fcf",
+                provenance=PROV_DERIVED_METRIC,
             )
         )
 
-    operating = _node(
-        "cf_operating",
-        "Operating activities",
-        1,
-        value=ocf,
-        children=op_children,
-        label_key="stmt_hier_cf_operating",
-    )
-
-    investing = _node(
+    investing = _cf_section(
         "cf_investing",
         "Investing activities",
-        1,
-        value=None,
-        children=[],
-        label_key="stmt_hier_cf_investing",
-        availability="unavailable",
-        note="not_modeled",
+        "stmt_hier_cf_investing",
+        inv,
     )
 
-    financing = _node(
+    financing = _cf_section(
         "cf_financing",
         "Financing activities",
+        "stmt_hier_cf_financing",
+        fin,
+    )
+
+    net_change = _node(
+        "cf_net_change",
+        "Net change in cash",
         1,
-        value=None,
+        value=cashflow_raw.get("net_change_in_cash"),
         children=[],
-        label_key="stmt_hier_cf_financing",
-        availability="unavailable",
-        note="not_modeled",
+        label_key="stmt_hier_cf_net_change",
+        provenance=PROV_DERIVED_METRIC,
+    )
+
+    ending = _node(
+        "cf_ending_cash",
+        "Ending cash",
+        1,
+        value=cashflow_raw.get("ending_cash", cashflow_raw.get("cash_balance")),
+        children=[],
+        label_key="stmt_hier_cf_ending_cash",
+        provenance=PROV_DERIVED_METRIC,
     )
 
     return {
         "root": _node(
             "cashflow_statement",
-            "Cash flow (indirect operating view)",
+            "Cash flow statement",
             0,
             value=None,
-            children=[operating, investing, financing],
+            children=[opening, operating, investing, financing, net_change, ending],
             label_key="stmt_hier_cashflow_root",
+            reconciliation=cashflow_raw.get("reconciles"),
+            statement_meta=stmt_meta,
+            provenance=PROV_STRUCTURAL_CONTAINER,
         ),
         "period": period or str(cashflow_raw.get("period") or ""),
         "flags": cashflow_raw.get("flags") or {},

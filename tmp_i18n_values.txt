@@ -1,0 +1,10 @@
+app/i18n/ar.json
+settings_mapping_title: ØªØ¬Ø§ÙØ²Ø§Øª Ø±Ø¨Ø· Ø§ÙØ­Ø³Ø§Ø¨Ø§Øª
+settings_mapping_subtitle: ØªØ¬Ø§ÙØ²Ø§Øª Ø®Ø§ØµØ© Ø¨Ø§ÙØ´Ø±ÙØ© ØªØ¹ØªÙØ¯ Ø¹ÙÙ Ø§ÙØªØ·Ø§Ø¨Ù Ø§ÙØªØ§Ù ÙØ±ÙØ² Ø§ÙØ­Ø³Ø§Ø¨.
+settings_mapping_add: Ø¥Ø¶Ø§ÙØ© ØªØ¬Ø§ÙØ²
+settings_mapping_delete_confirm: ÙÙ ØªØ±ÙØ¯ Ø­Ø°Ù ØªØ¬Ø§ÙØ² Ø±Ø¨Ø· Ø§ÙØ­Ø³Ø§Ø¨ ÙØ°Ø§Ø
+app/i18n/tr.json
+settings_mapping_title: Hesap EÅleme GeÃ§ersiz KÄ±lmalarÄ±
+settings_mapping_subtitle: Åirkete Ã¶zel tam hesap kodu eÅleÅmeleri iÃ§in geÃ§ersiz kÄ±lmalar.
+settings_mapping_add: GeÃ§ersiz KÄ±lma Ekle
+settings_mapping_delete_confirm: Bu hesap eÅleme geÃ§ersiz kÄ±lmasÄ± silinsin mi?

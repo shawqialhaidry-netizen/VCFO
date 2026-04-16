@@ -181,6 +181,7 @@ class BranchCreate(BaseModel):
     code:       Optional[str] = None
     name:       str
     name_ar:    Optional[str] = None
+    manager_name: Optional[str] = None
     city:       Optional[str] = None
     country:    Optional[str] = None
     currency:   str = "USD"
@@ -204,6 +205,7 @@ class BranchUpdate(BaseModel):
     code:      Optional[str] = None
     name:      Optional[str] = None
     name_ar:   Optional[str] = None
+    manager_name: Optional[str] = None
     city:      Optional[str] = None
     country:   Optional[str] = None
     currency:  Optional[str] = None
@@ -216,6 +218,7 @@ class BranchResponse(BaseModel):
     code:       Optional[str]
     name:       str
     name_ar:    Optional[str]
+    manager_name: Optional[str]
     city:       Optional[str]
     country:    Optional[str]
     currency:   str
@@ -351,6 +354,79 @@ def get_branch_financials(
         "branch_name": b.name,
         "periods":     [x["period"] for x in financials_out],
         "financials":  financials_out,
+        "data_source": "branch_upload",
+    }
+
+
+@router.get("/companies/{company_id}/branch-financials")
+def get_company_branch_financials(
+    db: Session = Depends(get_db),
+    company: Company = Depends(get_current_company_access),
+):
+    """
+    Direct branch financial snapshots from canonical branch upload statements.
+    No rankings, no intelligence layer, no synthetic branch comparison UI payload.
+    """
+    company_id = company.id
+    branches = (
+        db.query(Branch)
+        .filter(Branch.company_id == company_id, Branch.is_active == True)  # noqa
+        .order_by(Branch.name.asc())
+        .all()
+    )
+
+    rows: list[dict] = []
+    for b in branches:
+        stmts = _branch_statements_from_uploads(db, company_id, b.id)
+        if not stmts:
+            rows.append({
+                "branch_id": b.id,
+                "branch_name": b.name,
+                "branch_code": getattr(b, "code", None),
+                "city": b.city,
+                "country": b.country,
+                "has_data": False,
+                "period_count": 0,
+                "latest_period": None,
+                "revenue": None,
+                "expenses": None,
+                "net_profit": None,
+                "net_margin": None,
+                "data_source": "branch_upload",
+            })
+            continue
+
+        latest = stmts[-1]
+        is_ = latest.get("income_statement") or {}
+        rev = (is_.get("revenue") or {}).get("total")
+        exp = (is_.get("expenses") or {}).get("total")
+        npv = is_.get("net_profit")
+        net_margin = (
+            round(float(npv) / float(rev) * 100, 2)
+            if (rev is not None and float(rev) > 0 and npv is not None)
+            else None
+        )
+
+        rows.append({
+            "branch_id": b.id,
+            "branch_name": b.name,
+            "branch_code": getattr(b, "code", None),
+            "city": b.city,
+            "country": b.country,
+            "has_data": True,
+            "period_count": len(stmts),
+            "latest_period": latest.get("period"),
+            "revenue": rev,
+            "expenses": exp,
+            "net_profit": npv,
+            "net_margin": net_margin,
+            "data_source": "branch_upload",
+        })
+
+    return {
+        "has_data": any(r.get("has_data") for r in rows),
+        "branch_count": len(branches),
+        "rows": rows,
         "data_source": "branch_upload",
     }
 
@@ -1019,9 +1095,9 @@ def get_branch_drill_down(
         "name_ar":      branch.name_ar,
         "city":         branch.city,
         "country":      branch.country,
-        "latest_period": financials[-1].period,
+        "latest_period": stmts[-1].get("period"),
         "period_count": period_count,
-        "periods":      [f.period for f in financials],
+        "periods":      [s.get("period") for s in stmts if s.get("period")],
         "has_data":     True,
         "status":       "active" if branch.is_active else "inactive",
         "lang":         safe_lang,
@@ -2711,9 +2787,11 @@ def upsert_branch_financial(
     always presented as positive business metrics in comparison screens.
     Net profit is kept signed (negative = loss).
     """
+    from app.services.account_classifier import classify_dataframe_for_company
     from app.services.financial_statements import build_statements, statements_to_dict
 
-    fs = build_statements(df, company_id=company_id, period=period)
+    classified = classify_dataframe_for_company(df, company_id, db)
+    fs = build_statements(classified, company_id=company_id, period=period)
     d  = statements_to_dict(fs)
     is_ = d.get("income_statement", {})
     bs  = d.get("balance_sheet", {})

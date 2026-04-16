@@ -31,6 +31,8 @@ import StructuredFinancialLayers from '../components/StructuredFinancialLayers.j
 import { strictT, localizedMissingPlaceholder } from '../utils/strictI18n.js'
 import { splitPrimaryDecisionHeadlineAndMetrics } from '../utils/splitPrimaryDecisionHeadline.js'
 import { CLAMP_FADE_MASK_SHORT } from '../utils/serverTextUi.js'
+import { normalizeFinancialTrust } from '../utils/trustNormalization.js'
+import { normalizeDecisions } from '../utils/decisionNormalization.js'
 import CmdServerText from '../components/CmdServerText.jsx'
 
 const API = '/api/v1'
@@ -88,6 +90,263 @@ function DataQualityBanner({ validation, lang, tr }) {
       {warnings.map((w,i)=>{
         return <span key={i} style={{fontSize:9,color:'rgba(255,255,255,0.5)'}}>· {strictT(tr, lang, `dq_${w.code}`)}</span>
       })}
+    </div>
+  )
+}
+
+function FinancialTrustStrip({ trust, tr, lang, onDetails }) {
+  if (!trust) return null
+  const st = (key) => strictT(tr, lang, key)
+  const status = trust.overall_status || 'unavailable'
+  const color = {
+    good: T.green,
+    warning: T.amber,
+    risk: T.red,
+    unavailable: T.text3,
+  }[status] || T.text3
+  const warnings = Array.isArray(trust.warnings) ? trust.warnings.slice(0, 3) : []
+
+  return (
+    <div style={{
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 12,
+      flexWrap: 'wrap',
+      padding: '10px 14px',
+      borderRadius: 10,
+      border: `1px solid ${color}30`,
+      borderLeft: `3px solid ${color}`,
+      background: `${color}0d`,
+      marginBottom: 14,
+    }}>
+      <div style={{display:'flex',alignItems:'center',gap:10,flexWrap:'wrap',minWidth:0}}>
+        <span style={{fontSize:11,fontWeight:800,color:T.text1,textTransform:'uppercase',letterSpacing:'.06em'}}>
+          {st('trust_financial_title')}
+        </span>
+        <Pill label={st(`trust_status_${status}`)} color={color} />
+        {warnings.length ? warnings.map((item) => (
+          <span key={item.key} style={{fontSize:11,color:T.text2,whiteSpace:'nowrap'}}>
+            {st(item.label_key || `trust_warning_${item.key}`)}
+          </span>
+        )) : (
+          <span style={{fontSize:11,color:T.text2}}>
+            {st('trust_no_warnings')}
+          </span>
+        )}
+      </div>
+      <button
+        type="button"
+        onClick={onDetails}
+        style={{
+          border: `1px solid ${color}35`,
+          background: 'rgba(255,255,255,.03)',
+          color,
+          borderRadius: 8,
+          padding: '6px 10px',
+          fontSize: 11,
+          fontWeight: 800,
+          cursor: 'pointer',
+          whiteSpace: 'nowrap',
+        }}
+      >
+        {st('trust_view_statements')}
+      </button>
+    </div>
+  )
+}
+
+function ExecutiveDecisionStrip({ bundle, tr, lang, navigate }) {
+  const decisions = Array.isArray(bundle?.decisions) ? bundle.decisions.slice(0, 3) : []
+  const [selectedId, setSelectedId] = useState(null)
+  if (!decisions.length) return null
+  const st = (key) => strictT(tr, lang, key)
+  const selected = decisions.find((decision) => decision.id === selectedId) || null
+  const sevColor = {
+    critical: T.red,
+    high: T.red,
+    medium: T.amber,
+    low: T.blue,
+  }
+  const trustColor = {
+    good: T.green,
+    warning: T.amber,
+    risk: T.red,
+    unavailable: T.text3,
+  }
+  const renderValue = (value) => {
+    if (value == null || value === '') return '—'
+    if (typeof value === 'number') return Number.isFinite(value) ? value.toLocaleString() : '—'
+    if (typeof value === 'boolean') return String(value)
+    return String(value)
+  }
+  const whyDecisionText = (decision) => {
+    const rationaleCount = (decision?.rationale_keys || []).length
+    const trustKey = decision?.blocked_by_trust
+      ? 'decision_why_trust_blocked'
+      : decision?.requires_review
+        ? 'decision_why_requires_review'
+        : 'decision_why_trust_clear'
+    return st('decision_why_sentence', {
+      severity: st(`severity_${decision?.severity || 'medium'}`),
+      confidence: st(`decision_confidence_${decision?.confidence || 'low'}`),
+      count: rationaleCount,
+      trust: st(trustKey),
+    })
+  }
+  const sourceTarget = (source = '') => {
+    const s = String(source || '').toLowerCase()
+    if (!s) return null
+    if (s.includes('trust.')) {
+      const focus = s.includes('cashflow') || s.includes('working_capital') || s.includes('reconciliation') ? 'cash' : 'balance'
+      return { type: 'statements', focus }
+    }
+    if (s.includes('kpi_block') || s.includes('kpis')) return { type: 'kpi' }
+    if (s.includes('cashflow') || s.includes('working_capital')) return { type: 'statements', focus: 'cash' }
+    if (s.includes('balance_sheet') || s.includes('equity') || s.includes('leverage')) return { type: 'statements', focus: 'balance' }
+    if (s.includes('statements') || s.includes('net_profit') || s.includes('revenue') || s.includes('expenses')) return { type: 'statements', focus: 'income' }
+    return null
+  }
+  const viewSource = (item) => {
+    const target = sourceTarget(item?.source)
+    if (!target) return
+    if (target.type === 'kpi') {
+      document.getElementById('executive-kpi-area')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      return
+    }
+    navigate('/statements', { state: { focus: target.focus } })
+  }
+
+  return (
+    <div style={{display:'flex',flexDirection:'column',gap:10}}>
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit, minmax(240px, 1fr))',gap:10}}>
+        {decisions.map((decision) => {
+          const color = sevColor[decision.severity] || T.text3
+          const tColor = trustColor[decision.trust_status] || T.text3
+          const active = decision.id === selectedId
+          return (
+            <button
+              key={decision.id}
+              type="button"
+              onClick={() => setSelectedId(active ? null : decision.id)}
+              style={{
+                textAlign:'left',
+                background:T.card,
+                border:`1px solid ${active ? `${color}55` : 'rgba(255,255,255,.08)'}`,
+                borderLeft:`3px solid ${color}`,
+                borderRadius:12,
+                padding:'12px 14px',
+                cursor:'pointer',
+              }}
+            >
+              <div style={{display:'flex',alignItems:'center',gap:7,flexWrap:'wrap',marginBottom:8}}>
+                <Pill label={st(`severity_${decision.severity}`)} color={color} />
+                <Pill label={`${st('confidence')}: ${st(`decision_confidence_${decision.confidence}`)}`} color={T.text2} />
+                {(decision.blocked_by_trust || decision.requires_review) && (
+                  <Pill
+                    label={decision.blocked_by_trust ? st('decision_trust_blocked') : st('decision_requires_review')}
+                    color={decision.blocked_by_trust ? T.red : T.amber}
+                  />
+                )}
+              </div>
+              <div style={{fontSize:12,fontWeight:800,color:T.text1,lineHeight:1.3,marginBottom:6}}>
+                {st(decision.title_key)}
+              </div>
+              <div style={{fontSize:11,color:T.text2,lineHeight:1.45,marginBottom:8}}>
+                {st(decision.action_key || decision.summary_key)}
+              </div>
+              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:8}}>
+                <span style={{fontSize:10,color:T.text3}}>
+                  {st(`decision_category_${decision.category}`)}
+                </span>
+                <span style={{fontSize:10,color:tColor,fontWeight:800}}>
+                  {st('trust_financial_title')}: {st(`trust_status_${decision.trust_status || 'unavailable'}`)}
+                </span>
+              </div>
+            </button>
+          )
+        })}
+      </div>
+
+      {selected && (
+        <div style={{
+          background:'rgba(255,255,255,.025)',
+          border:'1px solid rgba(255,255,255,.08)',
+          borderRadius:12,
+          padding:'14px 16px',
+        }}>
+          <div style={{display:'flex',justifyContent:'space-between',gap:12,alignItems:'flex-start',marginBottom:12}}>
+            <div>
+              <div style={{fontSize:13,fontWeight:900,color:T.text1,marginBottom:5}}>{st(selected.title_key)}</div>
+              <div style={{fontSize:11,color:T.text2,lineHeight:1.5}}>{st(selected.summary_key)}</div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setSelectedId(null)}
+              style={{border:'1px solid rgba(255,255,255,.1)',background:'transparent',color:T.text2,borderRadius:8,padding:'5px 9px',fontSize:11,cursor:'pointer'}}
+            >
+              {st('close')}
+            </button>
+          </div>
+
+          <div style={{display:'flex',gap:7,flexWrap:'wrap',marginBottom:12}}>
+            <Pill label={st(`severity_${selected.severity}`)} color={sevColor[selected.severity] || T.text3} />
+            <Pill label={`${st('confidence')}: ${st(`decision_confidence_${selected.confidence}`)}`} color={T.text2} />
+            {(selected.blocked_by_trust || selected.requires_review) && (
+              <Pill
+                label={selected.blocked_by_trust ? st('decision_trust_blocked') : st('decision_requires_review')}
+                color={selected.blocked_by_trust ? T.red : T.amber}
+              />
+            )}
+            <Pill label={`${st('trust_financial_title')}: ${st(`trust_status_${selected.trust_status || 'unavailable'}`)}`} color={trustColor[selected.trust_status] || T.text3} />
+          </div>
+
+          <div style={{fontSize:11,fontWeight:800,color:T.text1,marginBottom:6}}>{st('decision_detail_action')}</div>
+          <div style={{fontSize:11,color:T.text2,lineHeight:1.5,marginBottom:12}}>{st(selected.action_key)}</div>
+
+          <div style={{padding:'10px 12px',borderRadius:10,border:'1px solid rgba(255,255,255,.08)',background:'rgba(255,255,255,.025)',marginBottom:12}}>
+            <div style={{fontSize:11,fontWeight:800,color:T.text1,marginBottom:5}}>{st('decision_why_title')}</div>
+            <div style={{fontSize:11,color:T.text2,lineHeight:1.5}}>{whyDecisionText(selected)}</div>
+          </div>
+
+          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit, minmax(220px, 1fr))',gap:12}}>
+            <div>
+              <div style={{fontSize:11,fontWeight:800,color:T.text1,marginBottom:7}}>{st('decision_detail_rationale')}</div>
+              {(selected.rationale_keys || []).length ? selected.rationale_keys.map((key) => (
+                <div key={key} style={{fontSize:11,color:T.text2,lineHeight:1.45,marginBottom:5}}>
+                  {st(key)}
+                </div>
+              )) : (
+                <div style={{fontSize:11,color:T.text3}}>{st('decision_detail_no_rationale')}</div>
+              )}
+            </div>
+            <div>
+              <div style={{fontSize:11,fontWeight:800,color:T.text1,marginBottom:7}}>{st('decision_detail_evidence')}</div>
+              {(selected.evidence || []).length ? selected.evidence.map((item, idx) => {
+                const target = sourceTarget(item.source)
+                return (
+                  <div key={`${item.source || idx}-${idx}`} style={{fontSize:11,color:T.text2,lineHeight:1.45,marginBottom:8}}>
+                    <span style={{fontWeight:800,color:T.text1}}>{st(item.label_key)}:</span>{' '}
+                    <span>{renderValue(item.value)}</span>
+                    {item.source && <div style={{fontSize:9,color:T.text3,marginTop:2}}>{st('decision_detail_source')}: {item.source}</div>}
+                    {target && (
+                      <button
+                        type="button"
+                        onClick={() => viewSource(item)}
+                        style={{marginTop:5,border:'1px solid rgba(255,255,255,.1)',background:'rgba(255,255,255,.03)',color:T.text2,borderRadius:7,padding:'4px 8px',fontSize:10,cursor:'pointer'}}
+                      >
+                        {st('decision_view_source')}
+                      </button>
+                    )}
+                  </div>
+                )
+              }) : (
+                <div style={{fontSize:11,color:T.text3}}>{st('decision_detail_no_evidence')}</div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -1163,6 +1422,16 @@ export default function ExecutiveDashboard() {
   const status = intel?.status ?? (health!=null ? health>=80?'excellent':health>=60?'good':health>=40?'warning':'risk' : 'neutral')
   const kpis   = main?.kpi_block?.kpis || {}
   const period = main?.intelligence?.latest_period || main?.periods?.slice(-1)[0]
+  const trust = main ? normalizeFinancialTrust({ statements: main.statements, cashflow: main.cashflow }) : null
+  const decisionBundle = main ? normalizeDecisions({
+    statements: main.statements,
+    cashflow: main.cashflow,
+    kpis,
+    kpi_block: main.kpi_block,
+    intelligence: intel,
+    trust,
+  }) : null
+  const hasNormalizedDecisions = (decisionBundle?.decisions || []).length > 0
 
   return (
     <div className="" style={{padding:'18px 26px',display:'flex',flexDirection:'column',gap:14,
@@ -1217,10 +1486,27 @@ export default function ExecutiveDashboard() {
       <ExecutiveNarrativeStrip narrative={narrative} tr={tr} lang={lang} />
       <TopFocusBanner tr={tr} lang={lang} decSum={decSum} alertSum={alertSum} health={health}/>
 
-      {decs?.length>0 && <ActionStrip decisions={decs} tr={tr} lang={lang} causes={causes} impacts={impacts} onSelect={open}/>}
+      {main && <ExecutiveDecisionStrip bundle={decisionBundle} tr={tr} lang={lang} navigate={navigate}/>}
 
-      {main && <ExecutiveKpiRow kpis={kpis} cashflow={main.cashflow||{}} main={main} tr={tr} lang={lang}
-        alerts={alerts} onSelect={open} ctxLabel={ctxLabel}/>}
+      {!hasNormalizedDecisions && decs?.length>0 && (
+        <ActionStrip decisions={decs} tr={tr} lang={lang} causes={causes} impacts={impacts} onSelect={open}/>
+      )}
+
+      {main && (
+        <FinancialTrustStrip
+          trust={trust}
+          tr={tr}
+          lang={lang}
+          onDetails={() => navigate('/statements')}
+        />
+      )}
+
+      {main && (
+        <div id="executive-kpi-area">
+          <ExecutiveKpiRow kpis={kpis} cashflow={main.cashflow||{}} main={main} tr={tr} lang={lang}
+            alerts={alerts} onSelect={open} ctxLabel={ctxLabel}/>
+        </div>
+      )}
 
       {heavyReady && intel && <DomainGrid intelligence={intel} tr={tr} lang={lang}
         rootCauses={causes} decisions={decs} onSelect={open}/>}

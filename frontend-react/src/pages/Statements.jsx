@@ -12,6 +12,7 @@ import {
 import { useCompany } from '../context/CompanyContext.jsx'
 import { usePeriodScope } from '../context/PeriodScopeContext.jsx'
 import { buildAnalysisQuery } from '../utils/buildAnalysisQuery.js'
+import { normalizeFinancialTrust } from '../utils/trustNormalization.js'
 import '../styles/statements-premium.css'
 
 const API = '/api/v1'
@@ -59,6 +60,132 @@ function DataQualityBanner({ validation, tr }) {
           · {tr(`dq_${w.code}`)}
         </span>
       ))}
+    </div>
+  )
+}
+
+function statusColor(status) {
+  if (status === 'good') return 'var(--accent)'
+  if (status === 'warning') return 'var(--amber)'
+  if (status === 'risk') return 'var(--red)'
+  return 'rgba(196,204,214,0.55)'
+}
+
+function StatusBadge({ status, tr }) {
+  const color = statusColor(status)
+  return (
+    <span
+      style={{
+        fontSize: 9,
+        fontWeight: 800,
+        padding: '3px 8px',
+        borderRadius: 999,
+        color,
+        background: `${color}14`,
+        border: `1px solid ${color}35`,
+        textTransform: 'uppercase',
+        letterSpacing: '.04em',
+        whiteSpace: 'nowrap',
+      }}
+    >
+      {tr(`trust_status_${status || 'unavailable'}`)}
+    </span>
+  )
+}
+
+function StatementsIntegrityPanel({ trust, tab, tr }) {
+  if (!trust) return null
+  const checks = Array.isArray(trust.checks) ? trust.checks : []
+  const warnings = Array.isArray(trust.warnings) ? trust.warnings : []
+  const cashWarningKeys = new Set(['cashflow_partial', 'working_capital_unavailable', 'reconciliation_mismatch'])
+  const cashWarnings = warnings.filter((item) => cashWarningKeys.has(item.key))
+  const overall = trust.overall_status || 'unavailable'
+  const overallColor = statusColor(overall)
+
+  return (
+    <div
+      style={{
+        padding: '16px 18px',
+        borderRadius: 12,
+        border: `1px solid ${overallColor}30`,
+        borderLeft: `3px solid ${overallColor}`,
+        background: 'linear-gradient(135deg, rgba(22,27,34,0.9) 0%, rgba(13,17,23,0.96) 100%)',
+      }}
+    >
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
+        <div>
+          <div style={{ fontSize: 11, fontWeight: 800, color: '#fff', letterSpacing: '.08em', textTransform: 'uppercase' }}>
+            {tr('trust_integrity_panel_title')}
+          </div>
+          <div style={{ fontSize: 11, color: 'rgba(196,204,214,0.65)', marginTop: 4 }}>
+            {tr('trust_integrity_panel_subtitle')}
+          </div>
+        </div>
+        <StatusBadge status={overall} tr={tr} />
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 10 }}>
+        {checks.map((item) => (
+          <div
+            key={item.key}
+            style={{
+              padding: '10px 11px',
+              borderRadius: 10,
+              border: '1px solid rgba(255,255,255,0.08)',
+              background: 'rgba(255,255,255,0.025)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 7 }}>
+              <span style={{ fontSize: 11, fontWeight: 750, color: '#fff' }}>
+                {tr(item.label_key || `trust_check_${item.key}`)}
+              </span>
+              <StatusBadge status={item.status} tr={tr} />
+            </div>
+            <div style={{ fontSize: 11, lineHeight: 1.45, color: 'rgba(196,204,214,0.68)' }}>
+              {tr(`trust_check_${item.key}_desc`)}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {warnings.length > 0 && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 12 }}>
+          {warnings.map((item) => (
+            <span
+              key={item.key}
+              style={{
+                fontSize: 10,
+                fontWeight: 700,
+                color: statusColor(item.status),
+                padding: '4px 8px',
+                borderRadius: 999,
+                background: `${statusColor(item.status)}12`,
+                border: `1px solid ${statusColor(item.status)}30`,
+              }}
+            >
+              {tr(item.label_key || `trust_warning_${item.key}`)}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {tab === 'cash' && cashWarnings.length > 0 && (
+        <div
+          style={{
+            marginTop: 12,
+            padding: '10px 12px',
+            borderRadius: 10,
+            border: '1px solid rgba(251,191,36,0.28)',
+            background: 'rgba(251,191,36,0.07)',
+            color: 'rgba(255,255,255,0.82)',
+            fontSize: 11,
+            lineHeight: 1.45,
+          }}
+        >
+          <strong style={{ color: 'var(--amber)' }}>{tr('trust_cashflow_warning_title')}:</strong>{' '}
+          {cashWarnings.map((item) => tr(item.label_key || `trust_warning_${item.key}`)).join(' · ')}
+        </div>
+      )}
     </div>
   )
 }
@@ -118,7 +245,9 @@ export default function Statements() {
     '—'
   const validation = meta.pipeline_validation
   const health = d.health_score_v2
+  const trust = data ? normalizeFinancialTrust({ statements: d.statements, cashflow: d.cashflow }) : null
   const cfOk = tab === 'cash' ? cashHierarchyHasOperatingData(stmtH?.cashflow) : true
+  const hasBalanceData = Boolean(stmtH?.balance_sheet?.has_data)
 
   const healthHue =
     health != null && Number.isFinite(Number(health))
@@ -131,9 +260,13 @@ export default function Statements() {
 
   const TABS = [
     { k: 'income', label: tr('stmt_section_is') },
-    { k: 'balance', label: tr('stmt_section_bs') },
+    ...(hasBalanceData ? [{ k: 'balance', label: tr('stmt_section_bs') }] : []),
     { k: 'cash', label: tr('stmt_section_cf') },
   ]
+
+  useEffect(() => {
+    if (tab === 'balance' && !hasBalanceData) setTab('income')
+  }, [tab, hasBalanceData])
 
   if (!selectedId) {
     return (
@@ -403,6 +536,8 @@ export default function Statements() {
             )}
           </div>
 
+          <StatementsIntegrityPanel trust={trust} tab={tab} tr={tr} />
+
           {/* TABS */}
           <div
             style={{
@@ -444,7 +579,7 @@ export default function Statements() {
               <StatementHierarchyTree root={stmtH.income_statement} tr={tr} lang={lang} mode="income" />
             )}
 
-            {tab === 'balance' && stmtH.balance_sheet && (
+            {tab === 'balance' && hasBalanceData && stmtH.balance_sheet && (
               <StatementHierarchyTree root={stmtH.balance_sheet} tr={tr} lang={lang} mode="balance" />
             )}
 

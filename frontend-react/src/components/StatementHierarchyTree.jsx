@@ -6,6 +6,8 @@ import { formatCompactForLang } from '../utils/numberFormat.js'
 import {
   resolveStatementHierarchyRootTitle,
   resolveStatementHierarchyRowLabel,
+  resolveStatementHierarchyBadgeLabel,
+  resolveStatementHierarchyNote,
 } from '../utils/statementHierarchyLabels.js'
 import '../styles/statements-premium.css'
 
@@ -49,7 +51,7 @@ function cashRowLane(node) {
   return 'bridge'
 }
 
-function laneStyle(lane, { hasKids, leaf, statementKind, rowKind }) {
+function laneStyle(lane, { hasKids, statementKind, rowKind }) {
   const base = {
     borderBottom: '1px solid rgba(255,255,255,0.055)',
     transition: 'background 0.15s ease',
@@ -149,10 +151,11 @@ function laneStyle(lane, { hasKids, leaf, statementKind, rowKind }) {
     }
   }
   if (rowKind === 'source') {
-    return { ...base, background: 'transparent' }
-  }
-  if (leaf) {
-    return { ...base, background: 'transparent' }
+    return {
+      ...base,
+      background: 'rgba(255,255,255,0.012)',
+      borderInlineStart: '1px solid rgba(196,204,214,0.08)',
+    }
   }
   return base
 }
@@ -187,21 +190,23 @@ function labelStyle(lane, depth, labelLeaf, statementKind, tier) {
   let weight = labelLeaf ? 400 : 600
   let color = labelLeaf ? 'rgba(196,204,214,0.82)' : 'rgba(232,236,244,0.95)'
   if (tier === 'ledger') {
-    size = d >= 3 ? 10.75 : 11.25
+    size = d >= 3 ? 10.5 : 11
     weight = 400
-    color = 'rgba(186,194,204,0.76)'
+    color = 'rgba(176,184,194,0.72)'
   }
   if (tier === 'section' && !labelLeaf) {
-    size = Math.max(size, 12.5)
-    weight = 750
+    size = Math.max(size, 12.75)
+    weight = 780
+    color = '#f3f6fb'
   }
   if (tier === 'subtotal' && !labelLeaf) {
-    size = Math.max(size, 12)
-    weight = 680
+    size = Math.max(size, 12.25)
+    weight = 740
+    color = 'rgba(240,244,250,0.98)'
   }
   if (tier === 'split' && !labelLeaf) {
-    weight = 620
-    color = 'rgba(224,230,240,0.9)'
+    weight = 660
+    color = 'rgba(229,235,244,0.93)'
   }
   if (statementKind === 'income' && lane === 'net') {
     size = 13.5
@@ -231,6 +236,7 @@ function labelStyle(lane, depth, labelLeaf, statementKind, tier) {
     fontSize: size,
     fontWeight: weight,
     color,
+    letterSpacing: tier === 'ledger' ? '0.01em' : 'normal',
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
@@ -248,13 +254,14 @@ function valueStyle(lane, labelLeaf, statementKind, tier) {
   let weight = labelLeaf ? 500 : 650
   let color = 'rgba(232,236,244,0.92)'
   if (tier === 'ledger') {
-    size = 11
-    weight = 520
-    color = 'rgba(210,218,228,0.88)'
+    size = 10.75
+    weight = 500
+    color = 'rgba(186,194,204,0.8)'
   }
   if (tier === 'subtotal' && !labelLeaf) {
-    size = 13
-    weight = 740
+    size = 13.25
+    weight = 760
+    color = '#f2f5fa'
   }
   if (statementKind === 'income' && lane === 'net') {
     size = 14.5
@@ -278,10 +285,34 @@ function valueStyle(lane, labelLeaf, statementKind, tier) {
     weight = 800
   }
   if (statementKind === 'cash' && lane === 'fcf' && !labelLeaf) {
-    size = 13
-    weight = 780
+    size = 13.25
+    weight = 800
   }
   return { ...mono, fontSize: size, fontWeight: weight, color }
+}
+
+function provenanceBadgeStyle(provenance) {
+  const background =
+    provenance === 'synthetic_injected'
+      ? 'rgba(210,168,75,0.22)'
+      : provenance === 'merged_source_leaf'
+        ? 'rgba(88,166,255,0.18)'
+        : 'rgba(255,255,255,0.08)'
+  return {
+    display: 'inline-flex',
+    alignItems: 'center',
+    marginInlineStart: 8,
+    padding: '1px 6px',
+    borderRadius: 999,
+    border: '1px solid rgba(255,255,255,0.1)',
+    background,
+    color: 'rgba(196,204,214,0.72)',
+    fontSize: 9,
+    fontWeight: 700,
+    letterSpacing: '0.08em',
+    textTransform: 'uppercase',
+    flexShrink: 0,
+  }
 }
 
 function StmtHierRow({ node, tr, lang, defaultOpen = false, statementKind }) {
@@ -292,8 +323,10 @@ function StmtHierRow({ node, tr, lang, defaultOpen = false, statementKind }) {
   const val = node?.value
   const depth = Number(node?.depth) || 0
   const pad = 16 + depth * 18
-  const leaf = Boolean(node?.leaf)
   const labelLeaf = rowKind === 'source'
+  const provenance = typeof node?.provenance === 'string' ? node.provenance : ''
+  const provenanceText = resolveStatementHierarchyBadgeLabel(provenance, tr, lang)
+  const noteText = resolveStatementHierarchyNote(node, tr, lang)
 
   let lane = 'line'
   if (statementKind === 'income') lane = incomeRowLane(node || {})
@@ -303,7 +336,7 @@ function StmtHierRow({ node, tr, lang, defaultOpen = false, statementKind }) {
   const tier = computeTier(statementKind, lane, rowKind, hasKids)
   const tierClass = `stmt-tier-${tier}`
 
-  const wrapSx = laneStyle(lane, { hasKids, leaf, statementKind, rowKind })
+  const wrapSx = laneStyle(lane, { hasKids, statementKind, rowKind })
 
   if (!hasKids) {
     return (
@@ -314,8 +347,14 @@ function StmtHierRow({ node, tr, lang, defaultOpen = false, statementKind }) {
           padding: `7px 14px 7px ${pad}px`,
         }}
       >
-        <span className="stmt-row-label-cell" style={labelStyle(lane, depth, labelLeaf, statementKind, tier)}>
-          {lbl}
+        <span style={{ display: 'flex', alignItems: 'center', minWidth: 0 }}>
+          <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+            <span className="stmt-row-label-cell" style={labelStyle(lane, depth, labelLeaf, statementKind, tier)}>
+              {lbl}
+            </span>
+            {noteText ? <span className="stmt-row-note">{noteText}</span> : null}
+          </span>
+          {provenanceText ? <span style={provenanceBadgeStyle(provenance)}>{provenanceText}</span> : null}
         </span>
         <span style={valueStyle(lane, labelLeaf, statementKind, tier)}>{fmt(val, lang)}</span>
       </div>
@@ -336,9 +375,13 @@ function StmtHierRow({ node, tr, lang, defaultOpen = false, statementKind }) {
           <span className="stmt-chevron" aria-hidden>
             ▶
           </span>
-          <span className="stmt-row-label-cell" style={labelStyle(lane, depth, false, statementKind, tier)}>
-            {lbl}
+          <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+            <span className="stmt-row-label-cell" style={labelStyle(lane, depth, false, statementKind, tier)}>
+              {lbl}
+            </span>
+            {noteText ? <span className="stmt-row-note">{noteText}</span> : null}
           </span>
+          {provenanceText ? <span style={provenanceBadgeStyle(provenance)}>{provenanceText}</span> : null}
         </span>
         <span style={valueStyle(lane, false, statementKind, tier)}>
           {val != null && val !== '' ? fmt(val, lang) : ''}
@@ -482,18 +525,24 @@ export function StatementHierarchyTree({ root, tr, lang, mode }) {
   )
 }
 
-/** Operating block from statement_hierarchy.cashflow — no inferred lines. */
+/** Cash flow block from statement_hierarchy.cashflow — no inferred lines. */
 export function StatementCashOperatingTree({ cashflowRoot, tr, lang }) {
   const kids = Array.isArray(cashflowRoot?.children) ? cashflowRoot.children.filter((x) => x && typeof x === 'object') : []
   if (!cashflowRoot || kids.length === 0) return null
-  const operating =
-    kids.find((c) => c.key === 'cf_operating') || kids[0]
-  if (!operating) return null
   const rootTitle = resolveStatementHierarchyRootTitle(cashflowRoot, tr, lang)
   return (
     <WorkspaceChrome title={rootTitle} tr={tr}>
       <div style={{ padding: '0 8px' }}>
-        <StmtHierRow node={operating} tr={tr} lang={lang} defaultOpen statementKind="cash" />
+        {kids.map((node, idx) => (
+          <StmtHierRow
+            key={String(node.key ?? node.label ?? idx)}
+            node={node}
+            tr={tr}
+            lang={lang}
+            defaultOpen={node?.key === 'cf_operating' || node?.key === 'cf_investing' || node?.key === 'cf_financing'}
+            statementKind="cash"
+          />
+        ))}
       </div>
     </WorkspaceChrome>
   )

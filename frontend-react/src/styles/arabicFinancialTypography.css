@@ -5,7 +5,16 @@
 
 html[lang='ar'] body,
 html[lang='ar'] #root {
+  font-family: 'Noto Sans Arabic', 'Segoe UI', Tahoma, Arial, sans-serif;
   line-height: 1.62;
+}
+
+html[lang='ar'] button,
+html[lang='ar'] input,
+html[lang='ar'] textarea,
+html[lang='ar'] select,
+html[lang='ar'] label {
+  font-family: 'Noto Sans Arabic', 'Segoe UI', Tahoma, Arial, sans-serif;
 }
 
 /* ── Command Center — primary decision + hero narrative ───────────── */

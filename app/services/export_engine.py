@@ -1114,11 +1114,20 @@ def _build_narrative_sheet(ws, narrative: dict, lang: str = 'en'):
     r += 2
 
     no_risks = _t("exp_no_risks", lang)
+    if lang == "ar":
+        missing_summary = "لا توجد أدلة كمية كافية لصياغة ملخص تنفيذي موثوق."
+        missing_action = "لا يوجد إجراء موصى به بدرجة ثقة كافية من البيانات الحالية."
+    elif lang == "tr":
+        missing_summary = "Güvenilir bir yönetici özeti üretmek için yeterli nicel kanıt yok."
+        missing_action = "Mevcut verilerden yeterli güven düzeyinde türetilmiş bir önerilen eylem yok."
+    else:
+        missing_summary = "There is not enough quantitative evidence to produce a reliable executive summary."
+        missing_action = "No recommended action can be stated with enough confidence from the current data."
     sections = [
-        (_t("nar_summary",lang),   narrative.get("executive_summary",  "—")),
+        (_t("nar_summary",lang),   narrative.get("executive_summary") or missing_summary),
         (_t("nar_takeaways",lang), "\n".join(f"✓ {t}" for t in (narrative.get("key_takeaways") or []))),
         (_t("nar_risks",lang),     "\n".join(f"⚠ {t}" for t in (narrative.get("risks") or [])) or no_risks),
-        (_t("nar_action",lang),    narrative.get("recommended_action",  "—")),
+        (_t("nar_action",lang),    narrative.get("recommended_action") or missing_action),
     ]
 
     for label, content in sections:

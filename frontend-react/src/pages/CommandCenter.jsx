@@ -2173,6 +2173,7 @@ export default function CommandCenter() {
   const [fcData,   setFcData]   = useState(null)
   const [loading,  setLoading]  = useState(false)
   const prevLoadingRef = useRef(false)
+  const trRef = useRef(tr)
   const [dashEnterCls, setDashEnterCls] = useState('')
   const [consolidate, setConsolidate] = useState(false)
   const [noDataMsg, setNoDataMsg] = useState(null)
@@ -2187,6 +2188,10 @@ export default function CommandCenter() {
 
   // Defer expensive charts / composites until after first paint/idle.
   const heavyReady = useDeferredMount({ idle: true, timeoutMs: 1400 })
+
+  useEffect(() => {
+    trRef.current = tr
+  }, [tr])
 
   const drillAnalysis = useCallback(
     (tab) => {
@@ -2209,7 +2214,7 @@ export default function CommandCenter() {
         if (r.status === 422) {
           setMain(null)
           setNarrative(null)
-          setNoDataMsg(strictT(tr, lang, 'err_no_financial_data'))
+          setNoDataMsg(strictT(trRef.current, lang, 'err_no_financial_data'))
         }
         return
       }
@@ -2255,7 +2260,7 @@ export default function CommandCenter() {
     } finally {
       setLoading(false)
     }
-  }, [selectedId, lang, consolidate, win, scopeQS, tr, psIncomplete, psSetResolved, authFetch])
+  }, [selectedId, lang, consolidate, win, scopeQS, psIncomplete, psSetResolved, authFetch])
 
   useEffect(() => { load() }, [load])
 

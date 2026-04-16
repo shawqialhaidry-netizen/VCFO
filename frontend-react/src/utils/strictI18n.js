@@ -1,25 +1,18 @@
-/**
- * Strict i18n: missing/invalid keys → console.error + locale-safe placeholder (bundled `i18n_missing_label`).
- * LangContext `tr` uses the same rules (no raw keys, no EN→AR/TR leakage via fallbackLabel).
+﻿/**
+ * Strict i18n: missing or invalid keys log to console.error and resolve to a
+ * locale-safe placeholder. LangContext `tr` uses the same rules.
  */
 import { fallbackLabel } from '../i18n/criticalFallbacks.js'
 
 export const STRICT_I18N_PLACEHOLDER = '\u2026'
 
-/** Single source of truth for UI language codes (Command Center, narrative, drills). */
 export function normalizeUiLang(lang) {
-  const l = String(lang ?? '')
-    .trim()
-    .toLowerCase()
+  const l = String(lang ?? '').trim().toLowerCase()
   if (l === 'ar') return 'ar'
   if (l === 'tr') return 'tr'
   return 'en'
 }
 
-/**
- * Bound translator for narrative builders: supports `t(key)` and `t(key, params)`.
- * Keeps one resolution path with strictT / strictTParams (no English leakage in ar/tr).
- */
 export function makeStrictTr(tr, lang) {
   return (key, params) => {
     if (params != null && typeof params === 'object') return strictTParams(tr, lang, key, params)
@@ -27,7 +20,6 @@ export function makeStrictTr(tr, lang) {
   }
 }
 
-/** Visible fallback when a key is missing — Arabic/Turkish get non-English copy from locale JSON. */
 export function localizedMissingPlaceholder(lang) {
   const code = String(lang || 'en').toLowerCase()
   const loc = code === 'ar' ? 'ar' : code === 'tr' ? 'tr' : 'en'
@@ -36,15 +28,10 @@ export function localizedMissingPlaceholder(lang) {
   return loc === 'ar' ? '[؟]' : loc === 'tr' ? '[?]' : '[?]'
 }
 
-/** Translation *values* that look like unresolved keys — never show as visible UI copy in any locale */
 export function looksLikeRawI18nKey(v) {
   if (typeof v !== 'string') return false
   const t = v.trim()
-  return (
-    /^(exec_|cmd_|nav_|dq_|kpi_|tab_|ratio_|domain_signal_|narr_|drill_|ai_cfo_|loc_|stmt_|gen_|cashflow_|app_|upload_|login_|tb_|cfo_|validation_|mapped_|period_|forecast_|analysis_|branch_|trial_|search_|health_|company_|data_|board_|members_|settings_|plan_|role_|hint_|api_|session_|trial_wall_|i18n_|fmt_)[a-z0-9_]+$/i.test(
-      t
-    )
-  )
+  return /^(exec_|cmd_|nav_|dq_|kpi_|tab_|ratio_|domain_signal_|narr_|drill_|ai_cfo_|loc_|stmt_|gen_|cashflow_|app_|upload_|login_|tb_|cfo_|validation_|mapped_|period_|forecast_|analysis_|branch_|trial_|search_|health_|company_|data_|board_|members_|settings_|plan_|role_|hint_|api_|session_|trial_wall_|i18n_|fmt_)[a-z0-9_]+$/i.test(t)
 }
 
 function invalidTranslation(key, val) {
@@ -56,10 +43,6 @@ function invalidTranslation(key, val) {
   )
 }
 
-/**
- * Resolve a key from the live map + bundled fallback — same rules as strictT (no raw keys, locale-safe miss).
- * Used by LangContext `tr` so every consumer gets strict i18n without per-call strictT().
- */
 export function readTranslation(translations, lang, key) {
   if (!key) return localizedMissingPlaceholder(lang)
   let s = translations && typeof translations === 'object' ? translations[key] : undefined
@@ -71,10 +54,9 @@ export function readTranslation(translations, lang, key) {
   return s
 }
 
-/** After param substitution, remove any leftover `{token}` so raw placeholders never reach UI. */
 export function stripUnresolvedI18nPlaceholders(s) {
   if (typeof s !== 'string') return s
-  return s.replace(/\{[a-zA-Z_][a-zA-Z0-9_.]*\}/g, '—')
+  return s.replace(/\{[a-zA-Z_][a-zA-Z0-9_.]*\}/g, '-')
 }
 
 export function applyTranslationParams(s, lang, params) {
@@ -87,11 +69,6 @@ export function applyTranslationParams(s, lang, params) {
   return stripUnresolvedI18nPlaceholders(out)
 }
 
-/**
- * @param {(key: string) => string} tr
- * @param {string} lang
- * @param {string} key
- */
 export function strictT(tr, lang, key) {
   let v
   try {
@@ -107,9 +84,6 @@ export function strictT(tr, lang, key) {
   return v
 }
 
-/**
- * Template with {name} placeholders — each segment strict; missing sub-key → placeholder for that segment only.
- */
 export function strictTParams(tr, lang, key, params) {
   const missing = localizedMissingPlaceholder(lang)
   const base = strictT(tr, lang, key)

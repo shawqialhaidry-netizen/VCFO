@@ -53,6 +53,8 @@ class LineItem:
     amount:        float          # positive = normal balance for that type
     mapped_type:   str
     confidence:    float
+    provenance:    str = "direct_source_leaf"
+    source_row_count: int = 1
 
 
 @dataclass
@@ -77,10 +79,12 @@ class IncomeStatement:
     total_expenses:   float = 0.0
 
     # Unclassified debit-net P&L suspects (mapped_type == "other", amount > 0)
-    # — excluded from expense_items so category intelligence is not inflated;
-    #   still deducted in operating_profit so net_profit matches prior behavior.
+    # — kept separate from expense_items so category intelligence is not inflated;
+    #   deducted in operating_profit so profit is not overstated.
     unclassified_pnl_debit_items: list[LineItem] = field(default_factory=list)
     total_unclassified_pnl_debits: float = 0.0
+    unclassified_pnl_impact_excluded: bool = False
+    income_statement_warning: str | None = None
 
     # Operating Profit
     operating_profit: float = 0.0
@@ -105,16 +109,16 @@ class BalanceSheet:
     total_assets:       float = 0.0
 
     # Asset breakdown — account code ranges (1000-1399 = current, 1400+ = non-current)
-    current_assets:     float = 0.0
-    noncurrent_assets:  float = 0.0
+    current_assets:     float | None = 0.0
+    noncurrent_assets:  float | None = 0.0
 
     # Liabilities
     liability_items:    list[LineItem] = field(default_factory=list)
     total_liabilities:  float = 0.0
 
     # Liability breakdown — (2000-2199 = current, 2200+ = non-current)
-    current_liabilities:    float = 0.0
-    noncurrent_liabilities: float = 0.0
+    current_liabilities:    float | None = 0.0
+    noncurrent_liabilities: float | None = 0.0
 
     # Equity
     equity_items:       list[LineItem] = field(default_factory=list)
@@ -122,19 +126,27 @@ class BalanceSheet:
 
     # Working Capital — SINGLE SOURCE OF TRUTH
     # working_capital = current_assets - current_liabilities
-    working_capital:    float = 0.0
+    working_capital:    float | None = 0.0
 
     # Balance check:  assets == liabilities + equity
     liabilities_equity: float = 0.0
     is_balanced:        bool = False
     balance_diff:       float = 0.0
-    current_assets_approximated:      bool = False   # True = fallback used; no 1000-1399 accounts
-    current_liabilities_approximated: bool = False   # True = fallback used; no 2000-2199 accounts
+    current_assets_approximated:      bool = False   # retained for backward compatibility; no longer used for "all current" fallback
+    current_liabilities_approximated: bool = False   # retained for backward compatibility; no longer used for "all current" fallback
+    current_assets_unavailable:       bool = False
+    current_liabilities_unavailable:  bool = False
+    current_noncurrent_grouping_warning: str | None = None
 
     # FIX-2.1: TB type metadata
     tb_type:        str | None = None   # "pre_closing"|"post_closing"|"unknown"
     np_injected:    bool = False        # True only when pre_closing NP was added
     balance_warning: str | None = None  # set when tb_type unknown
+    synthetic_equity_support: bool = False
+    synthetic_equity_support_reason: str | None = None
+    retained_earnings_continuity_proven: bool = False
+    equity_rollforward_available: bool = False
+    equity_integrity_warning: str | None = None
 
 
 @dataclass
@@ -189,12 +201,16 @@ def _net_amount(row: dict, positive_side: str) -> float:
 
 
 def _to_line_item(row: dict, positive_side: str) -> LineItem:
+    source_row_count = int(float(row.get("source_row_count", 1) or 1))
+    provenance = "merged_source_leaf" if source_row_count > 1 else "direct_source_leaf"
     return LineItem(
         account_code = str(row.get("account_code", "")),
         account_name = str(row.get("account_name", "")),
         amount       = _net_amount(row, positive_side),
         mapped_type  = _canon_mapped_type(row.get("mapped_type", "other")),
         confidence   = float(row.get("confidence", 0)),
+        provenance   = provenance,
+        source_row_count = source_row_count,
     )
 
 
@@ -260,6 +276,12 @@ def _build_income_statement(
     stmt.total_unclassified_pnl_debits = _round2(
         sum(li.amount for li in stmt.unclassified_pnl_debit_items)
     )
+    stmt.unclassified_pnl_impact_excluded = False
+    if stmt.total_unclassified_pnl_debits > 0:
+        stmt.income_statement_warning = (
+            "unclassified_pnl_debits_deducted_from_profit: debit-net unmapped rows were deducted from profit but kept separate from operating expense categories"
+        )
+
     stmt.total_expenses     = _round2(sum(li.amount for li in stmt.expense_items))
     stmt.operating_profit   = _round2(
         stmt.gross_profit - stmt.total_expenses - stmt.total_unclassified_pnl_debits
@@ -308,6 +330,11 @@ def _build_balance_sheet(
     bs.tb_type          = tb_type or "unknown"
     bs.np_injected      = False
     bs.balance_warning  = None
+    bs.synthetic_equity_support = False
+    bs.synthetic_equity_support_reason = None
+    bs.retained_earnings_continuity_proven = False
+    bs.equity_rollforward_available = False
+    bs.equity_integrity_warning = None
 
     if tb_type == "pre_closing" and net_profit != 0:
         bs.equity_items.append(LineItem(
@@ -316,16 +343,30 @@ def _build_balance_sheet(
             amount       = _round2(net_profit),
             mapped_type  = EQUITY,
             confidence   = 1.0,
+            provenance   = "synthetic_injected",
+            source_row_count = 0,
         ))
         bs.np_injected = True
+        bs.synthetic_equity_support = True
+        bs.synthetic_equity_support_reason = (
+            "pre_closing_net_profit_injected_for_balance_support"
+        )
+        bs.equity_integrity_warning = (
+            "equity_rollforward_not_proven: current-period net profit was injected to support pre-closing balance handling"
+        )
     elif tb_type == "post_closing":
-        # NP already in retained earnings — do not touch
-        pass
+        # NP already in retained earnings ? do not touch
+        bs.equity_integrity_warning = (
+            "equity_rollforward_not_proven: post-closing retained earnings continuity is assumed from tb_type but not independently verified"
+        )
     else:
         # Unknown tb_type: conservative, no injection, flag warning
         bs.balance_warning = "tb_type_unknown: net_profit not injected into equity"
+        bs.equity_integrity_warning = (
+            "equity_rollforward_not_proven: tb_type is unknown and retained earnings continuity is not verified"
+        )
 
-    # ── Totals ────────────────────────────────────────────────────────────────
+    # ?? Totals ????????????????????????????????????????????????????????????????
     bs.total_assets      = _round2(sum(li.amount for li in bs.asset_items))
     bs.total_liabilities = _round2(sum(li.amount for li in bs.liability_items))
     bs.total_equity      = _round2(sum(li.amount for li in bs.equity_items))
@@ -337,38 +378,69 @@ def _build_balance_sheet(
     #   1400-1999 → non-current (fixed) assets
     #   2000-2199 → current liabilities
     #   2200-2999 → non-current liabilities
-    def _code_range(items: list, lo: int, hi: int) -> float:
-        total = 0.0
+    def _split_by_code_range(
+        items: list[LineItem],
+        current_lo: int,
+        current_hi: int,
+        noncurrent_lo: int,
+        noncurrent_hi: int,
+    ) -> tuple[float | None, float | None, bool]:
+        current_total = 0.0
+        noncurrent_total = 0.0
+        has_unknown = False
         for item in items:
             code = str(item.account_code).strip()
             try:
                 num = int(code[:4]) if len(code) >= 4 else int(code)
             except (ValueError, TypeError):
-                num = lo   # fallback: treat as lower bound (current)
-            if lo <= num <= hi:
-                total += abs(item.amount)
-        return _round2(total)
+                has_unknown = True
+                continue
 
-    bs.current_assets         = _code_range(bs.asset_items,     1000, 1399)
-    bs.noncurrent_assets      = _code_range(bs.asset_items,     1400, 1999)
-    bs.current_liabilities    = _code_range(bs.liability_items, 2000, 2199)
-    bs.noncurrent_liabilities = _code_range(bs.liability_items, 2200, 2999)
+            if current_lo <= num <= current_hi:
+                current_total += abs(item.amount)
+            elif noncurrent_lo <= num <= noncurrent_hi:
+                noncurrent_total += abs(item.amount)
+            else:
+                has_unknown = True
 
-    # Fallback: if no account codes in range → use totals as current
-    # This is an APPROXIMATION — it assumes all assets/liabilities are current.
-    # The approximation_flag is set so downstream consumers can surface a warning.
-    bs.current_assets_approximated        = False
-    bs.current_liabilities_approximated   = False
-    if bs.current_assets == 0.0 and bs.total_assets != 0.0:
-        bs.current_assets = bs.total_assets
-        bs.current_assets_approximated = True   # Flag: no 1000-1399 accounts found
-    if bs.current_liabilities == 0.0 and bs.total_liabilities != 0.0:
-        bs.current_liabilities = bs.total_liabilities
-        bs.current_liabilities_approximated = True  # Flag: no 2000-2199 accounts found
+        if has_unknown:
+            return None, None, True
+        return _round2(current_total), _round2(noncurrent_total), False
+
+    bs.current_assets_approximated = False
+    bs.current_liabilities_approximated = False
+    bs.current_noncurrent_grouping_warning = None
+
+    bs.current_assets, bs.noncurrent_assets, asset_grouping_unknown = _split_by_code_range(
+        bs.asset_items, 1000, 1399, 1400, 1999
+    )
+    (
+        bs.current_liabilities,
+        bs.noncurrent_liabilities,
+        liability_grouping_unknown,
+    ) = _split_by_code_range(bs.liability_items, 2000, 2199, 2200, 2999)
+
+    bs.current_assets_unavailable = asset_grouping_unknown and bs.total_assets != 0.0
+    bs.current_liabilities_unavailable = liability_grouping_unknown and bs.total_liabilities != 0.0
+    if bs.current_assets_unavailable and bs.current_liabilities_unavailable:
+        bs.current_noncurrent_grouping_warning = (
+            "current_noncurrent_grouping_unavailable: asset and liability code ranges are incomplete or nonstandard"
+        )
+    elif bs.current_assets_unavailable:
+        bs.current_noncurrent_grouping_warning = (
+            "current_noncurrent_grouping_unavailable: asset code ranges are incomplete or nonstandard"
+        )
+    elif bs.current_liabilities_unavailable:
+        bs.current_noncurrent_grouping_warning = (
+            "current_noncurrent_grouping_unavailable: liability code ranges are incomplete or nonstandard"
+        )
 
     # ── Working Capital — SINGLE SOURCE OF TRUTH ─────────────────────────────
     # Formula: Working Capital = Current Assets - Current Liabilities
-    bs.working_capital = _round2(bs.current_assets - bs.current_liabilities)
+    if bs.current_assets is None or bs.current_liabilities is None:
+        bs.working_capital = None
+    else:
+        bs.working_capital = _round2(bs.current_assets - bs.current_liabilities)
 
     # Balance check
     TOLERANCE = 0.10   # allow up to 10 cents rounding difference
@@ -437,6 +509,8 @@ def _line_items_to_list(items: list[LineItem]) -> list[dict]:
             "amount":       li.amount,
             "mapped_type":  li.mapped_type,
             "confidence":   li.confidence,
+            "provenance":   li.provenance,
+            "source_row_count": li.source_row_count,
         }
         for li in items
     ]
@@ -470,7 +544,10 @@ def statements_to_dict(fs: FinancialStatements) -> dict:
             "unclassified_pnl_debits": {
                 "items": _line_items_to_list(is_.unclassified_pnl_debit_items),
                 "total": is_.total_unclassified_pnl_debits,
+                "excluded_from_profit": is_.unclassified_pnl_impact_excluded,
+                "deducted_from_profit": is_.total_unclassified_pnl_debits > 0,
             },
+            "income_statement_warning": is_.income_statement_warning,
             "operating_profit":        is_.operating_profit,
             "operating_margin_pct":    is_.operating_margin_pct,
             "tax": {
@@ -497,6 +574,11 @@ def statements_to_dict(fs: FinancialStatements) -> dict:
             "equity": {
                 "items": _line_items_to_list(bs.equity_items),
                 "total": bs.total_equity,
+                "synthetic_equity_support": bs.synthetic_equity_support,
+                "synthetic_equity_support_reason": bs.synthetic_equity_support_reason,
+                "retained_earnings_continuity_proven": bs.retained_earnings_continuity_proven,
+                "equity_rollforward_available": bs.equity_rollforward_available,
+                "equity_integrity_warning": bs.equity_integrity_warning,
             },
             # SINGLE SOURCE OF TRUTH for working capital
             "working_capital":        bs.working_capital,
@@ -509,6 +591,9 @@ def statements_to_dict(fs: FinancialStatements) -> dict:
             "balance_diff":           bs.balance_diff,
             "current_assets_approximated":      bs.current_assets_approximated,
             "current_liabilities_approximated": bs.current_liabilities_approximated,
+            "current_assets_unavailable":       bs.current_assets_unavailable,
+            "current_liabilities_unavailable":  bs.current_liabilities_unavailable,
+            "current_noncurrent_grouping_warning": bs.current_noncurrent_grouping_warning,
             # FIX-2.1: TB type transparency
             "tb_type":        bs.tb_type,
             "np_injected":    bs.np_injected,

@@ -86,6 +86,12 @@ _DECISION_HINTS: dict[str, dict[str, str]] = {
     },
 }
 
+_LIMITATION_TEXT: dict[str, str] = {
+    "en": "Available evidence is not yet sufficient to explain this point with decision-grade confidence.",
+    "ar": "الأدلة المتاحة حاليًا غير كافية لشرح هذه النقطة بدرجة ثقة مناسبة لاتخاذ قرار.",
+    "tr": "Mevcut kanıt bu noktayı karar kalitesinde açıklamak için henüz yeterli değil.",
+}
+
 def _hint(domain: str, lang: str) -> str:
     bucket = _DECISION_HINTS.get(domain, {})
     return bucket.get(lang) or bucket.get("en", "")
@@ -241,6 +247,15 @@ def build_narratives(
         # Final fallback: use decision_hint if still empty
         if not what_to_do:
             what_to_do = hint
+
+        if not what_happened:
+            if merged_metrics:
+                metric_bits = ", ".join(f"{k}={v}" for k, v in list(merged_metrics.items())[:3])
+                what_happened = f"{_LIMITATION_TEXT[safe_lang]} Evidence available: {metric_bits}."
+            else:
+                what_happened = _LIMITATION_TEXT[safe_lang]
+        if not why_it_matters:
+            why_it_matters = _LIMITATION_TEXT[safe_lang]
 
         # Collect all drivers (deduplicated)
         drivers: list[str] = []

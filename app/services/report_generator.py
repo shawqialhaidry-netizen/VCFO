@@ -226,11 +226,16 @@ def _build_opportunities(executive: dict, analysis: dict) -> list[dict]:
 
     for o in (executive.get("opportunities") or []):
         otype = o.get("type", "")
+        desc = o.get("description", "")
+        if not desc:
+            sm = o.get("source_metrics") or []
+            metrics = ", ".join(str(m) for m in sm[:3]) if sm else "current metrics"
+            desc = f"Positive evidence is present in {otype or 'performance'} based on {metrics}; confirm that the signal is converting into stronger margin and cash generation."
         if otype not in seen:
             seen.add(otype)
             opps.append({
                 "type":           otype,
-                "description":    o.get("description", ""),
+                "description":    desc,
                 "source_metrics": o.get("source_metrics", []),
             })
 
@@ -253,14 +258,18 @@ def _build_priorities(executive: dict) -> list[dict]:
     """Top 3 from executive.top_priorities with priority + urgency + decision_hint."""
     result = []
     for p in (executive.get("top_priorities") or [])[:3]:
+        summary = p.get("summary", "")
+        decision_hint = p.get("decision_hint", "")
+        if not decision_hint and summary:
+            decision_hint = "Execute this priority first and review the same driver again next period to confirm movement."
         result.append({
             "rank":          p.get("rank"),
-            "summary":       p.get("summary", ""),
+            "summary":       summary,
             "priority":      p.get("priority") or p.get("severity", "medium"),
             "urgency":       p.get("urgency", "soon"),
             "type":          p.get("type", ""),
             "source":        p.get("source", ""),
-            "decision_hint": p.get("decision_hint", ""),
+            "decision_hint": decision_hint,
         })
     return result
 
@@ -488,14 +497,21 @@ def _build_major_risks(analysis: dict, executive: dict, lang: str) -> list[dict]
     risks = _build_risks(analysis, executive)
     out: list[dict] = []
     for r in risks[:6]:
-        desc = r.get("description") or "—"
+        desc = r.get("description")
+        if not desc:
+            if ar:
+                desc = "هذه الإشارة لا تملك وصفاً تفسيرياً كافياً بعد، لذا يجب الرجوع إلى المقاييس الداعمة قبل تصعيدها إلى خطر مجلس."
+            elif tr_:
+                desc = "Bu sinyal için yeterli açıklayıcı anlatı yok; kurul düzeyinde risk olarak kullanmadan önce destek metrikleri doğrulanmalı."
+            else:
+                desc = "This signal does not yet have enough explanatory support, so the underlying metrics should be validated before it is elevated as a board risk."
         sev  = r.get("severity")
         if ar:
-            msg = f"مخاطر ({sev}): {desc}"
+            msg = f"مخاطر {sev}: {desc}"
         elif tr_:
-            msg = f"Risk ({sev}): {desc}"
+            msg = f"Risk {sev}: {desc}"
         else:
-            msg = f"Risk ({sev}): {desc}"
+            msg = f"Risk {sev}: {desc}"
         out.append({"type": r.get("type"), "severity": sev, "message": msg, "source": r.get("source")})
     return out
 
@@ -523,7 +539,12 @@ def _build_cost_drivers(analysis: dict, executive: dict, lang: str) -> dict:
         else:
             summary = f"Operating expenses are {_fmt_pct(ox)} of revenue."
     else:
-        summary = "—"
+        if ar:
+            summary = "لا توجد بيانات تكلفة كافية لصياغة قراءة موثوقة لحمل التكلفة."
+        elif tr_:
+            summary = "Maliyet yükünü güvenilir biçimde açıklamak için yeterli maliyet verisi yok."
+        else:
+            summary = "Insufficient cost data is available to explain the current cost load reliably."
 
     pri = executive.get("top_priorities") or []
     exp_related = [p for p in pri if (p.get("source") == "expense" or "cost" in str(p.get("type","")))]
@@ -557,7 +578,15 @@ def _build_recommendations(analysis: dict, executive: dict, lang: str) -> list[d
         elif tr_:
             recs.insert(0, {"priority": "high", "action": "Kısa vadeli maliyet kontrol planı ve kârlılık geri dönene kadar aylık performans gözden geçirme."})
         else:
-            recs.insert(0, {"priority": "high", "action": "Adopt a short-term cost control plan and run monthly performance reviews until profitability stabilizes."})
+            recs.insert(0, {"priority": "high", "action": "Adopt a short-term cost control plan, review the main cost drivers monthly, and track whether profitability is recovering versus the prior period."})
+
+    if not recs:
+        if ar:
+            recs.append({"priority": "medium", "action": "لا توجد أولوية تنفيذية مرتفعة مدعومة بأدلة كافية حالياً؛ راقب الإيراد والهامش والسيولة في الفترة القادمة قبل اعتماد تدخل واسع."})
+        elif tr_:
+            recs.append({"priority": "medium", "action": "Şu anda yüksek öncelikli bir yönetim adımını destekleyecek kadar güçlü kanıt yok; geniş bir müdahale öncesinde gelir, marj ve likiditeyi gelecek dönemde izleyin."})
+        else:
+            recs.append({"priority": "medium", "action": "There is not yet enough evidence to elevate a high-priority management action; monitor revenue, margin, and liquidity into the next period before committing to a broad intervention."})
 
     return recs[:6]
 

@@ -29,7 +29,7 @@ import logging
 from typing import Optional, Any
 
 import pandas as pd
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -623,10 +623,35 @@ def _validate_pipeline(
               detail=f"CF uses NP={cf_np}, stmt NP={stmt_np}")
 
     # ── CHECK 6: Cashflow single-period (informational) ───────────────────────
-    if cashflow and cashflow.get("reliability") == "estimated":
+    def _cashflow_has_estimate_warning(cf: dict) -> bool:
+        flags = cf.get("flags") or {}
+        meta = cf.get("statement_meta") or {}
+        operating_basis = str(meta.get("operating_cashflow_basis") or "")
+        wc_basis = str(meta.get("working_capital_basis") or "")
+        return bool(
+            cf.get("reliability") == "estimated"  # legacy compatibility only
+            or flags.get("single_period")
+            or flags.get("operating_partial")
+            or flags.get("investing_partial")
+            or flags.get("financing_partial")
+            or flags.get("wc_unavailable")
+            or flags.get("wc_approximated")
+            or flags.get("reconciliation_unavailable")
+            or operating_basis.startswith("partial")
+            or "net_profit_plus_da_only" in operating_basis
+            or wc_basis.startswith("unavailable")
+        )
+
+    cf_flags = cashflow.get("flags") or {}
+    cf_meta = cashflow.get("statement_meta") or {}
+    cashflow_estimated = _cashflow_has_estimate_warning(cashflow)
+    if cashflow and cashflow_estimated:
         _warn("cashflow_estimated", "info",
               period_count=len(windowed),
-              detail="Single period — WC deltas set to zero")
+              flags=cf_flags,
+              working_capital_basis=cf_meta.get("working_capital_basis"),
+              operating_cashflow_basis=cf_meta.get("operating_cashflow_basis"),
+              detail="Cashflow is estimated or partial based on cashflow_engine flags")
 
     # ── CHECK 7: TB type unknown (informational) ──────────────────────────────
     bs_warning = bs_.get("balance_warning")
@@ -681,6 +706,53 @@ def _assess_financial_integrity(pipeline_validation: dict) -> dict:
         "error_codes": list(pipeline_validation.get("error_codes") or []),
         "info_codes": list(pipeline_validation.get("info_codes") or []),
     }
+
+
+def _apply_governance_suppression(
+    *,
+    endpoint: str,
+    data: dict | None,
+    meta: dict | None,
+    pipeline_validation: dict | None,
+) -> tuple[dict, dict]:
+    """
+    Central integrity gate for governance-style endpoints.
+    Preserves envelope shape while suppressing endpoint-specific governance outputs
+    whenever financial integrity marks them as blocked.
+    """
+    safe_data = dict(data or {})
+    safe_meta = dict(meta or {})
+    integrity = _assess_financial_integrity(pipeline_validation or {})
+    safe_meta["pipeline_validation"] = pipeline_validation or {}
+    safe_meta["financial_integrity"] = integrity
+
+    if not integrity.get("suppress_governance_outputs", False):
+        return safe_data, safe_meta
+
+    if endpoint == "alerts":
+        safe_data = {"alerts": [], "summary": {"integrity_blocked": True}}
+    elif endpoint == "decisions":
+        safe_data = {
+            **safe_data,
+            "decisions": [],
+            "causal_items": [],
+            "realized_causal_items": [],
+            "recommendations": [],
+            "summary": {"integrity_blocked": True},
+            "domain_scores": {},
+        }
+    elif endpoint == "root_causes":
+        safe_data = {"causes": [], "summary": {"integrity_blocked": True}}
+    elif endpoint == "intelligence":
+        safe_data = {
+            **safe_data,
+            "integrity_gated": True,
+            "status": "integrity_blocked",
+            "health_score_v2": None,
+            "surface_scores": {},
+        }
+
+    return safe_data, safe_meta
 
 
 def _build_debug_block(windowed: list[dict]) -> dict:
@@ -1762,7 +1834,7 @@ def get_analysis_summary(
                 })
         if _branch_upload_map:
             branch_intelligence = build_branch_expense_intelligence(
-                _branch_upload_map, _load_df, lang=safe_lang
+                _branch_upload_map, _load_df, lang=safe_lang, company_id=company_id, db=db
             )
     except Exception as _bei_exc:
         logger.warning("branch_expense_intelligence failed: %s", _bei_exc)
@@ -3352,11 +3424,13 @@ class DecisionRequest(BaseModel):
         return v
 
 
-@router.post("/{company_id}/decisions")
-def get_decisions(
+@router.post("/{company_id}/scenarios")
+@router.post("/{company_id}/decisions", deprecated=True)
+def get_scenarios(
     company_id: str,
     body: DecisionRequest,
     lang: str = Query("en"),
+    request: Request = None,
     db: Session = Depends(get_db),
 ):
     _req_lang = (lang or "en").strip().lower()
@@ -3441,6 +3515,9 @@ def get_decisions(
                 "lang": safe_lang,
                 "locale_requested": lang,
                 "locale_fallback": locale_fallback,
+                "semantic_type": "scenario_simulation",
+                "canonical_governance_output": False,
+                "deprecated_path_used": bool(request and str(request.url.path).endswith(f"/{company_id}/decisions")),
             },
             **result,
         }
@@ -3797,11 +3874,23 @@ def get_intelligence(
         windowed  = filter_periods(all_stmts, window.upper() if window.upper() in VALID_WINDOWS else "ALL")
     analysis  = run_analysis(windowed)
     annual    = build_annual_layer(windowed)
+    cf_raw = build_cashflow(windowed) if windowed else {}
+    pv = _validate_pipeline(windowed, analysis, cf_raw)
 
     result = build_intelligence(
         analysis     = analysis,
         annual_layer = annual,
         currency     = company.currency or "",
+    )
+    data_payload, meta_payload = _apply_governance_suppression(
+        endpoint="intelligence",
+        data=result,
+        meta={
+            "period_count": analysis.get("period_count", 0),
+            "periods":      analysis.get("periods", []),
+            "currency":     company.currency or "",
+        },
+        pipeline_validation=pv,
     )
 
     return {
@@ -3809,12 +3898,8 @@ def get_intelligence(
         "company_id":  company_id,
         "company_name": company.name,
         "window":      window,
-        "data":        result,
-        "meta": {
-            "period_count": analysis.get("period_count", 0),
-            "periods":      analysis.get("periods", []),
-            "currency":     company.currency or "",
-        },
+        "data":        data_payload,
+        "meta":        meta_payload,
     }
 
 
@@ -3866,20 +3951,25 @@ def get_alerts(
     )
 
     alerts_data = build_alerts(intelligence, lang=safe_lang)
-
-    return {
-        "status": "success",
-        "company_id":   company_id,
-        "company_name": company.name,
-        "data": alerts_data,
-        "meta": {
+    data_payload, meta_payload = _apply_governance_suppression(
+        endpoint="alerts",
+        data=alerts_data,
+        meta={
             "scope":        resolved_scope,
             "period_count": analysis.get("period_count", 0),
             "periods":      analysis.get("periods", []),
             "currency":     company.currency or "",
             "lang":         safe_lang,
-            "pipeline_validation": pv,
         },
+        pipeline_validation=pv,
+    )
+
+    return {
+        "status": "success",
+        "company_id":   company_id,
+        "company_name": company.name,
+        "data": data_payload,
+        "meta": meta_payload,
     }
 
 
@@ -3955,20 +4045,25 @@ def get_cfo_decisions_v2(
         "causal_items": merged_templates,
         "realized_causal_items": realized_list,
     }
+    data_payload, meta_payload = _apply_governance_suppression(
+        endpoint="decisions",
+        data=data_payload,
+        meta={
+            "scope":             resolved_scope,
+            "period_count":      analysis.get("period_count", 0),
+            "periods":           analysis.get("periods", []),
+            "lang":              safe_lang,
+            "currency":          company.currency or "",
+        },
+        pipeline_validation=pv,
+    )
 
     return {
         "status":       "success",
         "company_id":   company_id,
         "company_name": company.name,
         "data":         data_payload,
-        "meta": {
-            "scope":             resolved_scope,
-            "period_count":      analysis.get("period_count", 0),
-            "periods":           analysis.get("periods", []),
-            "lang":              safe_lang,
-            "currency":          company.currency or "",
-            "pipeline_validation": pv,
-        },
+        "meta":         meta_payload,
     }
 
 
@@ -4033,21 +4128,26 @@ def get_root_causes(
 
     cf_raw = build_cashflow(windowed) if windowed else {}
     pv = _validate_pipeline(windowed, analysis, cf_raw)
-
-    return {
-        "status":       "success",
-        "company_id":   company_id,
-        "company_name": company.name,
-        "data":         result,
-        "meta": {
+    data_payload, meta_payload = _apply_governance_suppression(
+        endpoint="root_causes",
+        data=result,
+        meta={
             "scope":             resolved_scope,
             "period_count":      analysis.get("period_count", 0),
             "periods":           analysis.get("periods", []),
             "lang":              safe_lang,
             "currency":          company.currency or "",
-            "pipeline_validation": pv,
             "cfo_recommendations": dec_result.get("recommendations", []),
         },
+        pipeline_validation=pv,
+    )
+
+    return {
+        "status":       "success",
+        "company_id":   company_id,
+        "company_name": company.name,
+        "data":         data_payload,
+        "meta":         meta_payload,
     }
 
 
@@ -4175,12 +4275,19 @@ def get_executive(
     No new logic — calls same engines as individual endpoints.
     """
     safe_lang = lang if lang in ("en", "ar", "tr") else "en"
+    _branch_scope = (branch_id or "").strip()
+    thin_exec_default = (
+        not include_comparative
+        and not include_decisions
+        and not consolidate
+        and not _branch_scope
+    )
 
     company, all_stmts, windowed, resolved_scope, scope22 = _product_windowed_statements(
         db,
         company_id,
         consolidate=consolidate,
-        branch_id=branch_id or None,
+        branch_id=_branch_scope or None,
         window=window,
         basis_type=basis_type,
         period=period,
@@ -4218,39 +4325,50 @@ def get_executive(
         )
 
     # ── Root causes ───────────────────────────────────────────────────────────
-    rc_result = _build_root_causes(
-        intelligence = intelligence,
-        decisions    = (dec_result.get("decisions", []) if include_decisions else []),
-        lang         = safe_lang,
-        n_periods    = analysis.get("period_count", 3),
-    )
+    if thin_exec_default:
+        rc_result = {
+            "causes": [],
+            "summary": {"deferred": True, "reason": "thin_exec_default"},
+        }
+    else:
+        rc_result = _build_root_causes(
+            intelligence = intelligence,
+            decisions    = (dec_result.get("decisions", []) if include_decisions else []),
+            lang         = safe_lang,
+            n_periods    = analysis.get("period_count", 3),
+        )
 
     # ── Deep intelligence (Phase 47) — deterministic, data-backed ─────────────
-    deep_intelligence: dict = {}
-    try:
-        from app.services.deep_intelligence import build_deep_intelligence
-        deep_intelligence = build_deep_intelligence(windowed, analysis, lang=safe_lang)
-    except Exception as _di_exc:
-        logger.warning("exec deep_intelligence failed: %s", _di_exc)
-        deep_intelligence = {}
+    if thin_exec_default:
+        deep_intelligence = {"available": False, "reason": "deferred_thin_exec"}
+        profitability_intelligence = {"available": False, "reason": "deferred_thin_exec"}
+        trend_analysis = {"available": False, "reason": "deferred_thin_exec"}
+    else:
+        deep_intelligence: dict = {}
+        try:
+            from app.services.deep_intelligence import build_deep_intelligence
+            deep_intelligence = build_deep_intelligence(windowed, analysis, lang=safe_lang)
+        except Exception as _di_exc:
+            logger.warning("exec deep_intelligence failed: %s", _di_exc)
+            deep_intelligence = {}
 
-    profitability_intelligence: dict = {}
-    try:
-        from app.services.deep_intelligence import build_executive_profitability_intelligence
-        profitability_intelligence = build_executive_profitability_intelligence(
-            windowed, analysis, lang=safe_lang
-        )
-    except Exception as _epi_exc:
-        logger.warning("exec profitability_intelligence failed: %s", _epi_exc)
-        profitability_intelligence = {"available": False, "reason": str(_epi_exc)}
+        profitability_intelligence: dict = {}
+        try:
+            from app.services.deep_intelligence import build_executive_profitability_intelligence
+            profitability_intelligence = build_executive_profitability_intelligence(
+                windowed, analysis, lang=safe_lang
+            )
+        except Exception as _epi_exc:
+            logger.warning("exec profitability_intelligence failed: %s", _epi_exc)
+            profitability_intelligence = {"available": False, "reason": str(_epi_exc)}
 
-    trend_analysis: dict = {}
-    try:
-        from app.services.deep_intelligence import build_executive_trend_analysis
-        trend_analysis = build_executive_trend_analysis(windowed, analysis, lang=safe_lang)
-    except Exception as _ta_exc:
-        logger.warning("exec trend_analysis failed: %s", _ta_exc)
-        trend_analysis = {"available": False, "reason": str(_ta_exc)}
+        trend_analysis: dict = {}
+        try:
+            from app.services.deep_intelligence import build_executive_trend_analysis
+            trend_analysis = build_executive_trend_analysis(windowed, analysis, lang=safe_lang)
+        except Exception as _ta_exc:
+            logger.warning("exec trend_analysis failed: %s", _ta_exc)
+            trend_analysis = {"available": False, "reason": str(_ta_exc)}
 
     # ── KPI block — window-consistent ──────────────────────────────────────────
     # When scope is active (month/year): pass windowed+"ALL" so filter is a no-op.
@@ -4264,11 +4382,14 @@ def get_executive(
         kpi_block  = build_kpi_block(all_stmts, _win_label)
 
     # ── Forecast (canonical: forecast_engine only; same object as GET /forecast) ─
-    try:
-        forecast_pkg = _build_forecast(analysis, lang=safe_lang)
-    except Exception as _fc_exc:
-        logger.warning("exec forecast_engine failed: %s", _fc_exc)
-        forecast_pkg = {"available": False, "reason": str(_fc_exc)}
+    if thin_exec_default:
+        forecast_pkg = {"available": False, "reason": "deferred_thin_exec"}
+    else:
+        try:
+            forecast_pkg = _build_forecast(analysis, lang=safe_lang)
+        except Exception as _fc_exc:
+            logger.warning("exec forecast_engine failed: %s", _fc_exc)
+            forecast_pkg = {"available": False, "reason": str(_fc_exc)}
 
     intelligence_out = dict(intelligence)
     intelligence_out["surface_scores"] = build_intel_surface_scores(
@@ -4277,11 +4398,14 @@ def get_executive(
     intel_tile_hints = build_intel_tile_hints(cashflow_raw, kpi_block)
 
     # ── Advanced metrics (EBITDA, risk scores) ─────────────────────────────
-    try:
-        advanced_metrics = _compute_adv(windowed, analysis.get("ratios", {}))
-    except Exception as _adv_exc:
-        logger.warning("exec advanced_metrics failed: %s", _adv_exc)
+    if thin_exec_default:
         advanced_metrics = {}
+    else:
+        try:
+            advanced_metrics = _compute_adv(windowed, analysis.get("ratios", {}))
+        except Exception as _adv_exc:
+            logger.warning("exec advanced_metrics failed: %s", _adv_exc)
+            advanced_metrics = {}
 
     # ── Statement bundle (Phase 32.9) ───────────────────────────────────────
     statement_bundle = _build_statements(
@@ -4376,7 +4500,7 @@ def get_executive(
             logger.warning("comparative_intelligence build failed: %s", _ci_exc)
 
     # Ensure expense bundle exists for downstream blocks (expense_intelligence/decisions/brain).
-    if company_expense_bundle is None:
+    if company_expense_bundle is None and not thin_exec_default:
         try:
             from app.services.expense_intelligence_engine import build_expense_intelligence_bundle as _beb_fb
 
@@ -4404,7 +4528,10 @@ def get_executive(
     try:
         from app.services.expense_intelligence_engine import build_expense_intelligence_executive_view
 
-        expense_intelligence = build_expense_intelligence_executive_view(company_expense_bundle)
+        if thin_exec_default:
+            expense_intelligence = {"available": False, "reason": "deferred_thin_exec"}
+        else:
+            expense_intelligence = build_expense_intelligence_executive_view(company_expense_bundle)
     except Exception as _ei_exc:
         logger.warning("expense_intelligence executive view failed: %s", _ei_exc)
         expense_intelligence = {
@@ -4449,37 +4576,41 @@ def get_executive(
 
     # ── Expense decisions upgrade (company-level; additive) ───────────────────
     expense_decisions_v2: list = []
-    try:
-        from app.services.expense_decisions_upgrade import build_company_expense_decisions_v2
+    if not thin_exec_default:
+        try:
+            from app.services.expense_decisions_upgrade import build_company_expense_decisions_v2
 
-        expense_decisions_v2 = build_company_expense_decisions_v2(
-            company_id=company_id,
-            company_name=company.name,
-            currency=(company.currency or ""),
-            company_bundle=company_expense_bundle,
-            comparative_intelligence=comparative_intelligence or {},
-            lang=safe_lang,
-        )
-    except Exception as _ed2_exc:
-        logger.warning("expense_decisions_v2 build failed: %s", _ed2_exc)
+            expense_decisions_v2 = build_company_expense_decisions_v2(
+                company_id=company_id,
+                company_name=company.name,
+                currency=(company.currency or ""),
+                company_bundle=company_expense_bundle,
+                comparative_intelligence=comparative_intelligence or {},
+                lang=safe_lang,
+            )
+        except Exception as _ed2_exc:
+            logger.warning("expense_decisions_v2 build failed: %s", _ed2_exc)
 
     # ── Financial brain (explainable reasoning; additive) ─────────────────────
     financial_brain: dict = {"available": False, "reason": "unavailable"}
-    try:
-        from app.services.financial_brain import build_financial_brain_company
+    if thin_exec_default:
+        financial_brain = {"available": False, "reason": "deferred_thin_exec"}
+    else:
+        try:
+            from app.services.financial_brain import build_financial_brain_company
 
-        financial_brain = build_financial_brain_company(
-            company_id=company_id,
-            company_name=company.name,
-            currency=(company.currency or ""),
-            expense_bundle=company_expense_bundle,
-            comparative_intelligence=comparative_intelligence or {},
-            expense_decisions_v2=expense_decisions_v2,
-            anomalies=(company_expense_bundle or {}).get("expense_anomalies") or [],
-            lang=safe_lang,
-        )
-    except Exception as _fb_exc:
-        logger.warning("financial_brain build failed: %s", _fb_exc)
+            financial_brain = build_financial_brain_company(
+                company_id=company_id,
+                company_name=company.name,
+                currency=(company.currency or ""),
+                expense_bundle=company_expense_bundle,
+                comparative_intelligence=comparative_intelligence or {},
+                expense_decisions_v2=expense_decisions_v2,
+                anomalies=(company_expense_bundle or {}).get("expense_anomalies") or [],
+                lang=safe_lang,
+            )
+        except Exception as _fb_exc:
+            logger.warning("financial_brain build failed: %s", _fb_exc)
 
     # ── Realized causal (single UI-facing financial wording source) ───────────
     from app.services.causal_realize import realize_causal_items

@@ -171,24 +171,39 @@ def build_branch_intelligence(branches: list[dict]) -> dict:
     insights = []
 
     if revenue_leader:
+        rev = revenue_leader.get("revenue")
+        nm = revenue_leader.get("net_margin")
         insights.append({
             "type": "leader",
             "branch": revenue_leader["branch_name"],
-            "message": f"{revenue_leader['branch_name']} drives the highest revenue"
+            "message": (
+                f"{revenue_leader['branch_name']} leads branch revenue at {rev:.0f}"
+                + (f" with net margin {nm:.1f}%." if nm is not None else ".")
+            ),
         })
 
     if weakest:
+        nm = weakest.get("net_margin")
+        growth = weakest.get("growth")
         insights.append({
             "type": "risk",
             "branch": weakest["branch_name"],
-            "message": f"{weakest['branch_name']} shows weakest profitability"
+            "message": (
+                f"{weakest['branch_name']} is the weakest profitability point"
+                + (f" at {nm:.1f}% net margin" if nm is not None else "")
+                + (f" with growth at {growth:.1f}%." if growth is not None else ".")
+            ),
         })
 
     if cost_outlier:
+        exp_r = cost_outlier.get("expense_ratio")
         insights.append({
             "type": "cost",
             "branch": cost_outlier["branch_name"],
-            "message": f"{cost_outlier['branch_name']} has highest expense pressure"
+            "message": (
+                f"{cost_outlier['branch_name']} carries the highest expense pressure"
+                + (f" at {exp_r:.1f}% of revenue." if exp_r is not None else ".")
+            ),
         })
 
     # ── Final output ────────────────────────────────────

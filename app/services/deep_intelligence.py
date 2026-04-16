@@ -361,16 +361,16 @@ def build_expense_intelligence_deep(period_statements: list[dict], lang: str = "
 
     if tc_val is not None and ox_val is not None and ox_val > 0 and tc_val > ox_val + 1:
         pressure_branch = "cogs_material_vs_opex"
-        press_note = "COGS-inclusive cost base is material relative to OpEx alone — review gross margin and direct costs alongside operating spend."
+        press_note = "Direct cost load is materially heavier than operating expense alone, so margin review should start with gross margin and service-delivery cost before overhead cuts."
     elif ox_st in ("critical", "warning"):
         pressure_branch = "opex_elevated"
-        press_note = "Operating expense load vs revenue is elevated relative to internal targets."
+        press_note = "Operating expenses are high versus revenue, so overhead absorption is now a direct margin issue rather than a secondary monitoring point."
     elif tc_st in ("critical", "warning"):
         pressure_branch = "total_cost_elevated"
-        press_note = "Full cost load (COGS + OpEx + unclassified P&L debits) vs revenue is elevated."
+        press_note = "Total cost load versus revenue is elevated, which means the current activity level is not converting efficiently into earnings."
     else:
         pressure_branch = "neutral_bands"
-        press_note = "Cost ratios are within neutral bands versus default SME thresholds; continue monitoring category movers."
+        press_note = "Cost ratios are currently within neutral bands, but management should still monitor category movers to ensure the next period does not absorb the margin buffer."
 
     pressure_level = "high" if tc_st == "critical" or ox_st == "critical" else (
         "medium" if tc_st in ("warning", "elevated") or ox_st in ("warning", "elevated") else "low"
@@ -670,22 +670,22 @@ def build_profitability_intelligence_deep(
 
 _EXEC_PI_TEXT = {
     "strong_but_heavy": {
-        "en": "Profitability is strong but cost structure is heavy.",
+        "en": "Net margin is still holding, but the cost structure is consuming too much revenue and leaves limited room for slippage.",
         "ar": "الربحية قوية لكن هيكل التكاليف مرتفع.",
         "tr": "Karlılık güçlü ancak maliyet yapısı ağır.",
     },
     "margins_declining_expenses": {
-        "en": "Margins are declining due to rising expenses.",
+        "en": "Margins are contracting because expenses are rising faster than the period can absorb.",
         "ar": "الهوامش في تراجع بسبب ارتفاع المصروفات.",
         "tr": "Marjlar, giderlerin artmasıyla düşüyor.",
     },
     "rev_not_profit": {
-        "en": "Revenue growth is not translating into profit.",
+        "en": "Revenue is improving, but the incremental activity is not reaching net profit.",
         "ar": "نمو الإيرادات لا يتحول إلى ربح.",
         "tr": "Gelir büyümesi kara dönmüyor.",
     },
     "neutral": {
-        "en": "Profitability metrics are within the current observed range; monitor margin and cost ratios.",
+        "en": "Profitability is within the current range, but the next management check should focus on whether margin and cost ratios improve versus the prior period.",
         "ar": "مؤشرات الربحية ضمن النطاق الملاحظ حالياً؛ تابع نسب الهامش والتكاليف.",
         "tr": "Karlılık göstergeleri gözlenen aralıkta; marj ve maliyet oranlarını izleyin.",
     },
@@ -693,17 +693,17 @@ _EXEC_PI_TEXT = {
 
 _EXEC_TREND_TEXT = {
     "rev_up_profit_down": {
-        "en": "Revenue growing but profitability declining.",
+        "en": "Revenue is up versus the prior period, but profitability is moving the other way, which points to margin leakage.",
         "ar": "الإيرادات في نمو لكن الربحية تتراجع.",
         "tr": "Gelir büyüyor ancak karlılık düşüyor.",
     },
     "strong_upward": {
-        "en": "Strong upward trend.",
+        "en": "Revenue and profit are both improving together, which supports a stronger operating trajectory.",
         "ar": "اتجاه صاعد قوي.",
         "tr": "Güçlü yukarı yönlü trend.",
     },
     "volatility": {
-        "en": "Volatility detected.",
+        "en": "Recent periods are volatile, so short-term movements should be managed cautiously rather than read as a settled trend.",
         "ar": "تم رصد تقلبات.",
         "tr": "Oynaklık tespit edildi.",
     },
@@ -808,30 +808,30 @@ def build_executive_trend_analysis(
 
 _EXEC_FC_TEXT = {
     "growth": {
-        "en": "Expected growth continues.",
+        "en": "Current momentum points to continued growth in the next period, assuming recent conversion trends hold.",
         "ar": "من المتوقع استمرار النمو.",
         "tr": "Beklenen büyüme devam ediyor.",
     },
     "slowdown": {
-        "en": "Potential slowdown ahead.",
+        "en": "Recent momentum suggests a slower next period unless management protects demand and margin conversion.",
         "ar": "قد يكون هناك تباطؤ قادم.",
         "tr": "Önümüzde olası bir yavaşlama var.",
     },
     "neutral": {
-        "en": "Next-period outlook is broadly stable based on recent trend.",
+        "en": "The next-period outlook is broadly stable, but there is not enough directional evidence yet to call a clear acceleration or slowdown.",
         "ar": "توقع الفترة القادمة مستقر بشكل عام وفقاً للاتجاه الأخير.",
         "tr": "Son trende göre bir sonraki dönem görünümü genel olarak stabil.",
     },
 }
 
 _EXEC_FC_INSUFFICIENT = {
-    "en": "Not enough historical periods to project next revenue and profit.",
+    "en": "Forecast is withheld because the historical window is too short to project next-period revenue and profit responsibly.",
     "ar": "لا توجد فترات تاريخية كافية لتقدير الإيرادات وصافي الربح للفترة التالية.",
     "tr": "Bir sonraki dönem gelir ve net kar için yeterli geçmiş yok.",
 }
 
 _EXEC_FC_ENGINE = {
-    "en": "Forecast could not be computed from the current analysis state.",
+    "en": "Forecast is unavailable because the current analysis state does not provide a consistent basis for projection.",
     "ar": "تعذر حساب التوقع من حالة التحليل الحالية.",
     "tr": "Mevcut analiz durumundan tahmin hesaplanamadı.",
 }
@@ -1184,4 +1184,3 @@ def build_deep_intelligence(
             period_statements, analysis, trend_signals=sigs
         ),
     }
-

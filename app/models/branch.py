@@ -19,6 +19,7 @@ class Branch(Base):
     code       = Column(String(50),  nullable=True)
     name       = Column(String(255), nullable=False)
     name_ar    = Column(String(255), nullable=True)
+    manager_name = Column(String(255), nullable=True)
     city       = Column(String(100), nullable=True)
     country    = Column(String(100), nullable=True)
     currency   = Column(String(10),  default="USD", nullable=False)

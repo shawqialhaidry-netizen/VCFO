@@ -1,0 +1,2 @@
+﻿account_code,account_name,mapped_type,confidence,match_reason,classification_source,debit,credit
+4010,Sales Revenue,revenue,0.95,code_prefix+name_keyword (revenue),rule,0.0,100.0

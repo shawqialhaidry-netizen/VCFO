@@ -117,12 +117,58 @@ def _extract_bs(stmt: dict) -> dict:
     }
 
 
-def _da_estimate(bsc: dict, is_: dict) -> tuple[float, bool]:
+def _sum_keyword_items(items: list[dict], keywords: list[str]) -> float:
+    total = 0.0
+    for item in items or []:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("account_name", "")).lower()
+        code = str(item.get("account_code", "")).lower()
+        if any(kw in name or kw in code for kw in keywords):
+            total += abs(float(item.get("amount", 0) or 0))
+    return total
+
+
+def _extract_financing_components(stmt: Optional[dict]) -> dict:
+    if not stmt:
+        return {
+            "debt": 0.0,
+            "equity_contrib": 0.0,
+            "equity_distribution": 0.0,
+        }
+
+    bs = stmt.get("balance_sheet", {})
+    liab_items = _get(bs, "liabilities", "items") or []
+    eq_items = _get(bs, "equity", "items") or []
+
+    debt_keywords = [
+        "loan", "loans", "borrowing", "borrowings", "debt", "debenture",
+        "note payable", "notes payable", "overdraft", "lease liability",
+        "murabaha", "finance lease", "credit facility",
+    ]
+    equity_contrib_keywords = [
+        "share capital", "paid in capital", "paid-in capital", "capital contribution",
+        "owner capital", "owner's capital", "partners capital", "partner capital",
+        "common stock", "ordinary share capital",
+    ]
+    equity_distribution_keywords = [
+        "dividend", "dividends", "distribution", "distributions",
+        "drawing", "drawings", "owner withdrawal", "withdrawal",
+    ]
+
+    return {
+        "debt": _sum_keyword_items(liab_items, debt_keywords),
+        "equity_contrib": _sum_keyword_items(eq_items, equity_contrib_keywords),
+        "equity_distribution": _sum_keyword_items(eq_items, equity_distribution_keywords),
+    }
+
+
+def _da_estimate(bsc: dict, is_: dict) -> tuple[float, bool, str]:
     """
     Estimate Depreciation & Amortization.
     1. Scan income statement expense items for depreciation keywords.
     2. If not found: proxy = noncurrent_assets × 10% / 12 (monthly).
-    Returns (da_amount, was_approximated).
+    Returns (da_amount, was_approximated, source).
     """
     exp_items = _get(is_, "expenses", "items") or []
     da_keywords = ["depreciation", "amortization", "استهلاك", "إهلاك",
@@ -134,12 +180,12 @@ def _da_estimate(bsc: dict, is_: dict) -> tuple[float, bool]:
             da_identified += abs(float(item.get("amount", 0) or 0))
 
     if da_identified > 0:
-        return _r2(da_identified), False
+        return _r2(da_identified), False, "explicit_expense_lines"
 
     # Proxy: 10% annual rate on non-current assets, monthly
     nc = bsc.get("noncurrent_assets", 0)
     proxy = nc * 0.10 / 12
-    return _r2(proxy), True
+    return _r2(proxy), True, "noncurrent_assets_proxy"
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -164,42 +210,48 @@ def _compute_ocf_single(
     cogs = float(_get(is_, "cogs",    "total") or 0)
 
     # D&A
-    da, da_approx = _da_estimate(bsc, is_)
+    da, da_approx, da_source = _da_estimate(bsc, is_)
     da = da or 0.0
 
     # WC deltas
-    approx_flag = False
+    wc_unavailable = False
     if prev_stmt:
         prev_bsc = _extract_bs(prev_stmt)
         delta_rec = bsc["receivables"] - prev_bsc["receivables"]
         delta_inv = bsc["inventory"]   - prev_bsc["inventory"]
         delta_pay = bsc["payables"]    - prev_bsc["payables"]
+        wc_adj = -delta_rec - delta_inv + delta_pay
+        ocf = _r2(np_ + da + wc_adj)
+        ocf_basis = "net_profit_plus_da_plus_working_capital"
     else:
-        # Approximate: use ratio-based approach
-        # Δrec ≈ (DSO_current - DSO_prev) × (Revenue/30)
-        # Without prior period we use 0 as conservative fallback
-        delta_rec = 0.0
-        delta_inv = 0.0
-        delta_pay = 0.0
-        approx_flag = True
-
-    # OCF = NP + DA - ΔRec - ΔInv + ΔPay
-    wc_adj = -delta_rec - delta_inv + delta_pay
-    ocf    = _r2(np_ + da + wc_adj)
+        # Without prior-period balances, WC movement is unavailable.
+        # Keep OCF present for compatibility, but mark it as partial:
+        # OCF_partial = NP + DA only (no WC adjustment).
+        delta_rec = None
+        delta_inv = None
+        delta_pay = None
+        wc_adj = None
+        wc_unavailable = True
+        ocf = _r2(np_ + da)
+        ocf_basis = "net_profit_plus_da_only"
 
     # Debug / formula check
-    formula_check = abs((np_ + da + wc_adj) - ocf) < 0.02
+    formula_check = abs((np_ + da + (wc_adj or 0.0)) - ocf) < 0.02
 
     return {
         "net_profit":        _r2(np_),
         "da_addback":        _r2(da),
         "da_approximated":   da_approx,
+        "da_source":         da_source,
         "delta_receivables": _r2(delta_rec),
         "delta_inventory":   _r2(delta_inv),
         "delta_payables":    _r2(delta_pay),
         "wc_adjustment":     _r2(wc_adj),
         "ocf":               ocf,
-        "wc_approximated":   approx_flag,
+        "wc_approximated":   False,
+        "wc_unavailable":    wc_unavailable,
+        "ocf_partial":       wc_unavailable,
+        "ocf_basis":         ocf_basis,
         "cash":              _r2(bsc["cash"]),
         "formula":           "OCF = NP + DA - ΔReceivables - ΔInventory + ΔPayables",
         "formula_check":     formula_check,
@@ -268,7 +320,7 @@ def _build_cashflow_series(period_statements: list[dict]) -> dict:
         is_  = stmt.get("income_statement", {})
         bsc  = _extract_bs(stmt)
         np_  = float(_get(is_, "net_profit") or 0)
-        da, _ = _da_estimate(bsc, is_)
+        da, _, _ = _da_estimate(bsc, is_)
         da = da or 0.0
 
         prev = period_statements[i - 1] if i > 0 else None
@@ -279,9 +331,9 @@ def _build_cashflow_series(period_statements: list[dict]) -> dict:
             dp = bsc["payables"]    - pb["payables"]
             wc_adj = -dr - di + dp
         else:
-            wc_adj = 0.0
+            wc_adj = None
 
-        ocf = _r2(np_ + da + wc_adj)
+        ocf = _r2(np_ + da + (wc_adj or 0.0))
         periods_out.append(p)
         ocf_series.append(ocf)
         np_series.append(_r2(np_))
@@ -295,6 +347,180 @@ def _build_cashflow_series(period_statements: list[dict]) -> dict:
         "cash_balance":       cash_series,
         "wc_adjustment":      wc_adj_series,
     }
+
+
+def _build_operating_section(ocf_detail: dict) -> dict:
+    """
+    Build a structured indirect operating cash flow section using the
+    currently implemented OCF derivation chain.
+    """
+    lines = [
+        {"id": "net_profit", "label": "net_profit", "amount": ocf_detail["net_profit"]},
+        {"id": "da_addback", "label": "depreciation_amortization", "amount": ocf_detail["da_addback"]},
+        {
+            "id": "delta_receivables",
+            "label": "change_in_receivables",
+            "amount": None if ocf_detail.get("delta_receivables") is None else _r2(-float(ocf_detail["delta_receivables"])),
+        },
+        {
+            "id": "delta_inventory",
+            "label": "change_in_inventory",
+            "amount": None if ocf_detail.get("delta_inventory") is None else _r2(-float(ocf_detail["delta_inventory"])),
+        },
+        {
+            "id": "delta_payables",
+            "label": "change_in_payables",
+            "amount": None if ocf_detail.get("delta_payables") is None else _r2(float(ocf_detail["delta_payables"])),
+        },
+    ]
+    return {
+        "method": "indirect",
+        "lines": lines,
+        "subtotal": ocf_detail["ocf"],
+        "flags": {
+            "da_approximated": bool(ocf_detail.get("da_approximated")),
+            "wc_approximated": bool(ocf_detail.get("wc_approximated")),
+            "wc_unavailable": bool(ocf_detail.get("wc_unavailable")),
+            "ocf_partial": bool(ocf_detail.get("ocf_partial")),
+        },
+        "note": "working_capital_unavailable" if ocf_detail.get("wc_unavailable") else None,
+    }
+
+
+def _build_investing_section(
+    latest_stmt: dict,
+    prev_stmt: Optional[dict],
+    da_addback: Optional[float],
+) -> dict:
+    if not prev_stmt:
+        return _empty_section("investing", "opening_balance_unavailable")
+
+    latest_bs = _extract_bs(latest_stmt)
+    prev_bs = _extract_bs(prev_stmt)
+    da = float(da_addback or 0.0)
+    delta_nca = float(latest_bs["noncurrent_assets"] - prev_bs["noncurrent_assets"])
+
+    gross_capex_est = max(delta_nca + da, 0.0)
+    disposal_est = max(-(delta_nca + da), 0.0)
+
+    lines = []
+    if gross_capex_est > 0.005:
+        lines.append({
+            "id": "capital_expenditure_estimated",
+            "label": "capital_expenditure_estimated",
+            "amount": _r2(-gross_capex_est),
+        })
+    if disposal_est > 0.005:
+        lines.append({
+            "id": "asset_disposals_estimated",
+            "label": "asset_disposals_estimated",
+            "amount": _r2(disposal_est),
+        })
+
+    subtotal = _r2(sum(float(x["amount"] or 0) for x in lines)) if lines else 0.0
+    return {
+        "id": "investing",
+        "lines": lines,
+        "subtotal": subtotal,
+        "available": True,
+        "reason": None,
+        "flags": {
+            "capex_estimated_from_nca_and_da": True,
+            "asset_disposals_estimated": disposal_est > 0.005,
+            "other_investing_unavailable": True,
+        },
+    }
+
+
+def _build_financing_section(
+    latest_stmt: dict,
+    prev_stmt: Optional[dict],
+) -> dict:
+    if not prev_stmt:
+        return _empty_section("financing", "opening_balance_unavailable")
+
+    latest = _extract_financing_components(latest_stmt)
+    prev = _extract_financing_components(prev_stmt)
+
+    debt_delta = float(latest["debt"] - prev["debt"])
+    contrib_delta = float(latest["equity_contrib"] - prev["equity_contrib"])
+    dist_delta = float(latest["equity_distribution"] - prev["equity_distribution"])
+
+    lines = []
+    if debt_delta > 0.005:
+        lines.append({
+            "id": "debt_increase",
+            "label": "debt_increase",
+            "amount": _r2(debt_delta),
+        })
+    elif debt_delta < -0.005:
+        lines.append({
+            "id": "debt_repayment",
+            "label": "debt_repayment",
+            "amount": _r2(debt_delta),
+        })
+
+    if contrib_delta > 0.005:
+        lines.append({
+            "id": "equity_injection_estimated",
+            "label": "equity_injection_estimated",
+            "amount": _r2(contrib_delta),
+        })
+    elif contrib_delta < -0.005:
+        lines.append({
+            "id": "equity_reduction_estimated",
+            "label": "equity_reduction_estimated",
+            "amount": _r2(contrib_delta),
+        })
+
+    if dist_delta > 0.005:
+        lines.append({
+            "id": "owner_distributions_estimated",
+            "label": "owner_distributions_estimated",
+            "amount": _r2(-dist_delta),
+        })
+
+    if not lines and latest["debt"] <= 0.005 and latest["equity_contrib"] <= 0.005 and latest["equity_distribution"] <= 0.005:
+        return _empty_section("financing", "no_classifiable_financing_accounts")
+
+    subtotal = _r2(sum(float(x["amount"] or 0) for x in lines)) if lines else 0.0
+    return {
+        "id": "financing",
+        "lines": lines,
+        "subtotal": subtotal,
+        "available": True,
+        "reason": None,
+        "flags": {
+            "debt_derived_from_explicit_accounts": True,
+            "equity_flows_estimated_from_explicit_accounts": bool(
+                abs(contrib_delta) > 0.005 or dist_delta > 0.005
+            ),
+            "other_financing_unavailable": True,
+        },
+    }
+
+
+def _empty_section(section_id: str, reason: str) -> dict:
+    return {
+        "id": section_id,
+        "lines": [],
+        "subtotal": None,
+        "available": False,
+        "reason": reason,
+    }
+
+
+def _reconcile_cash_movement(
+    opening_cash: Optional[float],
+    net_change_in_cash: Optional[float],
+    ending_cash: Optional[float],
+    tolerance: float = 0.02,
+) -> tuple[Optional[bool], Optional[float]]:
+    if opening_cash is None or net_change_in_cash is None or ending_cash is None:
+        return None, None
+    expected_ending = _r2(opening_cash + net_change_in_cash)
+    delta = _r2((ending_cash or 0) - (expected_ending or 0))
+    return abs(delta or 0) <= tolerance, delta
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -315,8 +541,32 @@ def build_cashflow(
     Output: complete cashflow dict (see module docstring)
     """
     if not period_statements:
-        return {"error": "no data", "flags": {"capex_missing": True,
-                "da_approximated": True, "wc_approximated": True, "single_period": True}}
+        return {
+            "error": "no data",
+            "opening_cash": None,
+            "operating": _empty_section("operating", "no_data"),
+            "investing": _empty_section("investing", "not_modeled"),
+            "financing": _empty_section("financing", "not_modeled"),
+            "net_change_in_cash": None,
+            "ending_cash": None,
+            "reconciles": None,
+            "statement_meta": {
+                "method": "indirect_partial_foundation",
+                "reconciliation_tolerance": 0.02,
+                "statement_foundation_available": False,
+            },
+            "flags": {
+                "capex_missing": True,
+                "da_approximated": True,
+                "wc_approximated": False,
+                "wc_unavailable": True,
+                "single_period": True,
+                "operating_partial": True,
+                "investing_partial": True,
+                "financing_partial": True,
+                "reconciliation_unavailable": True,
+            },
+        }
 
     latest_stmt  = period_statements[-1]
     prev_stmt    = period_statements[-2] if len(period_statements) >= 2 else None
@@ -339,6 +589,25 @@ def build_cashflow(
     # ── Burn & Runway ─────────────────────────────────────────────────────────
     cash   = ocf_detail["cash"]
     burn, runway = _burn_runway(np_, cash)
+    opening_cash = _r2(_extract_bs(prev_stmt)["cash"]) if prev_stmt else None
+    ending_cash = cash
+
+    operating_section = _build_operating_section(ocf_detail)
+    investing_section = _build_investing_section(latest_stmt, prev_stmt, da)
+    financing_section = _build_financing_section(latest_stmt, prev_stmt)
+
+    investing_subtotal = investing_section.get("subtotal")
+    financing_subtotal = financing_section.get("subtotal")
+    derived_net_change = None
+    if ocf is not None and investing_subtotal is not None and financing_subtotal is not None:
+        derived_net_change = _r2(float(ocf) + float(investing_subtotal) + float(financing_subtotal))
+
+    net_change_in_cash = _r2(ending_cash - opening_cash) if opening_cash is not None and ending_cash is not None else None
+    reconciles, reconciliation_delta = _reconcile_cash_movement(
+        opening_cash,
+        derived_net_change if derived_net_change is not None else net_change_in_cash,
+        ending_cash,
+    )
 
     # ── Working capital change summary ────────────────────────────────────────
     wc_change = {
@@ -363,6 +632,13 @@ def build_cashflow(
 
     return {
         "period":                 latest_stmt.get("period", ""),
+        "opening_cash":           opening_cash,
+        "operating":              operating_section,
+        "investing":              investing_section,
+        "financing":              financing_section,
+        "net_change_in_cash":     net_change_in_cash,
+        "ending_cash":            ending_cash,
+        "reconciles":             reconciles,
         "operating_cashflow":     ocf,
         "operating_cashflow_mom": ocf_mom,
         "free_cashflow":          fcf,
@@ -377,7 +653,25 @@ def build_cashflow(
             "capex_missing":   capex_missing,
             "da_approximated": ocf_detail["da_approximated"],
             "wc_approximated": ocf_detail["wc_approximated"],
+            "wc_unavailable":  ocf_detail["wc_unavailable"],
             "single_period":   single,
+            "operating_partial": ocf_detail["ocf_partial"],
+            "investing_partial": bool(investing_section.get("flags", {}).get("other_investing_unavailable", False)),
+            "financing_partial": bool(financing_section.get("flags", {}).get("other_financing_unavailable", False)),
+            "reconciliation_unavailable": reconciles is None,
+        },
+        "statement_meta": {
+            "method": "indirect_partial_foundation",
+            "operating_method": "indirect",
+            "investing_modeled": bool(investing_section.get("available")),
+            "financing_modeled": bool(financing_section.get("available")),
+            "da_source": ocf_detail["da_source"],
+            "working_capital_basis": "actual_period_deltas" if not ocf_detail["wc_unavailable"] else "unavailable_no_prior_period",
+            "operating_cashflow_basis": ocf_detail["ocf_basis"],
+            "reconciliation_tolerance": 0.02,
+            "reconciliation_delta": reconciliation_delta,
+            "derived_net_change_in_cash": derived_net_change,
+            "statement_foundation_available": True,
         },
         "debug": {
             "net_profit":        ocf_detail["net_profit"],
@@ -386,6 +680,9 @@ def build_cashflow(
             "delta_inventory":   ocf_detail["delta_inventory"],
             "delta_payables":    ocf_detail["delta_payables"],
             "wc_adjustment":     ocf_detail["wc_adjustment"],
+            "wc_unavailable":    ocf_detail["wc_unavailable"],
+            "ocf_basis":         ocf_detail["ocf_basis"],
+            "da_source":         ocf_detail["da_source"],
             "formula":           ocf_detail["formula"],
             "formula_check":     ocf_detail["formula_check"],
         },

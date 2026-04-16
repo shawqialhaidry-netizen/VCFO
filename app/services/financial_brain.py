@@ -212,18 +212,25 @@ def build_financial_brain_company(
     # Compose deterministic narrative chain (structured)
     chain = []
     chain.append(
-        f"Expenses changed by {mom['expense_delta']} MoM while revenue changed by {mom['revenue_delta']}."
+        f"In {period}, total expense moved {mom['expense_delta']} MoM while revenue moved {mom['revenue_delta']}, so management should read the cost shift against the underlying revenue movement rather than in isolation."
     )
     if driver_branch and driver_branch.get("branch_name"):
         chain.append(
-            f"Main pressure signal is {driver_branch['branch_name']} (contribution {contrib_pct}%)."
+            f"The strongest branch-level pressure signal comes from {driver_branch['branch_name']}"
+            + (f", contributing {contrib_pct}% of company expense." if contrib_pct is not None else ".")
             if contrib_pct is not None
-            else f"Main pressure signal is {driver_branch['branch_name']}."
+            else f"The strongest branch-level pressure signal comes from {driver_branch['branch_name']}."
         )
     if cat_driver and cat_driver.get("category"):
-        chain.append(f"Primary category driver (MoM) is {cat_driver['category']} (delta {cat_driver['delta']}).")
+        chain.append(f"The main category driver versus the prior period is {cat_driver['category']} with a delta of {cat_driver['delta']}.")
     if top_decisions:
-        chain.append(f"Recommended action: {top_decisions[0].get('title')}.")
+        chain.append(f"The highest-priority action from the current evidence is: {top_decisions[0].get('title')}.")
+    if not top_decisions:
+        chain.append("No quantified action is elevated yet, so the next step is to validate the pressure source before committing to a management intervention.")
+    if yoy and yoy_d.get("expense_delta") is not None and yoy_d.get("revenue_delta") is not None:
+        chain.append(
+            f"Against the same period last year, expense moved {yoy_d['expense_delta']} while revenue moved {yoy_d['revenue_delta']}, helping separate structural pressure from short-term monthly noise."
+        )
 
     return {
         "available": True,
@@ -274,4 +281,3 @@ def build_financial_brain_company(
         },
         "causal_chain": chain,
     }
-

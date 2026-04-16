@@ -50,6 +50,14 @@ def _chg(v) -> str:
         return str(v)
 
 
+def _management_limitation(lang: str, topic: str) -> str:
+    if lang == "ar":
+        return f"لا توجد أدلة كمية كافية لصياغة قراءة إدارية موثوقة بشأن {topic}."
+    if lang == "tr":
+        return f"{topic} için güvenilir yönetim anlatısı kurmaya yetecek nicel kanıt yok."
+    return f"There is not enough quantitative evidence to produce a management-grade narrative for {topic}."
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 #  Section builders
 # ──────────────────────────────────────────────────────────────────────────────
@@ -130,7 +138,7 @@ def _build_annual_summary(annual: dict, currency: str) -> dict:
     }
 
 
-def _build_decision_summary(decisions: dict) -> dict:
+def _build_decision_summary(decisions: dict, lang: str = "en") -> dict:
     best    = decisions.get("best_scenario") or {}
     ranking = decisions.get("ranking") or []
     packs   = decisions.get("scenario_pack_results") or {}
@@ -142,8 +150,7 @@ def _build_decision_summary(decisions: dict) -> dict:
         "reduce_opex":      "Reduce Operating Expenses",
     }
 
-    return {
-        "best": {
+    best_block = {
             "id":             best.get("id"),
             "label":          SC_LABELS.get(best.get("id",""), best.get("id","")),
             "score":          best.get("score"),
@@ -155,7 +162,34 @@ def _build_decision_summary(decisions: dict) -> dict:
             "np_delta_fmt":   _fmtK((best.get("impact") or {}).get("net_profit_delta")),
             "np_pct":         (best.get("impact") or {}).get("net_profit_pct_change"),
             "margin_pp":      (best.get("impact") or {}).get("net_margin_pp"),
-        } if best else None,
+        } if best else None
+
+    narrative = _management_limitation(lang, "the decision set")
+    if best_block:
+        label = best_block.get("label") or "the leading scenario"
+        np_pct = best_block.get("np_pct")
+        margin_pp = best_block.get("margin_pp")
+        if lang == "ar":
+            narrative = f"أفضل سيناريو حالياً هو {label} بنتيجة {best_block.get('score')}/100"
+            if np_pct is not None:
+                narrative += f"، مع أثر متوقع على صافي الربح {np_pct:+.1f}%"
+            if margin_pp is not None:
+                narrative += f" وتحسن هامش بنحو {margin_pp:+.1f} نقطة."
+        elif lang == "tr":
+            narrative = f"Şu an en güçlü senaryo {label}; skor {best_block.get('score')}/100"
+            if np_pct is not None:
+                narrative += f", net kâr etkisi yaklaşık %{np_pct:+.1f}"
+            if margin_pp is not None:
+                narrative += f" ve marj etkisi {margin_pp:+.1f} puan."
+        else:
+            narrative = f"The leading scenario is {label} with a score of {best_block.get('score')}/100"
+            if np_pct is not None:
+                narrative += f", implying about {np_pct:+.1f}% net profit change"
+            if margin_pp is not None:
+                narrative += f" and {margin_pp:+.1f}pp margin impact."
+
+    return {
+        "best": best_block,
         "ranking_top3": [
             {
                 "rank":  sc.get("rank"),
@@ -177,16 +211,39 @@ def _build_decision_summary(decisions: dict) -> dict:
             }
             for pid, pk in packs.items()
         },
+        "narrative": narrative,
     }
 
 
-def _build_what_if_summary(what_if: dict) -> Optional[dict]:
+def _build_what_if_summary(what_if: dict, lang: str = "en") -> Optional[dict]:
     if not what_if or what_if.get("error"):
         return None
     imp  = what_if.get("impact") or {}
     inp  = what_if.get("inputs") or {}
     base = what_if.get("baseline") or {}
     sc   = what_if.get("scenario") or {}
+    narrative = _management_limitation(lang, "the what-if case")
+    np_pct = imp.get("net_profit_pct_change")
+    margin_pp = imp.get("net_margin_pp")
+    if lang == "ar":
+        narrative = "يعرض هذا السيناريو أثر المدخلات المفترضة على الإيراد والربحية"
+        if np_pct is not None:
+            narrative += f"، مع تغير متوقع في صافي الربح {np_pct:+.1f}%"
+        if margin_pp is not None:
+            narrative += f" وتغير هامش {margin_pp:+.1f} نقطة."
+    elif lang == "tr":
+        narrative = "Bu senaryo, varsayılan girdilerin gelir ve kârlılık üzerindeki etkisini gösteriyor"
+        if np_pct is not None:
+            narrative += f"; net kâr değişimi yaklaşık %{np_pct:+.1f}"
+        if margin_pp is not None:
+            narrative += f" ve marj etkisi {margin_pp:+.1f} puan."
+    else:
+        narrative = "This scenario translates the selected inputs into revenue and profitability impact"
+        if np_pct is not None:
+            narrative += f", with about {np_pct:+.1f}% net profit change"
+        if margin_pp is not None:
+            narrative += f" and {margin_pp:+.1f}pp margin movement."
+
     return {
         "inputs":            inp,
         "baseline_revenue":  _fmtK(base.get("revenue")),
@@ -199,6 +256,7 @@ def _build_what_if_summary(what_if: dict) -> Optional[dict]:
         "np_delta_fmt":      _fmtK(imp.get("net_profit_delta")),
         "np_pct":            _chg(imp.get("net_profit_pct_change")),
         "margin_pp":         imp.get("net_margin_pp"),
+        "narrative":         narrative,
     }
 
 
@@ -235,9 +293,11 @@ def build_management_report(
     """
     kpi       = _build_kpi_snapshot(annual, currency)
     ann       = _build_annual_summary(annual, currency)
-    dec       = _build_decision_summary(decisions)
-    wi_sum    = _build_what_if_summary(what_if)
+    dec       = _build_decision_summary(decisions, lang)
+    wi_sum    = _build_what_if_summary(what_if, lang)
     risks     = _extract_risks(narrative, warnings)
+    exec_summary = narrative.get("executive_summary") or _management_limitation(lang, "the executive summary")
+    rec_action = narrative.get("recommended_action") or _management_limitation(lang, "the recommended action")
 
     return {
         # ── Meta ──────────────────────────────────────────────────────────────
@@ -258,7 +318,7 @@ def build_management_report(
 
             "executive_summary": {
                 "title":   "executive_summary",
-                "content": narrative.get("executive_summary", "—"),
+                "content": exec_summary,
                 "status":  status,
             },
 
@@ -294,7 +354,7 @@ def build_management_report(
 
             "recommended_action": {
                 "title":   "recommended_action",
-                "content": narrative.get("recommended_action", "—"),
+                "content": rec_action,
                 "scenario_id":    (dec.get("best") or {}).get("id"),
                 "scenario_label": (dec.get("best") or {}).get("label"),
                 "priority":       (dec.get("best") or {}).get("priority"),

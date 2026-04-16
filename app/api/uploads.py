@@ -23,7 +23,10 @@ from app.models.user import User
 from app.models.company import Company
 from app.models.trial_balance import TrialBalanceUpload
 from app.services.tb_parser import parse_file
-from app.services.account_classifier import classify_dataframe, build_classification_summary
+from app.services.account_classifier import (
+    build_classification_summary,
+    classify_dataframe_for_company,
+)
 
 router = APIRouter(prefix="/uploads", tags=["uploads"])
 
@@ -286,8 +289,30 @@ async def upload_trial_balance(
     actual_upload_mode = parse_result["upload_mode"]  # monthly | annual
 
     # ── Phase 3: Classify ─────────────────────────────────────────────────────
-    df = classify_dataframe(df)
+    df = classify_dataframe_for_company(df, company_id, db)
     classification_summary = build_classification_summary(df)
+    type_breakdown = classification_summary.get("type_breakdown", {})
+    balance_sheet_types = {"assets", "liabilities", "equity"}
+    pnl_types = {"revenue", "cogs", "expenses", "tax"}
+    present_types = {k for k, v in type_breakdown.items() if (v or {}).get("count", 0) > 0}
+
+    if not (present_types - {"other"}):
+        raise HTTPException(
+            status_code=422,
+            detail="Upload classification is too incomplete for statement generation.",
+        )
+
+    if resolved_branch_id and not (present_types & pnl_types):
+        raise HTTPException(
+            status_code=422,
+            detail="Branch upload must include income-statement accounts for downstream branch processing.",
+        )
+
+    if not resolved_branch_id and not (present_types & balance_sheet_types):
+        raise HTTPException(
+            status_code=422,
+            detail="Company-level upload must include balance-sheet accounts for downstream statement generation.",
+        )
 
     # ── Save normalised CSV ───────────────────────────────────────────────────
     norm_name = safe_name.replace(ext, "_normalized.csv")
@@ -333,24 +358,25 @@ async def upload_trial_balance(
         tb_type           = resolved_tb_type,
         branch_id         = resolved_branch_id,  # NULL = company-level, value = branch-level
     )
-    db.add(record); db.commit(); db.refresh(record)
+    db.add(record)
+    db.flush()
 
     # ── Branch financial upsert (if branch_id provided) ───────────────────────
     branch_upsert_periods: list[str] = []
     if resolved_branch_id:
         branch_upsert_periods = _periods_for_branch_upsert(df, generated_periods, db_period)
+        if not branch_upsert_periods:
+            db.rollback()
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "Branch upload requires at least one resolvable YYYY-MM period "
+                    "for downstream branch financial writes."
+                ),
+            )
         try:
             from app.api.branches import upsert_branch_financial
 
-            if not branch_upsert_periods:
-                logger.warning(
-                    "Branch upload %s: no YYYY-MM period resolved for BranchFinancial "
-                    "(branch_id=%s company_id=%s). Set period on the upload form or include "
-                    "a period column in the file.",
-                    upload_id,
-                    resolved_branch_id,
-                    company_id,
-                )
             for gp in branch_upsert_periods:
                 if "period" in df.columns:
                     gdf = df[df["period"].astype(str).str.strip() == str(gp).strip()].copy()
@@ -359,9 +385,16 @@ async def upload_trial_balance(
                 else:
                     gdf = df.copy()
                 upsert_branch_financial(db, resolved_branch_id, company_id, gp, gdf, upload_id)
-            db.commit()
         except Exception as _be:
-            logger.warning("branch upsert failed for branch=%s: %s", resolved_branch_id, _be)
+            db.rollback()
+            logger.exception("branch upsert failed for branch=%s", resolved_branch_id)
+            raise HTTPException(
+                status_code=500,
+                detail=f"Branch financial upsert failed for branch '{resolved_branch_id}'.",
+            ) from _be
+
+    db.commit()
+    db.refresh(record)
 
     # ── Build preview (first 10 rows) ─────────────────────────────────────────
     preview_rows = [
@@ -418,6 +451,13 @@ async def upload_trial_balance(
             "classified_ratio": classification_summary["classified_ratio"],
             "unknown_accounts": classification_summary["unknown_accounts"],
             "type_breakdown":   classification_summary["type_breakdown"],
+            "classification_source_breakdown": classification_summary["classification_source_breakdown"],
+            "override_accounts": classification_summary["override_accounts"],
+            "rule_accounts": classification_summary["rule_accounts"],
+            "fallback_accounts": classification_summary["fallback_accounts"],
+            "low_confidence_accounts": classification_summary["low_confidence_accounts"],
+            "review_accounts": classification_summary["review_accounts"],
+            "qa_summary": classification_summary["qa_summary"],
         },
 
         # ── Preview ───────────────────────────────────────────────────────────

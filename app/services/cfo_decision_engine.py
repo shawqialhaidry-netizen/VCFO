@@ -422,7 +422,7 @@ def _build_actionable_recommendations(
             reason = "Likidite sinyalleri nakit baskısını önlemek için acil eylem gerektiriyor."
         else:
             rec = "Accelerate collections and renegotiate short-term obligations"
-            reason = "Liquidity signals require near-term action to prevent cash pressure."
+            reason = "Liquidity is under real pressure, with current-ratio or working-capital signals indicating the cash gap should be reduced before the next payment cycle."
         _add("liquidity", rec, reason, pri)
 
     # ── Net margin deterioration with rising costs ───────────────────────────
@@ -436,7 +436,7 @@ def _build_actionable_recommendations(
             reason = "Gelir artıyor ancak net kar baskı altında — maliyet verimliliğine odaklanın."
         else:
             rec = "Contain expense growth to protect profitability"
-            reason = "Revenue is growing but net profit is under pressure — prioritize cost efficiency."
+            reason = f"Revenue is improving but net profit is falling, while average expense growth is running near {exp_mom_avg:.1f}% over recent periods; growth is not converting into profit because cost pressure is outpacing it."
         _add("rev_up_np_down", rec, reason, pri)
 
     out.sort(key=lambda x: -_REC_SEVERITY_ORDER.get(x.get("priority", "low"), 0))
@@ -556,8 +556,8 @@ _DT: dict[str, dict] = {
     "paradox_growth_negative_operating_margin": {
         "en": {
             "title":     "Revenue is growing but profitability remains negative",
-            "rationale": "Cost structure is exceeding revenue growth",
-            "action":    "Analyze cost breakdown (COGS vs OPEX) and identify break-even point",
+            "rationale": "Revenue is expanding, but the current cost base is still absorbing more value than the growth is creating, so operating margin remains negative.",
+            "action":    "Reconcile the cost stack by COGS and OpEx, identify the break-even revenue level, and cut or reprice the lines preventing growth from translating into profit.",
             "impact":    "Evidence: trailing 3M revenue growth {revenue_growth_3m_pct}% vs prior 3M; operating margin {operating_margin_pct}%; (COGS+OpEx)/revenue {expense_ratio_pct}%.",
         },
         "ar": {

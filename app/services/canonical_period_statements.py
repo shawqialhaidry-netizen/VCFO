@@ -19,8 +19,9 @@ from collections import defaultdict
 from typing import TYPE_CHECKING, Any, Optional
 
 import pandas as pd
+from sqlalchemy.orm import object_session
 
-from app.services.account_classifier import classify_dataframe
+from app.services.account_classifier import classify_dataframe_for_company
 from app.services.financial_statements import build_statements, statements_to_dict
 from app.services.structured_income_statement import attach_structured_income_statement
 
@@ -82,7 +83,16 @@ def merge_tb_slices_for_period(slices: list[pd.DataFrame], period: str) -> pd.Da
     if not parts:
         return pd.DataFrame()
     all_df = pd.concat(parts, ignore_index=True)
+    counts = (
+        all_df.groupby(["account_code", "account_name"], as_index=False)
+        .size()
+        .rename(columns={"size": "source_row_count"})
+    )
     merged = all_df.groupby(["account_code", "account_name"], as_index=False)[["debit", "credit"]].sum()
+    merged = merged.merge(counts, on=["account_code", "account_name"], how="left")
+    merged["source_row_count"] = (
+        pd.to_numeric(merged["source_row_count"], errors="coerce").fillna(1).astype(int)
+    )
     merged["period"] = period
     return merged
 
@@ -107,6 +117,7 @@ def build_period_statements_from_uploads(company_id: str, uploads: list[Any]) ->
     period_slices = _collect_period_upload_slices(uploads)
     if not period_slices:
         return []
+    db = object_session(uploads[0]) if uploads else None
 
     stmts: list[dict] = []
     for period in sorted(period_slices.keys()):
@@ -118,7 +129,7 @@ def build_period_statements_from_uploads(company_id: str, uploads: list[Any]) ->
             continue
 
         tb_type = _merged_tb_type(records)
-        classified = classify_dataframe(merged)
+        classified = classify_dataframe_for_company(merged, company_id, db)
         fs = build_statements(
             classified,
             company_id=company_id,

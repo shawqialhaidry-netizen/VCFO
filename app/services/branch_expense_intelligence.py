@@ -64,17 +64,17 @@ def _categorize_from_stmt(stmt: dict) -> dict[str, float]:
     return dict(totals)
 
 
-def _categorize_df(df) -> dict[str, float]:
+def _categorize_df(df, company_id: str | None = None, db=None) -> dict[str, float]:
     """
     Legacy shim: builds a minimal statement from raw df using account_classifier
     then delegates to _categorize_from_stmt. Preserves compatibility with callers
     that still pass raw DataFrames, while routing arithmetic through statement_engine.
     """
-    from app.services.account_classifier import classify_dataframe
+    from app.services.account_classifier import classify_dataframe_for_company
     from app.services.financial_statements import build_statements, statements_to_dict
     try:
-        classified = classify_dataframe(df)
-        fs  = build_statements(classified, company_id="_branch_", period="_")
+        classified = classify_dataframe_for_company(df, company_id, db)
+        fs  = build_statements(classified, company_id=company_id or "_branch_", period="_")
         return _categorize_from_stmt(statements_to_dict(fs))
     except Exception:
         return {}
@@ -86,6 +86,8 @@ def _build_expense_breakdown(
     branch_name: str,
     period_dfs: list[tuple[str, object]],   # [(period, df), ...]
     lang: str,
+    company_id: str | None = None,
+    db=None,
 ) -> dict:
     """
     Build latest-period expense group breakdown for one branch.
@@ -97,7 +99,7 @@ def _build_expense_breakdown(
     if not period_dfs:
         return {"branch_name": branch_name, "expense_groups": []}
 
-    from app.services.account_classifier import classify_dataframe
+    from app.services.account_classifier import classify_dataframe_for_company
     from app.services.financial_statements import build_statements, statements_to_dict
 
     # Use latest period
@@ -105,8 +107,8 @@ def _build_expense_breakdown(
 
     # Build statement via statement_engine — single source of truth for all amounts
     try:
-        classified = classify_dataframe(latest_df)
-        fs   = build_statements(classified, company_id="_branch_", period=latest_period)
+        classified = classify_dataframe_for_company(latest_df, company_id, db)
+        fs   = build_statements(classified, company_id=company_id or "_branch_", period=latest_period)
         stmt = statements_to_dict(fs)
     except Exception:
         stmt = {}
@@ -228,6 +230,8 @@ def _build_top_movers(
     branch_name: str,
     period_dfs: list[tuple[str, object]],
     lang: str,
+    company_id: str | None = None,
+    db=None,
 ) -> list[dict]:
     """
     Detect largest MoM expense category increases.
@@ -242,8 +246,8 @@ def _build_top_movers(
     _, prev_df   = sorted_periods[-2]
     _, latest_df = sorted_periods[-1]
 
-    prev_cats   = _categorize_df(prev_df)
-    latest_cats = _categorize_df(latest_df)
+    prev_cats   = _categorize_df(prev_df, company_id, db)
+    latest_cats = _categorize_df(latest_df, company_id, db)
 
     movers = []
     all_cats = set(prev_cats) | set(latest_cats)
@@ -280,6 +284,8 @@ def build_branch_expense_intelligence(
     branches: list[dict],   # [{branch_id, branch_name, uploads: [TrialBalanceUpload]}]
     load_df_fn,             # callable(upload) → pd.DataFrame | None
     lang: str = "en",
+    company_id: str | None = None,
+    db=None,
 ) -> dict:
     """
     Build branch-level expense intelligence for all branches.
@@ -328,7 +334,7 @@ def build_branch_expense_intelligence(
 
         # Expense breakdown
         try:
-            bd = _build_expense_breakdown(branch_name, period_dfs, safe_lang)
+            bd = _build_expense_breakdown(branch_name, period_dfs, safe_lang, company_id, db)
             result["expense_breakdown"].append(bd)
         except Exception as exc:
             logger.warning("branch_expense: breakdown failed branch=%s: %s", branch_id, exc)
@@ -350,7 +356,7 @@ def build_branch_expense_intelligence(
 
         # Top movers
         try:
-            mv = _build_top_movers(branch_name, period_dfs, safe_lang)
+            mv = _build_top_movers(branch_name, period_dfs, safe_lang, company_id, db)
             if mv:
                 result["top_movers"].append({
                     "branch_id":   branch_id,

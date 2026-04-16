@@ -112,7 +112,7 @@ _IT = {
     },
     # Fallback
     "generic_improvement": {
-        "en": "Executing this action is expected to materially improve the financial position within {timeframe}.",
+        "en": "This action should improve the financial position within {timeframe}, but the current dataset is not sufficient to quantify the effect responsibly.",
         "ar": "تنفيذ هذا الإجراء من المتوقع أن يحسن الوضع المالي بشكل ملموس خلال {timeframe}.",
         "tr": "Bu aksiyonu uygulamak {timeframe} içinde finansal pozisyonu önemli ölçüde iyileştirmesi bekleniyor.",
     },
@@ -376,7 +376,7 @@ def _generic_impact(decision: dict, daily_rev: Optional[float], lang: str) -> di
         "unit":        "qualitative",
         "description": _desc("generic_improvement", lang,
                                timeframe=decision.get("timeframe","30-60 days")),
-        "assumption":  "Qualitative — insufficient data for numeric estimation",
+        "assumption":  "Qualitative only — insufficient evidence for a responsible numeric estimate",
         "range":       {"low": None, "high": None},
         "confidence":  40,
     }

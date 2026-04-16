@@ -81,6 +81,164 @@ def _fmt_currency(v: float) -> str:
 
 # ── Localized insight text — loaded from i18n JSON files (no hardcoded strings) ──
 
+def _integrity_status(proven: bool = False, partial: bool = False, available: bool = True) -> str:
+    if not available:
+        return "unavailable"
+    if proven:
+        return "proven"
+    if partial:
+        return "partial"
+    return "unavailable"
+
+
+def _extract_balance_sheet_cash(balance_sheet: dict) -> Optional[float]:
+    asset_items = _get(balance_sheet, "assets", "items") or []
+    total = 0.0
+    found = False
+    for item in asset_items:
+        if not isinstance(item, dict):
+            continue
+        code = str(item.get("account_code", "")).strip()
+        try:
+            num = int(code[:4]) if len(code) >= 4 else int(code)
+        except (TypeError, ValueError):
+            num = -1
+        if 1000 <= num <= 1099:
+            total += abs(float(item.get("amount", 0) or 0))
+            found = True
+    return _r2(total) if found else None
+
+
+def _values_match(a, b, tolerance: float = 0.01) -> bool:
+    if a is None or b is None:
+        return False
+    try:
+        return abs(float(a) - float(b)) <= tolerance
+    except (TypeError, ValueError):
+        return False
+
+
+def _build_cross_statement_integrity(latest: dict, cashflow_raw: dict) -> dict:
+    is_ = latest.get("income_statement") or {}
+    bs_ = latest.get("balance_sheet") or {}
+    bs_cash = _extract_balance_sheet_cash(bs_)
+
+    is_net_profit = _r2(_get(is_, "net_profit"))
+    cf_net_profit = _r2(_get(cashflow_raw, "debug", "net_profit"))
+    net_income_to_cashflow_proven = _values_match(is_net_profit, cf_net_profit)
+    net_income_to_cashflow_available = is_net_profit is not None and cf_net_profit is not None
+
+    synthetic_equity_support = bool(_get(bs_, "equity", "synthetic_equity_support"))
+    retained_earnings_continuity_proven = bool(_get(bs_, "equity", "retained_earnings_continuity_proven"))
+    equity_rollforward_available = bool(_get(bs_, "equity", "equity_rollforward_available"))
+    equity_warning = _get(bs_, "equity", "equity_integrity_warning")
+
+    net_income_to_equity_status = _integrity_status(
+        proven=retained_earnings_continuity_proven,
+        partial=synthetic_equity_support or bool(equity_warning),
+        available=(
+            retained_earnings_continuity_proven
+            or synthetic_equity_support
+            or equity_rollforward_available
+            or bool(equity_warning)
+        ),
+    )
+
+    ending_cash = _r2(cashflow_raw.get("ending_cash", cashflow_raw.get("cash_balance")))
+    opening_cash = _r2(cashflow_raw.get("opening_cash"))
+    ending_cash_to_bs_proven = _values_match(ending_cash, bs_cash)
+    ending_cash_to_bs_available = ending_cash is not None and bs_cash is not None
+
+    cf_reconciles = cashflow_raw.get("reconciles")
+    opening_to_ending_status = _integrity_status(
+        proven=cf_reconciles is True,
+        partial=cf_reconciles is False,
+        available=(opening_cash is not None and ending_cash is not None and cf_reconciles is not None),
+    )
+
+    equity_status = _integrity_status(
+        proven=(retained_earnings_continuity_proven and equity_rollforward_available),
+        partial=(synthetic_equity_support or bool(equity_warning)),
+        available=(
+            retained_earnings_continuity_proven
+            or equity_rollforward_available
+            or synthetic_equity_support
+            or bool(equity_warning)
+        ),
+    )
+
+    statuses = [
+        _integrity_status(
+            proven=net_income_to_cashflow_proven,
+            partial=(not net_income_to_cashflow_proven and net_income_to_cashflow_available),
+            available=net_income_to_cashflow_available,
+        ),
+        net_income_to_equity_status,
+        _integrity_status(
+            proven=ending_cash_to_bs_proven,
+            partial=(not ending_cash_to_bs_proven and ending_cash_to_bs_available),
+            available=ending_cash_to_bs_available,
+        ),
+        opening_to_ending_status,
+        equity_status,
+    ]
+    if any(s == "partial" for s in statuses):
+        overall = "partial"
+    elif statuses and all(s == "proven" for s in statuses):
+        overall = "proven"
+    else:
+        overall = "unavailable"
+
+    return {
+        "status": overall,
+        "net_income": {
+            "income_statement_to_cashflow_start": {
+                "status": _integrity_status(
+                    proven=net_income_to_cashflow_proven,
+                    partial=(not net_income_to_cashflow_proven and net_income_to_cashflow_available),
+                    available=net_income_to_cashflow_available,
+                ),
+                "income_statement_net_profit": is_net_profit,
+                "cashflow_starting_profit": cf_net_profit,
+            },
+            "income_statement_to_equity_handling": {
+                "status": net_income_to_equity_status,
+                "synthetic_equity_support": synthetic_equity_support,
+                "synthetic_equity_support_reason": _get(bs_, "equity", "synthetic_equity_support_reason"),
+                "retained_earnings_continuity_proven": retained_earnings_continuity_proven,
+                "equity_rollforward_available": equity_rollforward_available,
+                "warning": equity_warning,
+            },
+        },
+        "cash": {
+            "ending_cash_to_balance_sheet_cash": {
+                "status": _integrity_status(
+                    proven=ending_cash_to_bs_proven,
+                    partial=(not ending_cash_to_bs_proven and ending_cash_to_bs_available),
+                    available=ending_cash_to_bs_available,
+                ),
+                "cashflow_ending_cash": ending_cash,
+                "balance_sheet_cash": bs_cash,
+            },
+            "opening_to_ending_continuity": {
+                "status": opening_to_ending_status,
+                "opening_cash": opening_cash,
+                "ending_cash": ending_cash,
+                "reconciles": cf_reconciles,
+                "working_capital_basis": _get(cashflow_raw, "statement_meta", "working_capital_basis"),
+                "operating_cashflow_basis": _get(cashflow_raw, "statement_meta", "operating_cashflow_basis"),
+            },
+        },
+        "equity": {
+            "status": equity_status,
+            "synthetic_equity_support": synthetic_equity_support,
+            "retained_earnings_continuity_proven": retained_earnings_continuity_proven,
+            "equity_rollforward_available": equity_rollforward_available,
+            "warning": equity_warning,
+        },
+    }
+
+
 def _t(key: str, lang: str, **kw) -> str:
     """
     Translate a statement insight key using the central i18n system.
@@ -435,6 +593,7 @@ def build_statement_bundle(
         cashflow_raw,
         period=period,
     )
+    _cross_statement_integrity = _build_cross_statement_integrity(latest, cashflow_raw)
 
     return {
         "available":       True,
@@ -442,6 +601,7 @@ def build_statement_bundle(
         "income_statement": income_statement,
         "balance_sheet":   balance_sheet,
         "cashflow":        cashflow_stmt,
+        "cross_statement_integrity": _cross_statement_integrity,
         "series":          series,
         "summary":         summary,
         "insights":        insights,

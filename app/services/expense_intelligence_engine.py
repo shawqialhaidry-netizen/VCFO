@@ -564,22 +564,25 @@ def _build_explanation(rows: list[dict], trends: dict[str, Any], anomalies: list
     ratio_pp = mom.get("expense_pct_of_revenue_pp")
 
     headline = f"Expense intelligence for {last.get('period')}"
-    narrative = [f"Total expense {te_l} vs revenue {rev_l}."]
+    narrative = [f"In {last.get('period')}, total expense was {te_l} against revenue of {rev_l}."]
     if te_mom is not None:
-        narrative.append(f"MoM expense change {te_mom:+.1f}%.")
+        narrative.append(f"Expense changed {te_mom:+.1f}% versus the prior period.")
     if rev_mom is not None:
-        narrative.append(f"MoM revenue change {rev_mom:+.1f}%.")
+        narrative.append(f"Revenue changed {rev_mom:+.1f}% over the same comparison.")
     if ratio_pp is not None:
-        narrative.append(f"Expense-to-revenue moved {ratio_pp:+.1f}pp.")
+        narrative.append(f"The expense-to-revenue ratio moved {ratio_pp:+.1f}pp.")
 
     if top_movers["increasing"]:
         m = top_movers["increasing"][0]
-        narrative.append(f"Top driver up: {m['category']} (+{m['absolute_change']}).")
+        narrative.append(f"The main cost increase came from {m['category']} ({m['absolute_change']:+.2f}).")
     if top_movers["decreasing"]:
         m = top_movers["decreasing"][0]
-        narrative.append(f"Top driver down: {m['category']} ({m['absolute_change']}).")
+        narrative.append(f"The largest offset came from {m['category']} ({m['absolute_change']:+.2f}).")
     if anomalies:
-        narrative.append(f"{len(anomalies)} anomaly signal(s) flagged.")
+        narrative.append(f"{len(anomalies)} anomaly signal(s) were flagged and should be validated before the next operating review.")
+
+    if not prev:
+        narrative.append("Prior-period comparison is limited because only one period is available in the current window.")
 
     basis = []
     if prev:
@@ -882,4 +885,3 @@ def build_expense_intelligence_bundle(
         "expense_decisions": decisions,
         "expense_explanation": explanation,
     }
-

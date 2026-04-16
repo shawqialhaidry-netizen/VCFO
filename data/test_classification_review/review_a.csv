@@ -1,0 +1,2 @@
+﻿account_code,account_name,mapped_type,confidence,match_reason,classification_source,debit,credit
+1111,A,other,0.0,no_match,fallback,5.0,0.0

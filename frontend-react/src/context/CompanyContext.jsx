@@ -4,9 +4,8 @@
  * - Persists selected company to localStorage
  * - Provides analysis cache
  *
- * Phase 1.1: `fetchAnalysis` hits LEGACY `GET /analysis/{id}` (non-canonical aggregate).
- * Product surfaces should use `GET /analysis/{id}/executive` instead. This helper remains
- * for any stale callers / cache warming — not the single-truth path.
+ * `fetchAnalysis` hits canonical `GET /analysis/{id}/executive`.
+ *
  */
 import { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react'
 import { useAuth } from './AuthContext.jsx'
@@ -14,20 +13,8 @@ import { useAuth } from './AuthContext.jsx'
 const API = '/api/v1'
 const CompanyContext = createContext(null)
 
-function getToken() {
-  try {
-    const raw = localStorage.getItem('vcfo_auth')
-    return raw ? JSON.parse(raw)?.token : null
-  } catch { return null }
-}
-
-function authHeaders() {
-  const token = getToken()
-  return token ? { Authorization: `Bearer ${token}` } : {}
-}
-
 export function CompanyProvider({ children }) {
-  const { authFetch } = useAuth()
+  const { auth, authFetch } = useAuth()
   const [companies, setCompanies]               = useState([])
   const [selectedId, setSelectedId]             = useState(
     () => localStorage.getItem('vcfo_company_id') || ''
@@ -39,16 +26,16 @@ export function CompanyProvider({ children }) {
   const CACHE_TTL_MS  = 5 * 60 * 1000
 
   const reloadMemberships = useCallback(() => {
-    fetch(`${API}/auth/me/memberships`, { headers: authHeaders() })
+    authFetch(`${API}/auth/me/memberships`)
       .then(r => r.ok ? r.json() : [])
       .then(list => setMemberships(Array.isArray(list) ? list : []))
       .catch(() => {})
-  }, [])
+  }, [authFetch])
 
   // Expose reload so Login can trigger a refresh after login
   const reloadCompanies = useCallback(() => {
     setLoadingCompanies(true)
-    fetch(`${API}/companies`, { headers: authHeaders() })
+    authFetch(`${API}/companies`)
       .then(r => r.json())
       .then(list => {
         if (!Array.isArray(list)) { setLoadingCompanies(false); return }
@@ -66,10 +53,19 @@ export function CompanyProvider({ children }) {
         if (!selectedId || !exists) setSelectedId(list[0].id)
       })
       .catch(() => setLoadingCompanies(false))
-  }, [selectedId])
+  }, [authFetch, selectedId])
 
-  // Load company list on mount
-  useEffect(() => { reloadCompanies(); reloadMemberships() }, [reloadCompanies, reloadMemberships])
+  // Load company list only after auth is present.
+  useEffect(() => {
+    if (!auth?.token) {
+      setCompanies([])
+      setMemberships([])
+      setLoadingCompanies(false)
+      return
+    }
+    reloadCompanies()
+    reloadMemberships()
+  }, [auth?.token, reloadCompanies, reloadMemberships])
 
   useEffect(() => {
     if (selectedId) localStorage.setItem('vcfo_company_id', selectedId)
@@ -99,8 +95,7 @@ export function CompanyProvider({ children }) {
     try {
       let lang = 'en'
       try { lang = localStorage.getItem('vcfo_lang') || 'en' } catch { }
-      // LEGACY: GET /analysis/{id} — pipeline_profile.is_canonical_product_path === false
-      const res  = await fetch(`${API}/analysis/${companyId}?lang=${encodeURIComponent(lang)}`, { headers: authHeaders() })
+      const res  = await authFetch(`${API}/analysis/${companyId}/executive?lang=${encodeURIComponent(lang)}`)
       const json = await res.json()
       if (!res.ok) return { ok: false, error: json.detail || 'Analysis failed' }
       setCachedAnalysis(companyId, json)
@@ -108,7 +103,7 @@ export function CompanyProvider({ children }) {
     } catch (e) {
       return { ok: false, error: e.message }
     }
-  }, [])
+  }, [authFetch])
 
   const createCompany = useCallback(async (payload) => {
     const body = {
@@ -120,9 +115,9 @@ export function CompanyProvider({ children }) {
     if (!body.name) return { ok: false, error: 'Company name is required.' }
 
     try {
-      const r = await fetch(`${API}/companies`, {
+      const r = await authFetch(`${API}/companies`, {
         method: 'POST',
-        headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       })
       const j = await r.json().catch(() => ({}))
@@ -139,7 +134,7 @@ export function CompanyProvider({ children }) {
     } catch (e) {
       return { ok: false, error: e.message }
     }
-  }, [reloadCompanies, reloadMemberships])
+  }, [authFetch, reloadCompanies, reloadMemberships])
 
   // Derive current user's role for the selected company
   const currentMembership = memberships.find(m => m.company_id === selectedId) || null
